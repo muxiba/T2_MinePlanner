@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T2MinePlanner - Sistema de Planejamento de Produção</title>
+    
+    <!-- CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #F8F9FA;
+            color: #1A1A1A;
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .font-serif { font-family: 'Cormorant Garamond', serif; }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef } = React;
+
+        // --- CONSTANTS ---
+        const DEFAULT_PREMISES = {
+            targetMonthlyROM: 120000,
+            contractedHoursPerDay: 24,
+            operationalDaysPerMonth: 30,
+            plantFeedRateTPH: 250,
+            rmGlobal: 85,
+            rejeitoTotal: 15,
+            umidadeNatural: 5,
+            dfMina: 85,
+            ufMina: 75,
+            eoMina: 72,
+            dfPlanta: 90,
+            ufPlanta: 85,
+            eoPlanta: 80,
+            calendarDays: 30
+        };
+
+        const INITIAL_ROUTES = [
+            {
+                id: '1',
+                name: 'Mina Principal -> Britagem 01',
+                active: true,
+                truckCount: 5,
+                truckCapacity: 27.75,
+                distance: 1200,
+                cycleTime: 18,
+                mechanicalAvailability: 85,
+                operationalEfficiency: 72,
+            },
+            {
+                id: '2',
+                name: 'Mina Norte -> Britagem 02',
+                active: true,
+                truckCount: 3,
+                truckCapacity: 27.75,
+                distance: 2500,
+                cycleTime: 28,
+                mechanicalAvailability: 85,
+                operationalEfficiency: 72,
+            }
+        ];
+
+        // --- UTILS ---
+        const calculateRouteProduction = (route, premises) => {
+            if (!route.active) return { dailyProduction: 0, hourlyProduction: 0 };
+            const tripsPerHour = 60 / route.cycleTime;
+            const productionPerHour = route.truckCount * route.truckCapacity * tripsPerHour * (route.mechanicalAvailability / 100) * (route.operationalEfficiency / 100);
+            return {
+                dailyProduction: productionPerHour * premises.contractedHoursPerDay,
+                hourlyProduction: productionPerHour
+            };
+        };
+
+        const calculateTotalProduction = (routes, premises, logs) => {
+            const routeResults = routes.map(route => ({
+                id: route.id,
+                name: route.name,
+                ...calculateRouteProduction(route, premises),
+            }));
+
+            const totalDailyROM = routeResults.reduce((acc, curr) => acc + curr.dailyProduction, 0);
+            const totalMonthlyROM = totalDailyROM * (premises.calendarDays || 30);
+            
+            // Replanning logic
+            const allLogs = Object.values(logs).flat();
+            const totalLoggedROM = allLogs.reduce((acc, log) => acc + (log.tonnage || 0), 0);
+            const daysLogged = new Set(allLogs.map(log => log.date)).size;
+            const remainingDays = Math.max(0, (premises.calendarDays || 30) - daysLogged);
+            const remainingTarget = Math.max(0, premises.targetMonthlyROM - totalLoggedROM);
+            
+            const requiredDailyProduction = remainingDays > 0 ? remainingTarget / remainingDays : 0;
+            const isTargetAtRisk = totalDailyROM < requiredDailyProduction;
+
+            const plantUtilization = (totalDailyROM / premises.contractedHoursPerDay) / premises.plantFeedRateTPH * 100;
+
+            // Suggestions
+            const suggestions = [];
+            if (isTargetAtRisk) {
+                const deficit = requiredDailyProduction - totalDailyROM;
+                const avgTruckCap = routes[0]?.truckCapacity || 25;
+                const avgCycle = routes[0]?.cycleTime || 20;
+                const trucksNeeded = Math.ceil(deficit / (avgTruckCap * (60/avgCycle) * premises.contractedHoursPerDay * 0.6));
+                
+                suggestions.push(`Aumentar a frota em aproximadamente ${trucksNeeded} caminhões.`);
+                suggestions.push("Melhorar a Eficiência Operacional (EO) em 5-10%.");
+                suggestions.push("Reduzir o tempo de ciclo através de melhorias nas pistas.");
+            }
+
+            return {
+                routeResults,
+                totalDailyROM,
+                totalMonthlyROM,
+                totalHourlyROM: totalDailyROM / premises.contractedHoursPerDay,
+                plantUtilization: plantUtilization || 0,
+                isTargetAtRisk,
+                requiredDailyProduction,
+                totalLoggedROM,
+                remainingTarget,
+                remainingDays,
+                suggestions
+            };
+        };
+
+        // --- COMPONENTS ---
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const [icon, setIcon] = useState(null);
+            useEffect(() => {
+                if (window.lucide) {
+                    const iconNode = window.lucide.icons[name];
+                    if (iconNode) setIcon(iconNode);
+                }
+            }, [name]);
+
+            if (!icon) return <div style={{ width: size, height: size }} className={className} />;
+            
+            return (
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width={size}
+                    height={size}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={className}
+                    dangerouslySetInnerHTML={{ __html: icon.map(i => `<${i[0]} ${Object.entries(i[1]).map(([k,v]) => `${k}="${v}"`).join(' ')} />`).join('') }}
+                />
+            );
+        };
+
+        const Dashboard = ({ results, premises }) => {
+            const chartRef = useRef(null);
+            const barChartRef = useRef(null);
+
+            useEffect(() => {
+                if (chartRef.current) {
+                    const ctx = chartRef.current.getContext('2d');
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: ['Semana 1', 'Semana 2', 'Semana 3', 'Semana 4'],
+                            datasets: [{
+                                label: 'Produção ROM (t)',
+                                data: [results.totalDailyROM * 7 * 0.9, results.totalDailyROM * 7 * 1.05, results.totalDailyROM * 7 * 0.95, results.totalDailyROM * 7],
+                                borderColor: '#10b981',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                    });
+                }
+                if (barChartRef.current) {
+                    const ctx = barChartRef.current.getContext('2d');
+                    new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: results.routeResults.map(r => r.name),
+                            datasets: [{
+                                label: 'Produção (t/dia)',
+                                data: results.routeResults.map(r => r.dailyProduction),
+                                backgroundColor: '#3b82f6',
+                                borderRadius: 8
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                    });
+                }
+            }, [results]);
+
+            return (
+                <div className="space-y-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><Icon name="TrendingUp" size={24} /></div>
+                                <span className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${results.isTargetAtRisk ? 'text-red-500 bg-red-50' : 'text-emerald-500 bg-emerald-50'}`}>
+                                    {results.isTargetAtRisk ? 'Risco' : 'OK'}
+                                </span>
+                            </div>
+                            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Produção ROM Total</p>
+                            <h4 className="text-2xl font-mono font-bold text-[#1A1A1A]">{(results.totalMonthlyROM || 0).toLocaleString('pt-BR')} <span className="text-sm font-normal opacity-40">t/mês</span></h4>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl w-fit mb-4"><Icon name="Activity" size={24} /></div>
+                            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Produção ROM Diária</p>
+                            <h4 className="text-2xl font-mono font-bold text-[#1A1A1A]">{(results.totalDailyROM || 0).toLocaleString('pt-BR')} <span className="text-sm font-normal opacity-40">t/dia</span></h4>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                            <div className="p-3 bg-orange-50 text-orange-600 rounded-2xl w-fit mb-4"><Icon name="Zap" size={24} /></div>
+                            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Status da Planta</p>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-3 h-3 rounded-full ${results.plantUtilization > 100 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
+                                <h4 className={`text-xl font-bold ${results.plantUtilization > 100 ? 'text-red-600' : 'text-emerald-600'}`}>{results.plantUtilization > 100 ? 'Gargalo' : 'Ocioso'}</h4>
+                            </div>
+                            <p className="text-[10px] font-medium text-black/40 mt-2">Utilização: {(results.plantUtilization || 0).toFixed(1)}%</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                            <div className="p-3 bg-purple-50 text-purple-600 rounded-2xl w-fit mb-4"><Icon name="Clock" size={24} /></div>
+                            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Eficiência Mina</p>
+                            <h4 className="text-2xl font-mono font-bold text-[#1A1A1A]">{premises.eoMina}%</h4>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                            <h3 className="text-lg font-bold mb-8 flex items-center gap-2"><Icon name="TrendingUp" className="text-emerald-500" /> Evolução Semanal</h3>
+                            <div className="h-[300px]"><canvas ref={chartRef}></canvas></div>
+                        </div>
+                        <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                            <h3 className="text-lg font-bold mb-8 flex items-center gap-2"><Icon name="Truck" className="text-blue-500" /> Produção por Rota</h3>
+                            <div className="h-[300px]"><canvas ref={barChartRef}></canvas></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RouteManager = ({ routes, setRoutes }) => {
+            const [editingId, setEditingId] = useState(null);
+            const handleAdd = () => {
+                const newRoute = { id: Math.random().toString(36).substr(2, 9), name: `Nova Rota ${routes.length + 1}`, active: true, truckCount: 1, truckCapacity: 27.75, distance: 1000, cycleTime: 20, mechanicalAvailability: 85, operationalEfficiency: 72 };
+                setRoutes([...routes, newRoute]);
+                setEditingId(newRoute.id);
+            };
+            const update = (id, updates) => setRoutes(routes.map(r => r.id === id ? { ...r, ...updates } : r));
+            const del = (id) => setRoutes(routes.filter(r => r.id !== id));
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-xl font-bold text-black/80">Gestão de Rotas</h3>
+                        <button onClick={handleAdd} className="bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/20"><Icon name="Plus" size={18} /> Adicionar Rota</button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6">
+                        {routes.map(route => (
+                            <div key={route.id} className={`bg-white p-6 rounded-3xl shadow-sm border ${editingId === route.id ? 'border-emerald-500 ring-4 ring-emerald-500/5' : 'border-black/5'}`}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-3 rounded-2xl ${route.active ? 'bg-emerald-50 text-emerald-500' : 'bg-black/5 text-black/20'}`}><Icon name="Truck" size={24} /></div>
+                                        {editingId === route.id ? <input type="text" value={route.name} onChange={e => update(route.id, { name: e.target.value })} className="bg-[#F8F9FA] border rounded-xl px-4 py-2 font-bold" /> : <h4 className="text-lg font-bold">{route.name}</h4>}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => update(route.id, { active: !route.active })} className={`p-2.5 rounded-xl ${route.active ? 'bg-emerald-50 text-emerald-500' : 'bg-black/5 text-black/40'}`}><Icon name="Activity" size={18} /></button>
+                                        <button onClick={() => setEditingId(editingId === route.id ? null : route.id)} className={`p-2.5 rounded-xl ${editingId === route.id ? 'bg-emerald-500 text-white' : 'bg-black/5 text-black/40'}`}>{editingId === route.id ? <Icon name="Check" size={18} /> : <Icon name="Edit2" size={18} />}</button>
+                                        <button onClick={() => del(route.id)} className="p-2.5 rounded-xl bg-red-50 text-red-400"><Icon name="Trash2" size={18} /></button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                                    {[
+                                        { key: 'truckCount', label: 'Qtd Caminhões' },
+                                        { key: 'truckCapacity', label: 'Capacidade (t)' },
+                                        { key: 'distance', label: 'Distância (m)' },
+                                        { key: 'cycleTime', label: 'Ciclo (min)' },
+                                        { key: 'mechanicalAvailability', label: 'DF (%)' },
+                                        { key: 'operationalEfficiency', label: 'EO (%)' }
+                                    ].map(field => (
+                                        <div key={field.key} className="space-y-1.5">
+                                            <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">{field.label}</label>
+                                            {editingId === route.id ? <input type="number" value={route[field.key]} onChange={e => update(route.id, { [field.key]: parseFloat(e.target.value) || 0 })} className="w-full bg-[#F8F9FA] border rounded-xl px-3 py-2 font-mono text-sm" /> : <p className="text-lg font-mono font-bold">{route[field.key]}{field.key.includes('Efficiency') || field.key.includes('Availability') ? '%' : ''}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const PremisesForm = ({ premises, setPremises }) => {
+            const sections = [
+                { title: "Mina", fields: [{k: "dfMina", l: "Disponibilidade (%)"}, {k: "ufMina", l: "Utilização (%)"}, {k: "eoMina", l: "Eficiência (%)"}] },
+                { title: "Planta", fields: [{k: "dfPlanta", l: "Disponibilidade (%)"}, {k: "ufPlanta", l: "Utilização (%)"}, {k: "eoPlanta", l: "Eficiência (%)"}, {k: "plantFeedRateTPH", l: "Capacidade (t/h)"}] },
+                { title: "Processo", fields: [{k: "rmGlobal", l: "RM Global (%)"}, {k: "rejeitoTotal", l: "Rejeito (%)"}, {k: "umidadeNatural", l: "Umidade (%)"}] },
+                { title: "Calendário", fields: [{k: "targetMonthlyROM", l: "Meta Mensal (t)"}, {k: "contractedHoursPerDay", l: "Horas/Dia"}, {k: "calendarDays", l: "Dias Calendário"}] }
+            ];
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {sections.map(sec => (
+                        <div key={sec.title} className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                            <h3 className="text-lg font-bold mb-6 text-black/80">{sec.title}</h3>
+                            <div className="space-y-6">
+                                {sec.fields.map(f => (
+                                    <div key={f.k} className="space-y-2">
+                                        <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">{f.l}</label>
+                                        <input type="number" value={premises[f.k]} onChange={e => setPremises({ ...premises, [f.k]: parseFloat(e.target.value) || 0 })} className="w-full bg-[#F8F9FA] border border-black/5 rounded-xl px-4 py-3 font-mono text-sm focus:ring-2 focus:ring-emerald-500/20" />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const ProductionLogging = ({ routes, logs, setLogs }) => {
+            const [selectedRoute, setSelectedRoute] = useState(routes[0]?.id || '');
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+            const [tonnage, setTonnage] = useState('');
+
+            const handleAdd = () => {
+                if (!selectedRoute || !tonnage) return;
+                const newLog = { id: Math.random().toString(36).substr(2, 9), date, tonnage: parseFloat(tonnage), routeId: selectedRoute };
+                setLogs({ ...logs, [selectedRoute]: [...(logs[selectedRoute] || []), newLog] });
+                setTonnage('');
+            };
+
+            return (
+                <div className="space-y-8">
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                        <h3 className="text-xl font-bold mb-6">Lançar Produção Realizada</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <select value={selectedRoute} onChange={e => setSelectedRoute(e.target.value)} className="bg-[#F8F9FA] border rounded-xl px-4 py-3 text-sm">
+                                {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                            </select>
+                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-[#F8F9FA] border rounded-xl px-4 py-3 text-sm" />
+                            <input type="number" placeholder="Toneladas" value={tonnage} onChange={e => setTonnage(e.target.value)} className="bg-[#F8F9FA] border rounded-xl px-4 py-3 text-sm" />
+                            <button onClick={handleAdd} className="bg-emerald-500 text-white font-bold rounded-xl px-6 py-3">Lançar</button>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-3xl border border-black/5 overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-[#F8F9FA] text-[10px] font-bold uppercase tracking-widest text-black/40">
+                                <tr><th className="px-6 py-4">Data</th><th className="px-6 py-4">Rota</th><th className="px-6 py-4">Produção (t)</th><th className="px-6 py-4">Ação</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-black/5">
+                                {Object.entries(logs).flatMap(([rid, rlogs]) => rlogs.map(log => (
+                                    <tr key={log.id} className="text-sm">
+                                        <td className="px-6 py-4 font-mono">{log.date}</td>
+                                        <td className="px-6 py-4">{routes.find(r => r.id === rid)?.name}</td>
+                                        <td className="px-6 py-4 font-mono font-bold">{log.tonnage} t</td>
+                                        <td className="px-6 py-4"><button onClick={() => setLogs({ ...logs, [rid]: rlogs.filter(l => l.id !== log.id) })} className="text-red-400 hover:text-red-600"><Icon name="Trash2" size={16} /></button></td>
+                                    </tr>
+                                )))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        const ReplanningView = ({ results, premises }) => (
+            <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                        <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-2">Progresso Mensal</p>
+                        <h4 className="text-3xl font-mono font-bold text-emerald-600">{((results.totalLoggedROM / premises.targetMonthlyROM * 100) || 0).toFixed(1)}%</h4>
+                        <div className="w-full bg-black/5 h-2 rounded-full mt-4 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, (results.totalLoggedROM / premises.targetMonthlyROM * 100))}%` }} /></div>
+                    </div>
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                        <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-2">Meta Diária Necessária</p>
+                        <h4 className="text-3xl font-mono font-bold text-black/80">{(results.requiredDailyProduction || 0).toLocaleString('pt-BR')} t</h4>
+                        <p className="text-xs text-black/40 mt-2">Para os próximos {results.remainingDays} dias</p>
+                    </div>
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                        <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-2">Déficit de Produção</p>
+                        <h4 className="text-3xl font-mono font-bold text-red-500">{Math.max(0, results.remainingTarget).toLocaleString('pt-BR')} t</h4>
+                    </div>
+                </div>
+                <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
+                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-emerald-400"><Icon name="Zap" /> Sugestões de Ajuste</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {results.suggestions.map((s, i) => (
+                            <div key={i} className="flex items-start gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg"><Icon name="Check" size={16} /></div>
+                                <p className="text-sm font-medium text-white/80">{s}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const ProductionCalendar = ({ results, premises }) => {
+            const today = new Date();
+            const days = Array.from({ length: premises.calendarDays || 30 }, (_, i) => new Date(today.getFullYear(), today.getMonth(), i + 1));
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {['Planta', 'Mina'].map(title => (
+                        <div key={title} className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+                            <div className={`p-4 ${title === 'Planta' ? 'bg-blue-500' : 'bg-emerald-500'} text-white font-bold text-center`}>Calendário - {title}</div>
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-[#F8F9FA] text-black/40 text-[10px] uppercase font-bold tracking-widest">
+                                    <tr><th className="px-4 py-3">Dia</th><th className="px-4 py-3">Semana</th><th className="px-4 py-3 text-right">Horas</th></tr>
+                                </thead>
+                                <tbody className="divide-y divide-black/5">
+                                    {days.map((day, idx) => (
+                                        <tr key={idx} className="text-sm">
+                                            <td className="px-4 py-2 font-mono">{day.getDate()}</td>
+                                            <td className="px-4 py-2 text-black/60">{day.toLocaleDateString('pt-BR', { weekday: 'short' })}</td>
+                                            <td className="px-4 py-2 text-right font-mono">24.00</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const ScenarioManager = ({ routes, premises, scenarios, setScenarios, setRoutes, setPremises }) => {
+            const [name, setName] = useState('');
+            const save = () => {
+                if (!name) return;
+                setScenarios([...scenarios, { id: Math.random().toString(36).substr(2, 9), name, routes: JSON.parse(JSON.stringify(routes)), premises: JSON.parse(JSON.stringify(premises)), timestamp: Date.now() }]);
+                setName('');
+            };
+            return (
+                <div className="space-y-8">
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
+                        <h3 className="text-xl font-bold mb-6">Salvar Cenário</h3>
+                        <div className="flex gap-4">
+                            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nome do cenário" className="flex-1 bg-[#F8F9FA] border rounded-xl px-6 py-3" />
+                            <button onClick={save} className="bg-emerald-500 text-white font-bold px-8 rounded-xl">Salvar</button>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {scenarios.map(s => (
+                            <div key={s.id} className="bg-white p-6 rounded-3xl shadow-sm border border-black/5">
+                                <h4 className="font-bold mb-4">{s.name}</h4>
+                                <button onClick={() => { setRoutes(s.routes); setPremises(s.premises); }} className="w-full bg-[#F8F9FA] py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2"><Icon name="RefreshCw" size={16} /> Carregar</button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState("dashboard");
+            const [routes, setRoutes] = useState(INITIAL_ROUTES);
+            const [premises, setPremises] = useState(DEFAULT_PREMISES);
+            const [scenarios, setScenarios] = useState([]);
+            const [productionLogs, setProductionLogs] = useState({});
+
+            const results = useMemo(() => calculateTotalProduction(routes, premises, productionLogs), [routes, premises, productionLogs]);
+
+            const navItems = [
+                { id: "dashboard", label: "Dashboard", icon: "LayoutDashboard" },
+                { id: "routes", label: "Rotas", icon: "Truck" },
+                { id: "premises", label: "Premissas", icon: "Settings" },
+                { id: "logging", label: "Lançamento", icon: "ClipboardList" },
+                { id: "replanning", label: "Replanejamento", icon: "RefreshCw" },
+                { id: "calendar", label: "Calendário", icon: "Calendar" },
+                { id: "scenarios", label: "Cenários", icon: "Save" },
+            ];
+
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <aside className="w-64 bg-[#151619] text-white flex flex-col shadow-xl">
+                        <div className="p-6 border-b border-white/10">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center"><Icon name="TrendingUp" className="text-white" /></div>
+                                <h1 className="text-xl font-bold">T2MinePlanner</h1>
+                            </div>
+                        </div>
+                        <nav className="flex-1 py-4">
+                            {navItems.map(item => (
+                                <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 px-6 py-3.5 transition-all ${activeTab === item.id ? "text-emerald-400 bg-emerald-400/5 font-bold" : "text-white/60 hover:text-white hover:bg-white/5"}`}>
+                                    <Icon name={item.icon} size={18} className={activeTab === item.id ? "text-emerald-400" : "text-white/20"} />
+                                    <span className="text-sm">{item.label}</span>
+                                </button>
+                            ))}
+                        </nav>
+                    </aside>
+                    <main className="flex-1 overflow-y-auto">
+                        <header className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-black/5 px-8 py-4 flex justify-between items-center z-10">
+                            <h2 className="text-2xl font-bold italic font-serif">{navItems.find(i => i.id === activeTab)?.label}</h2>
+                            <div className="flex gap-6">
+                                <div className="text-right"><p className="text-[10px] font-bold text-black/40 uppercase">ROM Diária</p><p className="text-xl font-mono font-bold text-emerald-600">{(results.totalDailyROM || 0).toFixed(0)} t</p></div>
+                                <div className="text-right"><p className="text-[10px] font-bold text-black/40 uppercase">Meta Mensal</p><p className="text-xl font-mono font-bold">{(premises.targetMonthlyROM || 0).toFixed(0)} t</p></div>
+                            </div>
+                        </header>
+                        <div className="p-8 max-w-7xl mx-auto">
+                            {activeTab === "dashboard" && <Dashboard results={results} premises={premises} />}
+                            {activeTab === "routes" && <RouteManager routes={routes} setRoutes={setRoutes} />}
+                            {activeTab === "premises" && <PremisesForm premises={premises} setPremises={setPremises} />}
+                            {activeTab === "logging" && <ProductionLogging routes={routes} logs={productionLogs} setLogs={setProductionLogs} />}
+                            {activeTab === "replanning" && <ReplanningView results={results} premises={premises} />}
+                            {activeTab === "calendar" && <ProductionCalendar results={results} premises={premises} />}
+                            {activeTab === "scenarios" && <ScenarioManager routes={routes} premises={premises} scenarios={scenarios} setScenarios={setScenarios} setRoutes={setRoutes} setPremises={setPremises} />}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
