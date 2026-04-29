@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, Trash2, RefreshCw, Plus } from 'lucide-react';
+import { Save, Trash2, RefreshCw, Plus, Download, Upload, FileJson } from 'lucide-react';
 import { Route, DetailedPremises, Scenario } from '../types';
 
 interface ScenarioManagerProps {
@@ -45,6 +45,48 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
     setScenarios(scenarios.filter(s => s.id !== id));
   };
 
+  const exportToJSON = (scenario: Scenario) => {
+    const dataStr = JSON.stringify(scenario, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cenario_${scenario.name.toLowerCase().replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedScenario = JSON.parse(content);
+        
+        // Basic validation
+        if (importedScenario.name && importedScenario.routes && importedScenario.premises) {
+          // Generate new ID to avoid conflicts
+          importedScenario.id = Math.random().toString(36).substr(2, 9);
+          importedScenario.timestamp = Date.now();
+          setScenarios([...scenarios, importedScenario]);
+        } else {
+          alert("Arquivo JSON inválido para cenários.");
+        }
+      } catch (err) {
+        console.error("Erro ao importar cenário:", err);
+        alert("Erro ao ler o arquivo. Verifique se é um JSON válido.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    event.target.value = '';
+  };
+
   return (
     <div className="space-y-8">
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-black/5">
@@ -52,21 +94,36 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
           <Save size={24} className="text-emerald-500" />
           Salvar Cenário Atual
         </h3>
-        <div className="flex gap-4">
-          <input
-            type="text"
-            placeholder="Nome do cenário (ex: Plano A - 7 Caminhões)"
-            value={scenarioName}
-            onChange={(e) => setScenarioName(e.target.value)}
-            className="flex-1 bg-[#F8F9FA] border border-black/5 rounded-xl px-6 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
-          />
-          <button
-            onClick={handleSave}
-            className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
-          >
-            <Plus size={18} />
-            Salvar
-          </button>
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1 flex gap-2">
+            <input
+              type="text"
+              placeholder="Nome do cenário (ex: Plano A - 7 Caminhões)"
+              value={scenarioName}
+              onChange={(e) => setScenarioName(e.target.value)}
+              className="flex-1 bg-[#F8F9FA] border border-black/5 rounded-xl px-6 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
+            />
+            <button
+              onClick={handleSave}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+            >
+              <Plus size={18} />
+              Salvar
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer bg-white hover:bg-black/[0.02] text-black/60 font-bold py-3 px-6 rounded-xl border border-black/5 transition-all flex items-center gap-2">
+              <Upload size={18} />
+              Importar JSON
+              <input 
+                type="file" 
+                className="hidden" 
+                accept=".json"
+                onChange={handleFileUpload} 
+              />
+            </label>
+          </div>
         </div>
       </div>
 
@@ -99,13 +156,22 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={() => handleLoad(scenario)}
-              className="w-full flex items-center justify-center gap-2 bg-[#F8F9FA] hover:bg-emerald-50 hover:text-emerald-600 text-black/60 py-3 rounded-xl text-sm font-bold transition-all border border-black/5"
-            >
-              <RefreshCw size={16} />
-              Carregar Cenário
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleLoad(scenario)}
+                className="flex-1 flex items-center justify-center gap-2 bg-[#F8F9FA] hover:bg-emerald-50 hover:text-emerald-600 text-black/60 py-3 rounded-xl text-sm font-bold transition-all border border-black/5"
+              >
+                <RefreshCw size={16} />
+                Carregar
+              </button>
+              <button
+                onClick={() => exportToJSON(scenario)}
+                className="px-4 flex items-center justify-center bg-white hover:bg-blue-50 hover:text-blue-600 text-black/40 py-3 rounded-xl text-sm font-bold transition-all border border-black/5"
+                title="Exportar como JSON"
+              >
+                <Download size={16} />
+              </button>
+            </div>
           </div>
         ))}
         

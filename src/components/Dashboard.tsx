@@ -189,9 +189,24 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
     labels: results.routeResults.map((r: any) => r.name),
     datasets: [
       {
-        label: 'Produção por Rota (t/dia)',
-        data: results.routeResults.map((r: any) => r.dailyProduction),
-        backgroundColor: '#3b82f6',
+        label: 'Produção Efetiva por Rota (t/dia)',
+        // We scale the fleet production by the plant bottleneck ratio to match the header sum
+        data: results.routeResults.map((r: any) => {
+          const isROM = !(r.name.toLowerCase().includes('terminal') || r.name.toLowerCase().includes('produto') || r.name.toLowerCase().includes('baia') || r.name.toLowerCase().includes('rejeito') || r.name.toLowerCase().includes('estéril') || r.name.toLowerCase().includes('esteril'));
+          
+          if (isROM && results.plantUtilization > 100) {
+            // Cap ROM routes proportionally to plant capacity
+            return r.dailyProduction * (100 / results.plantUtilization);
+          }
+          return r.dailyProduction;
+        }),
+        backgroundColor: (context: any) => {
+          const name = results.routeResults[context.dataIndex]?.name?.toLowerCase() || '';
+          if (name.includes('terminal') || name.includes('produto')) return '#3b82f6';
+          if (name.includes('baia') || name.includes('rejeito')) return '#ef4444';
+          if (name.includes('estéril') || name.includes('esteril')) return '#f59e0b';
+          return '#10b981'; // ROM is Emerald
+        },
         borderRadius: 8,
       }
     ],
@@ -412,29 +427,29 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
           {/* Connector Line */}
           <div className="absolute top-1/2 left-0 w-full h-0.5 bg-black/5 -translate-y-1/2 hidden lg:block z-0" />
           
-          {/* Mine Stage */}
+          {/* Mine Stage – shows planned ROM delivery rate (from target) */}
           <div className="relative z-10 flex flex-col items-center group">
             <div className="w-24 h-24 bg-[#151619] text-white rounded-[32px] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-500">
               <Truck size={40} className="text-emerald-400" />
             </div>
             <div className="mt-6 text-center">
               <p className="text-[10px] font-black uppercase tracking-widest text-black/40 mb-1">Mina</p>
-              <p className="text-xl font-black tracking-tighter">{results.totalPossibleHourlyMovement.toFixed(0)} t/h</p>
-              <p className="text-[10px] font-bold text-emerald-600 mt-1 uppercase tracking-widest">Produção Bruta</p>
+              <p className="text-xl font-black tracking-tighter">{(results.plannedHourlyROM || 0).toFixed(3).replace('.',',')} t/h</p>
+              <p className="text-[10px] font-bold text-emerald-600 mt-1 uppercase tracking-widest">Meta de Entrega ROM</p>
             </div>
           </div>
 
           <ArrowRight className="text-black/10 hidden lg:block" size={32} />
 
-          {/* Terminal Stage (Recebimento) */}
+          {/* Terminal Stage (Recebimento) – ROM arriving at the plant gate */}
           <div className="relative z-10 flex flex-col items-center group">
             <div className="w-24 h-24 bg-blue-600 text-white rounded-[32px] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-500">
               <MapPin size={40} />
             </div>
             <div className="mt-6 text-center">
               <p className="text-[10px] font-black uppercase tracking-widest text-black/40 mb-1">Terminal (Recebimento)</p>
-              <p className="text-xl font-black tracking-tighter">{results.totalPossibleHourlyMovement.toFixed(0)} t/h</p>
-              <p className="text-[10px] font-bold text-blue-600 mt-1 uppercase tracking-widest">Fluxo Total Aparente</p>
+              <p className="text-xl font-black tracking-tighter">{(results.plannedHourlyROM || 0).toFixed(3).replace('.',',')} t/h</p>
+              <p className="text-[10px] font-bold text-blue-600 mt-1 uppercase tracking-widest">ROM Chegando na Planta</p>
             </div>
           </div>
 
@@ -451,9 +466,13 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
               </div>
               <div className="text-left">
                 <p className="text-[10px] font-black uppercase tracking-widest text-black/40 mb-1">Planta (Processamento)</p>
-                <p className="text-xl font-black tracking-tighter">{Math.min(results.totalPossibleHourlyMovement, premises.plantFeedRateTPH).toFixed(0)} t/h</p>
-                <p className={`text-[10px] font-bold mt-1 uppercase tracking-widest ${results.plantUtilization > 100 ? 'text-red-600' : 'text-blue-600'}`}>
-                  {results.plantUtilization > 100 ? 'Capacidade Máxima' : 'Fluxo Efetivo'}
+                <p className="text-xl font-black tracking-tighter">
+                  {Math.min(results.plannedHourlyROM || 0, premises.plantFeedRateTPH).toFixed(3).replace('.',',')} t/h
+                </p>
+                <p className={`text-[10px] font-bold mt-1 uppercase tracking-widest ${
+                  (results.plannedHourlyROM || 0) > premises.plantFeedRateTPH ? 'text-red-600' : 'text-blue-600'
+                }`}>
+                  {(results.plannedHourlyROM || 0) > premises.plantFeedRateTPH ? 'Capacidade Máxima' : 'Feed Planejado'}
                 </p>
               </div>
             </div>
@@ -468,12 +487,15 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
               <div className="text-left">
                 <div className="text-[10px] font-black uppercase tracking-widest text-black/40 mb-1">
                   Pilha Pulmão (Gargalo)
-                  <InfoTooltip text="Material não processado devido à restrição de capacidade da planta. Acúmulo para processamento futuro." />
+                  <InfoTooltip text="Excesso de ROM que a mina produz além do que a planta consegue absorver." />
                 </div>
-                <p className={`text-xl font-black tracking-tighter ${diagnostic.indicators.stockpileRateTPH > 0 ? 'text-amber-700' : 'text-black/20'}`}>
-                  {diagnostic.indicators.stockpileRateTPH.toFixed(0)} t/h
+                {/* Pilha = plannedROM - plantCapacity (if ROM > plant capacity) */}
+                <p className={`text-xl font-black tracking-tighter ${
+                  (results.plannedHourlyROM || 0) > premises.plantFeedRateTPH ? 'text-amber-700' : 'text-black/20'
+                }`}>
+                  {Math.max(0, (results.plannedHourlyROM || 0) - premises.plantFeedRateTPH).toFixed(3).replace('.',',')} t/h
                 </p>
-                {diagnostic.indicators.stockpileRateTPH > 0 && (
+                {(results.plannedHourlyROM || 0) > premises.plantFeedRateTPH && (
                   <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Material Não Processado</p>
                 )}
               </div>
@@ -491,7 +513,7 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
               <div className="text-left">
                 <p className="text-[8px] font-black uppercase tracking-widest text-black/40">Terminal (Produto)</p>
                 <p className="text-sm font-black tracking-tighter">
-                  {(Math.min(results.totalPossibleHourlyMovement, premises.plantFeedRateTPH) * (premises.rmGlobal/100)).toFixed(0)} t/h
+                  {(results.plannedHourlyPlanta || 0).toFixed(3).replace('.',',')} t/h
                 </p>
                 <p className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest">Produto Acabado</p>
               </div>
@@ -505,7 +527,7 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
                 <div className="text-left">
                   <p className="text-[8px] font-black uppercase tracking-widest text-black/40">Baia de Rejeito</p>
                   <p className="text-sm font-black tracking-tighter">
-                    {(Math.min(results.totalPossibleHourlyMovement, premises.plantFeedRateTPH) * (premises.rejeitoTotal/100)).toFixed(0)} t/h
+                    {(results.plannedHourlyRejeito || 0).toFixed(3).replace('.',',')} t/h
                   </p>
                   <p className="text-[8px] font-bold text-rose-600 uppercase tracking-widest">Resíduo Processo</p>
                 </div>
@@ -518,17 +540,17 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
           <div className="flex items-center gap-4">
             <div className="flex flex-col">
               <span className="text-[8px] font-black text-black/40 uppercase tracking-widest">Entrada (Mina)</span>
-              <span className="text-sm font-black font-mono">{results.totalPossibleHourlyMovement.toFixed(1)} t/h</span>
+              <span className="text-sm font-black font-mono">{(results.plannedHourlyROM || 0).toFixed(3).replace('.',',')} t/h</span>
             </div>
             <div className="w-px h-6 bg-black/10" />
             <div className="flex flex-col">
-              <span className="text-[8px] font-black text-black/40 uppercase tracking-widest">Saída Processada (Planta)</span>
-              <span className="text-sm font-black font-mono">{Math.min(results.totalPossibleHourlyMovement, premises.plantFeedRateTPH).toFixed(1)} t/h</span>
+              <span className="text-[8px] font-black text-black/40 uppercase tracking-widest">Processado (Planta)</span>
+              <span className="text-sm font-black font-mono">{Math.min(results.plannedHourlyROM || 0, premises.plantFeedRateTPH).toFixed(3).replace('.',',')} t/h</span>
             </div>
             <div className="w-px h-6 bg-black/10" />
             <div className="flex flex-col">
               <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest">Acúmulo (Gargalo)</span>
-              <span className="text-sm font-black font-mono text-amber-600">{diagnostic.indicators.stockpileRateTPH.toFixed(1)} t/h</span>
+              <span className="text-sm font-black font-mono text-amber-600">{Math.max(0, (results.plannedHourlyROM || 0) - premises.plantFeedRateTPH).toFixed(3).replace('.',',')} t/h</span>
             </div>
           </div>
           <p className="text-[10px] font-bold text-amber-600 italic">O volume em pilha não representa produção real, apenas material aguardando processamento.</p>
@@ -745,19 +767,20 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
                 <th className="py-4 px-4 text-[10px] font-bold text-black/40 uppercase tracking-widest">Indicador</th>
                 <th className="py-4 px-4 text-[10px] font-bold text-blue-600 uppercase tracking-widest text-right">Movimentação Bruta (Mina)</th>
                 <th className="py-4 px-4 text-[10px] font-bold text-emerald-600 uppercase tracking-widest text-right">Processamento Efetivo (Planta)</th>
+                {premises.hasWasteRock && <th className="py-4 px-4 text-[10px] font-bold text-amber-600 uppercase tracking-widest text-right">Movimentação Estéril</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
               <tr>
                 <td className="py-6 px-4">
-                  <p className="text-base font-bold text-black/80">Movimentação Total – Base Úmida (t)</p>
-                  <p className="text-[10px] text-black/40 uppercase tracking-widest">Massa Total no Mês</p>
+                  <p className="text-base font-bold text-black/80">Necessidade da Meta (ROM) (t)</p>
+                  <p className="text-[10px] text-black/40 uppercase tracking-widest">O que você PRECISA entregar</p>
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-blue-700">
-                  {results.totalPossibleMonthlyMovement.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulationResults?.totalWetMassNecessary || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-emerald-700">
-                  {results.simulationResults.totalWetMassNecessary.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulatedMonthlyROM || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
               </tr>
               <tr>
@@ -766,11 +789,16 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
                   <p className="text-[10px] text-black/40 uppercase tracking-widest">Produtividade Horária</p>
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-blue-700">
-                  {results.totalPossibleHourlyMovement.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulationResults?.productionHourlyNecessary || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-emerald-700">
-                  {results.simulationResults.productionHourlyNecessary.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulatedHourlyROM || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
+                {premises.hasWasteRock && (
+                  <td className="py-6 px-4 text-right font-mono font-black text-3xl text-amber-700">
+                    {results.simulatedHourlyWaste.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  </td>
+                )}
               </tr>
               <tr>
                 <td className="py-6 px-4">
@@ -778,11 +806,16 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, produc
                   <p className="text-[10px] text-black/40 uppercase tracking-widest">Produtividade Diária</p>
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-blue-700">
-                  {results.totalPossibleDailyMovement.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulationResults?.productionDailyNecessary || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
                 <td className="py-6 px-4 text-right font-mono font-black text-3xl text-emerald-700">
-                  {results.simulationResults.productionDailyNecessary.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {(results.simulatedDailyROM || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </td>
+                {premises.hasWasteRock && (
+                  <td className="py-6 px-4 text-right font-mono font-black text-3xl text-amber-700">
+                    {results.simulatedDailyWaste.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  </td>
+                )}
               </tr>
               {results.allocatedExtraMonthlyProduction > 0 && (
                 <tr className="bg-emerald-50/30">

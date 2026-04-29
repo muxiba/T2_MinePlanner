@@ -8,6 +8,7 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
       monthlyProduction: 0,
       tripsPerHour: 0,
       tripsPerDay: 0,
+      targetMass: 0,
       equipmentUtilization: 0,
       plantLimited: false,
       wetMass: 0,
@@ -27,9 +28,16 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   const eoMinaFactor = (premises.dfMina / 100) * (premises.ufMina / 100);
   const jornadaEfetivaMina = premises.contractedHoursMina * eoMinaFactor;
   
-  // 1. Full Fleet Dimensioning (Dimensionamento Individual)
-  // Frota (Viagem/Hora) = (60/cycle) * Total Trucks
-  const cycleTime = route.cycleTime || 1;
+  // 0. Cycle Time Calculation (Strictly calculated based on speeds and distance)
+  // Distance is in meters, speed in km/h. 1 km/h = 1000/60 m/min
+  const speedLoadedMmin = (premises.velocidadeCheio * 1000) / 60;
+  const speedEmptyMmin = (premises.velocidadeVazio * 1000) / 60;
+  
+  const travelTimeLoaded = route.distance / speedLoadedMmin;
+  const travelTimeEmpty = route.distance / speedEmptyMmin;
+  
+  const calculatedCycleTime = premises.loadingTime + travelTimeLoaded + premises.weighingTimeLoaded + premises.dumpingTime + travelTimeEmpty + premises.weighingTimeEmpty;
+  const cycleTime = calculatedCycleTime || 1;
   const truckCapacity = route.truckCapacity || 1;
   
   const fullFleetTripsPerHour = (60 / cycleTime) * premises.truckCount;
@@ -104,6 +112,7 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
     monthlyProduction: hourlyProduction * (premises.calendarDays * 24), 
     tripsPerHour,
     tripsPerDay: tripsPerHour * 24,
+    targetMass: baseSeca,
     equipmentUtilization: truckEO * 100,
     plantLimited: false,
     wetMass,
@@ -142,17 +151,20 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     const n = name.toLowerCase();
     if (n.includes('terminal') || n.includes('produto') || n.includes('product')) return 'product';
     if (n.includes('baia') || n.includes('rejeito') || n.includes('tailing')) return 'tailings';
+    if (n.includes('estéril') || n.includes('esteril') || n.includes('waste')) return 'waste';
     return 'rom';
   };
 
   const romRoutes = activeRoutes.filter(r => categorize(r.name) === 'rom');
   const productRoutes = activeRoutes.filter(r => categorize(r.name) === 'product');
   const tailingsRoutes = activeRoutes.filter(r => categorize(r.name) === 'tailings');
+  const wasteRoutes = activeRoutes.filter(r => categorize(r.name) === 'waste' && premises.hasWasteRock);
 
   const distributeTarget = (group: Route[], totalCategoryTarget: number, hours: number) => {
     // 1. Sum up manually specified targets
     const manualTargetSum = group.reduce((acc, r) => acc + (r.targetMass || 0), 0);
     // 2. Remaining target to be split among routes without manual target
+    // Note: for ROM, we respect the user's manual inputs as the primary target
     const remainingTarget = Math.max(0, totalCategoryTarget - manualTargetSum);
     const autoRoutes = group.filter(r => !r.targetMass);
     
@@ -170,10 +182,21 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   };
 
   const romResults = distributeTarget(romRoutes, premises.targetMonthlyROM, effectiveHoursPerMonthMina);
-  const productResults = distributeTarget(productRoutes, premises.targetMonthlyROM * (rmGlobal / 100), effectiveHoursPerMonthPlanta);
-  const tailingsResults = distributeTarget(tailingsRoutes, premises.targetMonthlyROM * (rejeitoTotal / 100), effectiveHoursPerMonthPlanta);
+  
+  // Calculate total actual ROM being moved (sum of individual fronts)
+  // This will be the basis for product and tailings generation
+  const totalActualROMTarget = romResults.reduce((acc, r) => acc + (r.targetMass || 0), 0);
 
-  const routeResults = [...romResults, ...productResults, ...tailingsResults];
+  const productResults = distributeTarget(productRoutes, totalActualROMTarget * (rmGlobal / 100), effectiveHoursPerMonthPlanta);
+  const tailingsResults = distributeTarget(tailingsRoutes, totalActualROMTarget * (rejeitoTotal / 100), effectiveHoursPerMonthPlanta);
+  const wasteResults = distributeTarget(wasteRoutes, premises.targetMonthlyWasteRock, effectiveHoursPerMonthMina);
+
+  const routeResults = [...romResults, ...productResults, ...tailingsResults, ...wasteResults];
+
+  const romMassSum = totalActualROMTarget;
+  const wasteMassSum = wasteResults.reduce((acc, r) => acc + (r.targetMass || 0), 0);
+  const romOverload = romMassSum > premises.targetMonthlyROM;
+  const wasteOverload = premises.hasWasteRock && wasteMassSum > premises.targetMonthlyWasteRock;
   
   const jornadaEfetivaMina = premises.contractedHoursMina * eoMinaFactor;
   const jornadaEfetivaPlanta = premises.contractedHoursPlanta * eoPlantaFactor;
@@ -181,8 +204,16 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const effectiveCalendarDaysMina = effectiveHoursPerMonthMina / 24;
   const effectiveCalendarDaysPlanta = effectiveHoursPerMonthPlanta / 24;
 
-  const totalHourlyROM = routeResults.reduce((acc, curr) => acc + curr.hourlyProduction, 0);
-  const actualDailyROM = totalHourlyROM * jornadaEfetivaMina;
+  // Production Totals by Category
+  const totalHourlyROM_Only = romResults.reduce((acc, curr) => acc + curr.hourlyProduction, 0);
+  const totalHourlyProduct = productResults.reduce((acc, curr) => acc + curr.hourlyProduction, 0);
+  const totalHourlyTailings = tailingsResults.reduce((acc, curr) => acc + curr.hourlyProduction, 0);
+  const totalHourlyWaste = wasteResults.reduce((acc, curr) => acc + curr.hourlyProduction, 0);
+
+  const totalHourlyROM = totalHourlyROM_Only; // Keep for backward compatibility in return object
+  const totalHourlyAllMovement = totalHourlyROM_Only + totalHourlyProduct + totalHourlyTailings + totalHourlyWaste;
+  
+  const actualDailyROM = totalHourlyROM_Only * jornadaEfetivaMina;
   
   // Total Trucks Used
   const totalTrucksUsed = activeRoutes.reduce((acc, curr) => acc + curr.truckCount, 0);
@@ -221,18 +252,27 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const potentialExtraDailyProduction = potentialExtraHourlyProduction * jornadaEfetivaMina;
   const potentialExtraMonthlyProduction = potentialExtraHourlyProduction * effectiveHoursPerMonthMina;
 
+  // Plant Capacity for capping
+  const plantCapacityTPH = premises.plantFeedRateTPH || 310;
+
   // Total Possible Movement (Assigned + Allocated Extra + Potential Extra)
-  // We'll use Allocated Extra + Potential for "Theoretical Max Possible"
-  const totalPossibleHourlyMovement = totalHourlyROM + allocatedExtraHourlyProduction + potentialExtraHourlyProduction;
-  const totalPossibleDailyMovement = totalPossibleHourlyMovement * jornadaEfetivaMina;
+  // We MUST cap the ROM possibility by the plant capacity to avoid misleading the user
+  const totalPossibleHourlyMovement = Math.min(totalHourlyROM_Only + allocatedExtraHourlyProduction + potentialExtraHourlyProduction, plantCapacityTPH);
   const totalPossibleMonthlyMovement = totalPossibleHourlyMovement * effectiveHoursPerMonthMina;
+  const totalPossibleDailyMovement = totalPossibleHourlyMovement * jornadaEfetivaMina;
+
+  // Theoretical UN-CAPPED Capacity (The "Gross" Mine potential)
+  const totalGrossHourlyMinaCapacity = totalHourlyROM_Only + potentialExtraHourlyProduction;
+
+  const totalPossibleHourlyAllMovement = totalHourlyAllMovement + (potentialExtraHourlyProduction); // Total theoretical max of all trucks
+  const totalPossibleMonthlyAllMovement = totalPossibleHourlyAllMovement * effectiveHoursPerMonthMina;
 
   // Stockpile Logic (Pilha Pulmão)
-  // Stockpile is whatever we move that EXCEEDS the plant's capacity or meta
-  const plantCapacityTPH = premises.plantFeedRateTPH || 310;
+  // Stockpile is only what we ARE MOVING (Assigned ROM + Allocated Extra) that EXCEEDS the plant's capacity
   
-  // Hourly Stockpile = Total Possible - Plant Capacity (if positive)
-  const hourlyStockpile = Math.max(0, totalPossibleHourlyMovement - plantCapacityTPH);
+  // Hourly Stockpile = (Current ROM Movement) - Plant Capacity (if positive)
+  // Note: We exclude potentialExtraHourlyProduction because those trucks are NOT currently working
+  const hourlyStockpile = Math.max(0, (totalHourlyROM_Only + allocatedExtraHourlyProduction) - plantCapacityTPH);
   const dailyStockpile = hourlyStockpile * jornadaEfetivaMina;
   const monthlyStockpile = hourlyStockpile * effectiveHoursPerMonthMina;
 
@@ -246,22 +286,23 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const availableCalendarDays = premises.calendarDays;
   const availableEffectiveHours = effectiveHoursPerMonthMina;
 
+  // We should also check the total fleet utilization vs all movement
   const totalTrucksNeeded = routeResults.reduce((acc, curr) => acc + curr.suggestedTrucks, 0);
 
-  if (totalEffectiveHoursNeeded > availableEffectiveHours) {
-    suggestions.push(`FROTA INSUFICIENTE: São necessárias ${totalEffectiveHoursNeeded.toFixed(1)}h efetivas para bater a meta, mas há apenas ${availableEffectiveHours.toFixed(1)}h disponíveis no mês.`);
-    suggestions.push(`Déficit Teórico de frota (Meta vs Capacidade): ${(totalTrucksNeeded - totalTrucksAvailable).toFixed(2)} caminhões.`);
+  if (totalTrucksNeeded > totalTrucksAvailable) {
+    suggestions.push(`FROTA INSUFICIENTE: A necessidade total de frota (${totalTrucksNeeded.toFixed(2)}) é superior à frota disponível (${totalTrucksAvailable}).`);
+    suggestions.push(`Déficit de frota: ${(totalTrucksNeeded - totalTrucksAvailable).toFixed(2)} caminhões.`);
   } else {
-    suggestions.push(`FROTA CAPAZ: A necessidade total (${totalEffectiveHoursNeeded.toFixed(1)}h efetivas) é compatível com a disponibilidade do mês (${availableEffectiveHours.toFixed(1)}h).`);
-    suggestions.push(`Folga Teórica de frota (Meta vs Capacidade): ${(totalTrucksAvailable - totalTrucksNeeded).toFixed(2)} caminhões.`);
+    suggestions.push(`FROTA CAPAZ: A frota atual (${totalTrucksAvailable}) suporta a meta de movimentação.`);
+    suggestions.push(`Folga de frota: ${(totalTrucksAvailable - totalTrucksNeeded).toFixed(2)} caminhões.`);
   }
 
   if (extraTrucks > 0) {
     suggestions.push(`FROTA FÍSICA NÃO ALOCADA: Você possui ${extraTrucks} caminhões não atribuídos a nenhum fluxo.`);
     if (allocatedExtraMonthlyProduction > 0) {
-      suggestions.push(`ALOCAÇÃO EXTRA: ${allocatedExtraMonthlyProduction.toLocaleString('pt-BR')} t/mês adicionais via alocação temporária.`);
+      suggestions.push(`ALOCAÇÃO EXTRA: ${allocatedExtraMonthlyProduction.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t/mês adicionais via alocação temporária.`);
     } else {
-      suggestions.push(`Potencial de movimentação extra (Pilha Pulmão): ${potentialExtraHourlyProduction.toFixed(2)} t/h.`);
+      suggestions.push(`Folga Operacional (Potencial): ${potentialExtraHourlyProduction.toFixed(2)} t/h.`);
     }
   }
 
@@ -273,49 +314,84 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   routeResults.forEach(r => {
     suggestions.push(`- ${r.name}: ${r.suggestedTrucks.toFixed(2)} caminhões`);
   });
+  
+  if (romOverload) {
+    suggestions.push(`ALERTA: A soma das massas planejadas nas frentes de ROM (${romMassSum.toLocaleString()} t) excede o limite do Consumo da Planta (${premises.targetMonthlyROM.toLocaleString()} t).`);
+  }
+  if (wasteOverload) {
+    suggestions.push(`ALERTA: A soma das massas planejadas de Estéril (${wasteMassSum.toLocaleString()} t) excede a Meta de Estéril (${premises.targetMonthlyWasteRock.toLocaleString()} t).`);
+  }
+
   suggestions.push(`TOTAL NECESSÁRIO: ${totalTrucksNeeded.toFixed(2)} caminhões`);
 
-  // Planned Production (t/h)
-  // Corrected logic: Consumo Planta (t/mês) / Horas Efetivas (Mina)
-  const plannedHourlyROM = effectiveHoursPerMonthMina > 0 ? premises.targetMonthlyROM / effectiveHoursPerMonthMina : 0;
-  
-  // Plant and Tailings hourly rates should depend on Plant effective hours
-  const plannedHourlyPlanta = effectiveHoursPerMonthPlanta > 0 ? (premises.targetMonthlyROM * (rmGlobal / 100)) / effectiveHoursPerMonthPlanta : 0;
-  const plannedHourlyRejeito = effectiveHoursPerMonthPlanta > 0 ? (premises.targetMonthlyROM * (rejeitoTotal / 100)) / effectiveHoursPerMonthPlanta : 0;
-  
-  const plannedHourlyTotalFrota = plannedHourlyROM + plannedHourlyPlanta + plannedHourlyRejeito;
+  // ─────────────────────────────────────────────────────────────────────
+  //  PLANNED PRODUCTION (Baseline from Premises – what you WANT to do)
+  //  The anchor: targetMonthlyROM = Consumo Planta (t/mês)
+  //  = ROM that the mine must deliver to the plant
+  //  Produto = ROM × rmGlobal%   (plant output goal)
+  //  Rejeito = ROM × rejeitoTotal%  (tailings fleet goal)
+  // ─────────────────────────────────────────────────────────────────────
 
-  // Planned Production (t/dia)
-  const plannedDailyROM = plannedHourlyROM * jornadaEfetivaMina;
-  const plannedDailyPlanta = plannedHourlyPlanta * jornadaEfetivaPlanta;
+  // Monthly plan (directly from premises)
+  const plannedMonthlyROM    = premises.targetMonthlyROM;                                      // Mina entrega → Planta
+  const plannedMonthlyPlanta = plannedMonthlyROM * (rmGlobal / 100);                           // Produto processado
+  const plannedMonthlyRejeito= plannedMonthlyROM * (rejeitoTotal / 100);                       // Rejeito gerado
+  const plannedMonthlyWaste  = (premises.hasWasteRock ? premises.targetMonthlyWasteRock : 0);
+
+  // Hourly plan (÷ effective hours)
+  const plannedHourlyROM     = effectiveHoursPerMonthMina   > 0 ? plannedMonthlyROM    / effectiveHoursPerMonthMina   : 0;
+  const plannedHourlyPlanta  = effectiveHoursPerMonthPlanta > 0 ? plannedMonthlyPlanta / effectiveHoursPerMonthPlanta : 0;
+  const plannedHourlyRejeito = effectiveHoursPerMonthPlanta > 0 ? plannedMonthlyRejeito/ effectiveHoursPerMonthPlanta : 0;
+  const plannedHourlyWaste   = (premises.hasWasteRock && effectiveHoursPerMonthMina > 0) ? plannedMonthlyWaste / effectiveHoursPerMonthMina : 0;
+  const plannedHourlyTotalFrota = plannedHourlyROM + plannedHourlyPlanta + plannedHourlyRejeito + plannedHourlyWaste;
+
+  // Daily plan (× effective hours/day)
+  const plannedDailyROM     = plannedHourlyROM     * jornadaEfetivaMina;
+  const plannedDailyPlanta  = plannedHourlyPlanta  * jornadaEfetivaPlanta;
   const plannedDailyRejeito = plannedHourlyRejeito * jornadaEfetivaPlanta;
-  const plannedDailyTotal = plannedDailyROM + plannedDailyPlanta + plannedDailyRejeito;
+  const plannedDailyWaste   = plannedHourlyWaste   * jornadaEfetivaMina;
+  const plannedDailyTotal   = plannedDailyROM + plannedDailyPlanta + plannedDailyRejeito + plannedDailyWaste;
 
-  // Planned Production (t/mês)
-  const plannedMonthlyROM = plannedHourlyROM * effectiveHoursPerMonthMina;
-  const plannedMonthlyPlanta = plannedHourlyPlanta * effectiveHoursPerMonthPlanta;
-  const plannedMonthlyRejeito = plannedHourlyRejeito * effectiveHoursPerMonthPlanta;
+  // ─────────────────────────────────────────────────────────────────────
+  //  SIMULATED / ACTUAL FLEET PRODUCTION
+  //  = What the fleet IS delivering right now (based on routes/trucks)
+  //  ROM = fleet output (may be > or < target → stockpile or deficit)
+  //  Planta = min(fleetROM, plantCapacity)   (plant can only absorb so much)
+  //  Rejeito = what went THROUGH the plant × rejeitoTotal%
+  // ─────────────────────────────────────────────────────────────────────
 
-  // Simulated / Actual Capacity-Limited Production
-  // This respects both the fleet's ability to move and the plant's ability to process
-  const simulatedHourlyROM = Math.min(totalHourlyROM, plantCapacityTPH);
-  const simulatedDailyROM = simulatedHourlyROM * jornadaEfetivaMina;
-  const simulatedMonthlyROM = simulatedHourlyROM * effectiveHoursPerMonthMina;
+  const simulatedHourlyROM    = totalHourlyROM_Only;                                               // Raw fleet ROM delivery
+  const simulatedDailyROM     = simulatedHourlyROM    * jornadaEfetivaMina;
+  const simulatedMonthlyROM   = simulatedHourlyROM    * effectiveHoursPerMonthMina;
 
-  const simulatedHourlyPlanta = Math.min(plannedHourlyPlanta, plantCapacityTPH);
-  const simulatedDailyPlanta = simulatedHourlyPlanta * jornadaEfetivaPlanta;
-  const simulatedMonthlyPlanta = simulatedHourlyPlanta * effectiveHoursPerMonthPlanta;
+  // Plant processes only up to its physical limit (plantCapacityTPH)
+  const simulatedHourlyPlanta = Math.min(simulatedHourlyROM, plantCapacityTPH);
+  const simulatedDailyPlanta  = simulatedHourlyPlanta * jornadaEfetivaPlanta;
+  const simulatedMonthlyPlanta= simulatedHourlyPlanta * effectiveHoursPerMonthPlanta;
 
-  const simulatedHourlyRejeito = simulatedHourlyPlanta * (rejeitoTotal / rmGlobal || 0);
-  const simulatedDailyRejeito = simulatedHourlyRejeito * jornadaEfetivaPlanta;
-  const simulatedMonthlyRejeito = simulatedHourlyRejeito * effectiveHoursPerMonthPlanta;
+  // Rejeito is derived from what ACTUALLY went through the plant
+  const simulatedHourlyRejeito = simulatedHourlyPlanta * (rejeitoTotal / 100);
+  const simulatedDailyRejeito  = simulatedHourlyRejeito * jornadaEfetivaPlanta;
+  const simulatedMonthlyRejeito= simulatedHourlyRejeito * effectiveHoursPerMonthPlanta;
 
-  const simulatedDailyTotal = simulatedDailyROM + simulatedDailyPlanta + simulatedDailyRejeito;
+  // Waste rock (estéril) – limited only by the waste fleet
+  const simulatedHourlyWaste   = totalHourlyWaste;
+  const simulatedDailyWaste    = simulatedHourlyWaste * jornadaEfetivaMina;
+  const simulatedMonthlyWaste  = simulatedHourlyWaste * effectiveHoursPerMonthMina;
 
-  const totalDailyROM = simulatedDailyROM; // For header display as requested
+  // Movimentação Total diária - FLEET (simulated, includes waste)
+  const simulatedDailyTotal = simulatedDailyROM + simulatedDailyPlanta + simulatedDailyRejeito + simulatedDailyWaste;
+  const totalDailyROM = simulatedDailyROM;
+
+  // Movimentação Total diária - PLANEJADA (target-based)
+  // = ROM_target_dia × (1 + rmGlobal% + rejeitoTotal%)
+  // This is the total planned fleet work: mine→plant + plant→terminal + plant→baia
+  const romTargetPerCalendarDay = premises.calendarDays > 0 ? premises.targetMonthlyROM / premises.calendarDays : 0;
+  const movimentacaoTotalDiaria = romTargetPerCalendarDay * (1 + rmGlobal / 100 + rejeitoTotal / 100);
   
   // New Simulation Results (Possible vs Necessary)
-  const totalWetMassNecessary = routeResults.reduce((acc, curr) => acc + curr.wetMass, 0);
+  const totalWetMassNecessary = romResults.reduce((acc, curr) => acc + curr.wetMass, 0); // Target Feed Mass (ROM)
+  const totalAllMovementWetMassNecessary = routeResults.reduce((acc, curr) => acc + curr.wetMass, 0); // Total Transport Work (ROM+Product+Tailings)
   
   // Possible Movement (Weighted Average)
   // ∑ (Massa – Base Úmida (t) × Frota – Produção Horária (t/h)) / ∑ (Massa – Base Úmida (t))
@@ -457,10 +533,11 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     const actualRejeito = dayLogs.reduce((acc, curr) => acc + (curr.actualRejeito || 0), 0);
     const hasLog = dayLogs.length > 0;
 
-    // Original Plan (Constant)
-    const plannedMina = originalDailyMina;
-    const plannedPlanta = originalDailyPlanta;
-    const plannedRejeito = originalDailyRejeito;
+    // Planned Production (Actual/Realistic Plan based on simulation)
+    // Planned Production (Baseline Meta from Premises)
+    const plannedMina = plannedDailyROM;
+    const plannedPlanta = plannedDailyPlanta;
+    const plannedRejeito = plannedDailyRejeito;
 
     // Re-planned / Required (Dynamic for future days)
     let requiredMina = 0;
@@ -526,10 +603,13 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     plannedDailyROM,
     plannedDailyPlanta,
     plannedDailyRejeito,
+    plannedDailyWaste,
     plannedDailyTotal,
     plannedMonthlyROM,
     plannedMonthlyPlanta,
     plannedMonthlyRejeito,
+    plannedMonthlyWaste,
+    plannedMonthlyTotal: plannedMonthlyROM + plannedMonthlyPlanta + plannedMonthlyRejeito + plannedMonthlyWaste,
     simulatedHourlyROM,
     simulatedDailyROM,
     simulatedMonthlyROM,
@@ -539,11 +619,16 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     simulatedHourlyRejeito,
     simulatedDailyRejeito,
     simulatedMonthlyRejeito,
+    simulatedHourlyWaste,
+    simulatedDailyWaste,
+    simulatedMonthlyWaste,
     simulatedDailyTotal,
     totalActualProduction,
     remainingTarget,
     requiredDailyProduction,
     requiredHourlyProduction,
+    operationalSlack: Math.max(0, plantCapacityTPH - totalHourlyROM_Only),
+    fleetSlack: Math.max(0, totalTrucksAvailable - totalTrucksNeeded),
     isTargetAtRisk: requiredDailyProduction > actualDailyROM,
     isTargetUnreachable,
     productionLoss,
@@ -559,6 +644,8 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     totalFleetCapacityTPH: maxTotalFleetCapacityTPH,
     isFleetOverloaded,
     fleetUtilization,
+    totalTrucksNeeded,
+    totalTrucksAvailable,
     suggestions,
     routeResults,
     totalCalendarDaysNeeded,
@@ -589,7 +676,12 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     simulationResults,
     loggedDates: Array.from(loggedDates),
     dailyBreakdown,
-    diagnostic: generateDiagnostic(totalHourlyROM, plantCapacityTPH, totalTrucksNeeded, totalTrucksAvailable, effectiveHoursPerMonthMina, premises.targetMonthlyROM)
+    diagnostic: generateDiagnostic(totalHourlyROM_Only, plantCapacityTPH, totalTrucksNeeded, totalTrucksAvailable, effectiveHoursPerMonthMina, premises.targetMonthlyROM),
+    totalHourlyAllMovement,
+    totalPossibleMonthlyAllMovement,
+    totalAllMovementWetMassNecessary,
+    totalGrossHourlyMinaCapacity,
+    movimentacaoTotalDiaria
   };
 }
 
@@ -658,11 +750,11 @@ function generateDiagnostic(
     recommendations.push('Aumentar a frota disponível ou melhorar a produtividade unitária dos equipamentos.');
   } else if (rawFleetUtil < 0.85) {
     status = 'idle_fleet';
-    label = 'Frota Ociosa';
+    label = 'Capacidade de Transporte Sobrando';
     color = 'blue';
-    description = 'Capacidade de transporte superior à demanda da mina.';
+    description = 'Sua frota física é maior do que o necessário para a meta atual.';
     impacts.push(`Ociosidade de ${(100 - fleetUtilization).toFixed(1)}% na frota física.`);
-    recommendations.push('Reduzir frota alocada ou aumentar frentes de lavra para aproveitar o excedente de transporte.');
+    recommendations.push('Você tem caminhões sobrando que poderiam ser usados para aumentar a meta ou cobrir manutenções.');
   }
 
   if (isInviable && status !== 'plant_bottleneck') {

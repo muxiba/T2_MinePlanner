@@ -200,25 +200,31 @@ const ProductionLogging: React.FC<ProductionLoggingProps> = ({ routes, logs, set
           </div>
           <div className="flex flex-wrap items-center justify-end gap-6">
             <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest opacity-60">Máximo Possível (ROM)</span>
+              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest opacity-60">Meta ROM - Mina (t/mês)</span>
               <span className="text-4xl font-black font-mono text-emerald-600 tracking-tighter">
-                {results.totalPossibleMonthlyMovement.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t
+                {results.plannedMonthlyROM.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t
               </span>
             </div>
             <div className="flex flex-col items-end border-l border-black/5 pl-6">
-              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest opacity-60">Planta (Simulação)</span>
+              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest opacity-60">Meta Planta - Produto (t/mês)</span>
               <span className="text-4xl font-black font-mono text-blue-600 tracking-tighter">
                 {results.plannedMonthlyPlanta.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t
               </span>
             </div>
             {premises.processType === 'umido' && (
               <div className="flex flex-col items-end border-l border-black/5 pl-6">
-                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest opacity-60">Rejeito (Simulação)</span>
+                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest opacity-60">Meta Rejeito (t/mês)</span>
                 <span className="text-4xl font-black font-mono text-amber-600 tracking-tighter">
                   {results.plannedMonthlyRejeito.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t
                 </span>
               </div>
             )}
+            <div className="flex flex-col items-end border-l border-black/5 pl-6">
+              <span className="text-[10px] font-bold text-[#1A1A1A] uppercase tracking-widest opacity-60">Movimentação Total (t/dia)</span>
+              <span className="text-4xl font-black font-mono text-[#1A1A1A] tracking-tighter">
+                {results.movimentacaoTotalDiaria.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} t
+              </span>
+            </div>
             <div className="flex flex-col gap-2 ml-4">
               <button
                 onClick={exportToCSV}

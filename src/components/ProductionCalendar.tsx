@@ -73,7 +73,7 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
               
               const isToday = isSameDay(day, today);
               
-              // Base planned values
+              // Base planned values come from the TARGET (Consumo Planta meta), not from fleet simulation
               const plannedMina = results.plannedDailyROM;
               const plannedPlanta = results.plannedDailyPlanta;
               const plannedRejeito = results.plannedDailyRejeito;
@@ -297,8 +297,8 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
               <AlertCircle size={20} />
             </div>
             <div>
-              <p className="font-bold text-red-400">ALERTA DE PROCESSO: Taxa Horária Excedida</p>
-              <p className="text-sm text-white/60">A produção planejada ({results.totalHourlyROM.toFixed(1)} t/h) ultrapassa a capacidade da planta ({premises.plantFeedRateTPH} t/h). Ajuste as rotas ou premissas.</p>
+              <p className="font-bold text-red-400">ALERTA DE PROCESSO: Capacidade da Planta Excedida</p>
+              <p className="text-sm text-white/60">A produção total das rotas ({results.totalHourlyROM.toFixed(1)} t/h) ultrapassa o limite da planta ({premises.plantFeedRateTPH} t/h). O sistema limitou o planejamento automático à capacidade física.</p>
             </div>
           </div>
         )}
@@ -330,11 +330,11 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
             <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
               <span className="text-xs font-bold text-white/40 uppercase tracking-widest block mb-2">Utilização Total Frota</span>
               <div className="flex justify-between items-end">
-                <span className={`text-2xl font-mono font-bold ${results.isFleetOverloaded ? 'text-red-400' : 'text-orange-400'}`}>
+                <span className={`text-2xl font-mono font-bold ${results.isFleetOverloaded ? 'text-red-400' : 'text-emerald-400'}`}>
                   {results.fleetUtilization.toFixed(1)}%
                 </span>
                 <span className="text-[10px] text-white/40">
-                  Demanda: {((results.totalHourlyROM || 0) * (1 + (premises.rmGlobal/100) + (premises.processType === 'umido' ? (premises.rejeitoTotal/100) : 0))).toFixed(1)} t/h
+                  {results.isFleetOverloaded ? 'Sobrecarga detectada' : 'Frota Otimizada'}
                 </span>
               </div>
             </div>

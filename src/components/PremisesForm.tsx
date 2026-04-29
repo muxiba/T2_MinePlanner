@@ -150,6 +150,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       ["Perda Material (%)", premises.perdaMaterial],
       ["Número de Caminhões", premises.truckCount],
       ["Capacidade Caminhão (t)", premises.truckCapacity],
+      ["Meta Estéril (t/mês)", premises.targetMonthlyWasteRock],
+      ["Carregamento (min)", premises.loadingTime],
+      ["Basculamento (min)", premises.dumpingTime],
+      ["Pesagem Carregado (min)", premises.weighingTimeLoaded],
+      ["Pesagem Vazio (min)", premises.weighingTimeEmpty],
       ["", ""],
       ["Calendário Mina", ""],
       ["Data", "Horas", "Parada"],
@@ -232,6 +237,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Rejeito Total (%)", key: "rejeitoTotal", disabled: premises.processType === 'seco' },
         { label: "Umidade Natural (%)", key: "umidadeNatural" },
         { label: "Perda Material (%)", key: "perdaMaterial" },
+        { label: "Possui Estéril?", key: "hasWasteRock", type: "select", options: [{ label: "Sim", value: true }, { label: "Não", value: false }] },
+        { label: "Meta Estéril (t/mês)", key: "targetMonthlyWasteRock", disabled: !premises.hasWasteRock },
       ]
     },
     {
@@ -244,6 +251,15 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Frota Baia (t/h)", key: "fleetCapacityBaiaTPH", readOnly: true },
         { label: "Frota Terminal (t/h)", key: "fleetCapacityTerminalTPH", readOnly: true },
         { label: "Capacidade Total Frota (t/h)", key: "maxTotalFleetCapacityTPH", readOnly: true },
+      ]
+    },
+    {
+      title: "Tempos de Ciclo (min)",
+      fields: [
+        { label: "Carregamento (min)", key: "loadingTime" },
+        { label: "Basculamento/Manobra (min)", key: "dumpingTime" },
+        { label: "Pesagem Carregado (min)", key: "weighingTimeLoaded" },
+        { label: "Pesagem Vazio (min)", key: "weighingTimeEmpty" },
       ]
     }
   ];
@@ -326,8 +342,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
 
           <div className="space-y-4">
             <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Produção Diária (t/dia)</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Mina (ROM)</span>
+            <div className="flex justify-between items-center py-2 border-b border-white/5 text-emerald-400">
+              <span className="text-xs font-bold">Mina (ROM)</span>
               <span className="font-mono font-bold">{results.plannedDailyROM.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-white/5">

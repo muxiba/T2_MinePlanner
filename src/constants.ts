@@ -47,6 +47,10 @@ export const DEFAULT_PREMISES: DetailedPremises = {
   perdaMaterial: 1,
   velocidadeVazio: 12,
   velocidadeCheio: 10,
+  loadingTime: 4.5,
+  dumpingTime: 1.5,
+  weighingTimeLoaded: 1.0,
+  weighingTimeEmpty: 0.5,
   plantFeedRateTPH: 310,
   
   // Frota Geral
@@ -58,12 +62,14 @@ export const DEFAULT_PREMISES: DetailedPremises = {
   fleetCapacityTerminalTPH: 310,
   maxTotalFleetCapacityTPH: 930,
   extraAllocations: [],
+  hasWasteRock: false,
+  targetMonthlyWasteRock: 0,
 };
 
 export const INITIAL_ROUTES: Route[] = [
   {
     id: "mina-pilha-2a",
-    name: "MINA - PILHA 2A -> PLANTA",
+    name: "Mina -> Planta",
     active: true,
     truckCount: 8,
     truckCapacity: 40,
@@ -75,7 +81,7 @@ export const INITIAL_ROUTES: Route[] = [
   },
   {
     id: "planta-baia-pru",
-    name: "PLANTA -> BAIA - PRU",
+    name: "Planta -> Baia",
     active: true,
     truckCount: 4,
     truckCapacity: 40,
@@ -87,7 +93,7 @@ export const INITIAL_ROUTES: Route[] = [
   },
   {
     id: "planta-terminal",
-    name: "PLANTA -> TERMINAL",
+    name: "Planta -> Terminal",
     active: true,
     truckCount: 4,
     truckCapacity: 40,

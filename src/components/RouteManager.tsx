@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Trash2, Edit2, Check, Truck, MapPin, Clock, Activity, AlertTriangle, RefreshCw, Download } from 'lucide-react';
+import { Plus, PlusCircle, Trash2, Edit2, Check, Truck, MapPin, Clock, Activity, AlertTriangle, RefreshCw, Download } from 'lucide-react';
 import { Route, DetailedPremises } from '../types';
 import ExtraFleetManager from './ExtraFleetManager';
 
@@ -13,6 +13,28 @@ interface RouteManagerProps {
 
 const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results, premises, setPremises }) => {
   const [editingId, setEditingId] = React.useState<string | null>(null);
+
+  const categorizeRoute = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes('baia') || n.includes('rejeito')) return 'rejeito';
+    if (n.includes('terminal') || n.includes('produto')) return 'produto';
+    if (n.includes('estéril') || n.includes('esteril')) return 'esteril';
+    return 'rom';
+  };
+
+  const calculateCycle = (distance: number) => {
+    const speedLoadedMmin = (premises.velocidadeCheio * 1000) / 60;
+    const speedEmptyMmin = (premises.velocidadeVazio * 1000) / 60;
+    const tLoaded = distance / speedLoadedMmin;
+    const tEmpty = distance / speedEmptyMmin;
+    const total = premises.loadingTime + tLoaded + premises.weighingTimeLoaded + premises.dumpingTime + tEmpty + premises.weighingTimeEmpty;
+    return total || 0;
+  };
+
+  const getDerivedMass = (route: Route) => {
+    const routeResult = results.routeResults?.find((r: any) => r.id === route.id);
+    return routeResult?.targetMass || 0;
+  };
 
   const handleSyncAll = () => {
     const updatedRoutes = routes.map(route => {
@@ -83,9 +105,23 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
   };
 
   const handleAddRoute = () => {
+    const name = prompt("Nome da Nova Frente/Rota:", `Frente ${routes.length + 1}`);
+    if (name === null) return; // Cancelled
+
+    const category = categorizeRoute(name || "");
+    let initialMass = 0;
+    
+    if (category === 'rom') {
+      const currentRomSum = routes.filter(r => r.active && categorizeRoute(r.name) === 'rom').reduce((acc, r) => acc + (r.targetMass || 0), 0);
+      initialMass = Math.max(0, premises.targetMonthlyROM - currentRomSum);
+    } else if (category === 'esteril') {
+      const currentWasteSum = routes.filter(r => r.active && categorizeRoute(r.name) === 'esteril').reduce((acc, r) => acc + (r.targetMass || 0), 0);
+      initialMass = Math.max(0, premises.targetMonthlyWasteRock - currentWasteSum);
+    }
+
     const newRoute: Route = {
       id: Math.random().toString(36).substr(2, 9),
-      name: `Nova Rota ${routes.length + 1}`,
+      name: name || `Nova Rota ${routes.length + 1}`,
       active: true,
       truckCount: 1,
       truckCapacity: premises.truckCapacity,
@@ -94,9 +130,39 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
       mechanicalAvailability: 85,
       operationalEfficiency: 72,
       processType: premises.processType,
+      targetMass: initialMass > 0 ? initialMass : undefined,
     };
-    setRoutes([...routes, newRoute]);
+    setRoutes([newRoute, ...routes]);
     setEditingId(newRoute.id);
+  };
+
+  const handleMassChange = (routeId: string, name: string, value: number) => {
+    const category = categorizeRoute(name);
+    let validatedValue = value;
+
+    if (category === 'rom') {
+      const otherRomMass = routes
+        .filter(r => r.id !== routeId && r.active && categorizeRoute(r.name) === 'rom')
+        .reduce((acc, r) => acc + (r.targetMass || 0), 0);
+      
+      const limit = premises.targetMonthlyROM;
+      if (otherRomMass + value > limit) {
+        validatedValue = Math.max(0, limit - otherRomMass);
+        alert(`Atenção: A soma das frentes de ROM não pode ultrapassar o limite de ${limit.toLocaleString()} t.\n\nValor ajustado para o saldo restante: ${validatedValue.toLocaleString()} t.`);
+      }
+    } else if (category === 'esteril') {
+      const otherWasteMass = routes
+        .filter(r => r.id !== routeId && r.active && categorizeRoute(r.name) === 'esteril')
+        .reduce((acc, r) => acc + (r.targetMass || 0), 0);
+      
+      const limit = premises.targetMonthlyWasteRock;
+      if (otherWasteMass + value > limit) {
+        validatedValue = Math.max(0, limit - otherWasteMass);
+        alert(`Atenção: A soma das frentes de Estéril não pode ultrapassar o limite de ${limit.toLocaleString()} t.\n\nValor ajustado para o saldo restante: ${validatedValue.toLocaleString()} t.`);
+      }
+    }
+
+    handleUpdateRoute(routeId, { targetMass: validatedValue });
   };
 
   const handleUpdateRoute = (id: string, updates: Partial<Route>) => {
@@ -110,13 +176,18 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
   const totalTrucksUsed = routes.reduce((acc, curr) => acc + curr.truckCount, 0);
   const extraTrucks = Math.max(0, premises.truckCount - totalTrucksUsed);
 
-  const isRejeitoRoute = (name: string) => {
-    const n = name.toLowerCase();
-    return n.includes('baia') || n.includes('rejeito');
-  };
+  const romRoutes = routes.filter(r => r.active && categorizeRoute(r.name) === 'rom');
+  const wasteRoutes = routes.filter(r => r.active && categorizeRoute(r.name) === 'esteril');
+
+  const romMassSum = romRoutes.reduce((acc, r) => acc + (r.targetMass || 0), 0);
+  const wasteMassSum = wasteRoutes.reduce((acc, r) => acc + (r.targetMass || 0), 0);
+
+  const romOverload = romMassSum > premises.targetMonthlyROM;
+  const wasteOverload = premises.hasWasteRock && wasteMassSum > premises.targetMonthlyWasteRock;
 
   const visibleRoutes = routes.filter(r => {
-    if (premises.processType === 'seco' && isRejeitoRoute(r.name)) return false;
+    if (premises.processType === 'seco' && categorizeRoute(r.name) === 'rejeito') return false;
+    if (!premises.hasWasteRock && categorizeRoute(r.name) === 'esteril') return false;
     return true;
   });
 
@@ -160,10 +231,28 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
             className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-500/20"
           >
             <Plus size={18} />
-            Adicionar Rota
+            Adicionar Frente/Rota
           </button>
         </div>
       </div>
+
+      {(romOverload || wasteOverload || totalTrucksUsed > premises.truckCount) && (
+        <div className="bg-red-50 border-2 border-red-200 rounded-[32px] p-6 flex items-start gap-4 animate-pulse">
+          <div className="p-3 bg-red-100 text-red-600 rounded-2xl">
+            <AlertTriangle size={24} />
+          </div>
+          <div className="space-y-1">
+            <h4 className="text-sm font-black text-red-900 uppercase tracking-widest">Inconsistência no Cenário</h4>
+            <div className="text-xs font-medium text-red-700/80 leading-relaxed">
+              {romOverload && <p>• A soma das massas de ROM ({romMassSum.toLocaleString()} t) excede o Consumo da Planta ({premises.targetMonthlyROM.toLocaleString()} t).</p>}
+              {wasteOverload && <p>• A soma das massas de Estéril ({wasteMassSum.toLocaleString()} t) excede a Meta de Estéril ({premises.targetMonthlyWasteRock.toLocaleString()} t).</p>}
+              {totalTrucksUsed > premises.truckCount && (
+                <p>• FROTA EXCEDIDA: Você está usando {totalTrucksUsed} caminhões, mas possui apenas {premises.truckCount} disponíveis.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6">
         <ExtraFleetManager 
@@ -214,29 +303,32 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
                           className="text-lg font-bold bg-[#F8F9FA] border border-black/5 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                           placeholder="Nome da Rota"
                         />
-                        <div className="flex items-center gap-2">
-                          <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Meta Mensal (t):</label>
+                        <div className="flex flex-col gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                          <label className="text-[10px] font-black text-emerald-700 uppercase tracking-widest flex items-center gap-2">
+                            <PlusCircle size={12} /> Massa Mensal Planejada (t)
+                          </label>
                           <input
                             type="number"
                             value={route.targetMass || ''}
-                            onChange={(e) => handleUpdateRoute(route.id, { targetMass: parseFloat(e.target.value) || undefined })}
-                            className="w-32 bg-[#F8F9FA] border border-black/5 rounded-lg px-2 py-1 text-xs font-mono"
-                            placeholder="Opcional"
+                            onChange={(e) => handleMassChange(route.id, route.name, parseFloat(e.target.value) || 0)}
+                            className="w-full bg-white border border-emerald-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                            placeholder="Informe a massa para esta frente..."
                           />
                         </div>
                       </div>
                     ) : (
                       <div>
                         <h4 className="text-lg font-bold text-black/80">{route.name}</h4>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${route.active ? 'bg-emerald-100 text-emerald-700' : 'bg-black/5 text-black/40'}`}>
                             {route.active ? 'Ativa' : 'Inativa'}
                           </span>
-                          {route.targetMass && (
-                            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                              Meta: {route.targetMass.toLocaleString()} t
-                            </span>
-                          )}
+                          
+                          {/* Display mass in view mode */}
+                          <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                            Massa: {getDerivedMass(route).toLocaleString()} t
+                          </span>
+
                           <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${route.processType === 'seco' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
                             {route.processType === 'seco' ? 'A Seco' : 'A Úmido'}
                           </span>
@@ -326,18 +418,11 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, results,
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest flex items-center gap-1.5">
-                      <Clock size={12} /> Ciclo (min)
+                      <Clock size={12} /> Ciclo Calculado (min)
                     </label>
-                    {editingId === route.id ? (
-                      <input
-                        type="number"
-                        value={route.cycleTime}
-                        onChange={(e) => handleUpdateRoute(route.id, { cycleTime: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-[#F8F9FA] border border-black/5 rounded-xl px-3 py-2 text-sm font-mono"
-                      />
-                    ) : (
-                      <p className="text-lg font-mono font-bold">{route.cycleTime}</p>
-                    )}
+                    <div className="w-full bg-black/5 border border-black/5 rounded-xl px-3 py-2 text-sm font-mono font-bold text-black/60">
+                      {calculateCycle(route.distance).toFixed(2)}
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">

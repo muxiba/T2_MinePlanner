@@ -37,12 +37,40 @@ const App: React.FC = () => {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [productionLogs, setProductionLogs] = useState<Record<string, DailyLog[]>>({});
   const initialPremisesRef = useRef(premises);
+  const isLoadedRef = useRef(false);
 
   // Recalculate results whenever routes, premises, or logs change
   const results = useMemo(() => 
     calculateTotalProduction(routes, premises, productionLogs), 
     [routes, premises, productionLogs]
   );
+
+  // Persistence: Load from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedRoutes = localStorage.getItem('mineplanner_routes');
+      const savedPremises = localStorage.getItem('mineplanner_premises');
+      const savedLogs = localStorage.getItem('mineplanner_logs');
+      
+      if (savedRoutes) setRoutes(JSON.parse(savedRoutes));
+      if (savedPremises) setPremises(JSON.parse(savedPremises));
+      if (savedLogs) setProductionLogs(JSON.parse(savedLogs));
+      
+      isLoadedRef.current = true;
+    } catch (e) {
+      console.error("Erro ao carregar dados salvos:", e);
+      isLoadedRef.current = true;
+    }
+  }, []);
+
+  // Persistence: Save to localStorage on change
+  useEffect(() => {
+    if (!isLoadedRef.current) return;
+    
+    localStorage.setItem('mineplanner_routes', JSON.stringify(routes));
+    localStorage.setItem('mineplanner_premises', JSON.stringify(premises));
+    localStorage.setItem('mineplanner_logs', JSON.stringify(productionLogs));
+  }, [routes, premises, productionLogs]);
 
   // Auto-sync suggested trucks when results change or on mount
   // This ensures the fleet is always optimized to meet the target
@@ -71,17 +99,12 @@ const App: React.FC = () => {
     }
   }, [results.routeResults, routes]);
 
-  // Reset simulation data whenever premises change in the premises tab
-  // This ensures that fleet sizing and results are consistent with new premises
+  // Monitor premises changes but don't force reset routes automatically
+  // The user should control their own routes
   const prevPremisesRef = useRef(premises);
   useEffect(() => {
-    if (activeTab === "premises" && prevPremisesRef.current !== premises) {
-      setProductionLogs({});
-      // Reset routes to initial state but keep current truck capacity
-      setRoutes(INITIAL_ROUTES.map(r => ({ ...r, truckCapacity: premises.truckCapacity })));
-    }
     prevPremisesRef.current = premises;
-  }, [premises, activeTab]);
+  }, [premises]);
 
   const resetSimulation = () => {
     setProductionLogs({});
@@ -253,22 +276,22 @@ const App: React.FC = () => {
           
           <div className="flex items-center gap-6">
             <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">ROM (t/dia)</span>
+              <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">ROM - Meta (t/dia)</span>
               <span className="text-xl font-mono font-bold text-emerald-600">
-                {results.simulatedDailyROM.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                {results.plannedDailyROM.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
               </span>
             </div>
             <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Planta (t/dia)</span>
+              <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Planta - Meta (t/dia)</span>
               <span className="text-xl font-mono font-bold text-blue-600">
-                {results.simulatedDailyPlanta.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                {results.plannedDailyPlanta.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
               </span>
             </div>
             {premises.processType === 'umido' && (
               <div className="flex flex-col items-end">
-                <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Rejeito (t/dia)</span>
+                <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Rejeito - Meta (t/dia)</span>
                 <span className="text-xl font-mono font-bold text-amber-600">
-                  {results.simulatedDailyRejeito.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                  {results.plannedDailyRejeito.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                 </span>
               </div>
             )}
@@ -276,7 +299,7 @@ const App: React.FC = () => {
             <div className="flex flex-col items-end">
               <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Movimentação Total (t/dia)</span>
               <span className="text-xl font-mono font-bold text-[#1A1A1A]">
-                {results.simulatedDailyTotal.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                {results.movimentacaoTotalDiaria.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
               </span>
             </div>
           </div>

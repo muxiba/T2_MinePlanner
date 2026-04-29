@@ -57,6 +57,13 @@ export interface DetailedPremises {
   perdaMaterial: number; // 1%
   velocidadeVazio: number; // 12 km/h
   velocidadeCheio: number; // 10 km/h
+  
+  // Tempos de Ciclo (min)
+  loadingTime: number;
+  dumpingTime: number;
+  weighingTimeLoaded: number;
+  weighingTimeEmpty: number;
+
   plantFeedRateTPH: number; // 310 t/h (Max)
   
   // Frota Geral
@@ -71,6 +78,10 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+
+  // Estéril
+  hasWasteRock: boolean;
+  targetMonthlyWasteRock: number;
 }
 
 export interface DailyLog {
@@ -91,6 +102,7 @@ export interface ProductionData {
   monthlyProduction: number;
   tripsPerHour: number;
   tripsPerDay: number;
+  targetMass: number;
   equipmentUtilization: number;
   plantLimited: boolean;
   wetMass: number;
