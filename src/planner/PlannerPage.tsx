@@ -391,6 +391,8 @@ const PlannerPage: React.FC = () => {
                   premises={premises}
                   routes={routes}
                   analysis={analysis}
+                  companyName={current?.company.name}
+                  planName={plan.planName}
                   productionLogs={productionLogs}
                   setLogs={setProductionLogs}
                   onReset={resetSimulation}
