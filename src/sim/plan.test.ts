@@ -14,7 +14,7 @@ import {
   sizePeriod,
   type MinePlan,
 } from './plan';
-import { parseFrontsDxf, parseSolidDxf, periodFromName } from './planParse';
+import { parseFrontsDxf, parseSolidDxf, periodFromName, scanLayers } from './planParse';
 import type { SimModel } from './types';
 
 /** Duas vias em cruz: L–O de 0 a 2000 m (y = 0) e N–S em x = 1000 (y de −500 a 500). */
@@ -147,5 +147,32 @@ describe('plano de lavra', () => {
     expect(solid!.volumeClosedM3).toBeCloseTo(1000, 3);
     expect(solid!.volumeGridM3).toBeCloseTo(1000, -1);
     expect(solid!.openEdges).toBe(0);
+  });
+
+  it('importação flexível: camada escolhida, uma camada por período e pontos de carga', async () => {
+    const dxf = (body: string[]) => ['0', 'SECTION', '2', 'ENTITIES', ...body, '0', 'ENDSEC', '0', 'EOF'].join('\n');
+    const poly = (layer: string, pts: number[][], closed = true) => [
+      '0', 'POLYLINE', '8', layer, '70', closed ? '9' : '8',
+      ...pts.flatMap(([x, y, z]) => ['0', 'VERTEX', '8', layer, '10', String(x), '20', String(y), '30', String(z)]),
+      '0', 'SEQEND',
+    ];
+    const sq = (x: number, z: number) => [[x, 0, z], [x + 100, 0, z], [x + 100, 100, z], [x, 100, z]];
+    const text = dxf([
+      ...poly('LAVRA_2027', sq(0, 900)),
+      ...poly('LAVRA_2028', sq(500, 880)),
+      '0', 'POINT', '8', 'CARGA_X', '10', '50', '20', '60', '30', '850',
+    ]);
+    const layers = await scanLayers(text);
+    expect(layers.map((l) => l.layer).join(',')).toBe('CARGA_X,LAVRA_2027,LAVRA_2028');
+    const a = await parseFrontsDxf(text, undefined, { areaLayers: ['LAVRA_2028'], floorLayers: [] });
+    expect(a.length).toBe(1);
+    expect(a[0].lx).toBeGreaterThan(500);
+    expect(a[0].z).toBeCloseTo(880, 5);
+    const pts = await parseFrontsDxf(text, undefined, { areaLayers: ['CARGA_X'], floorLayers: [] });
+    expect(pts.length).toBe(1);
+    expect(pts[0].lx).toBe(50);
+    expect(pts[0].z).toBe(850);
+    // automático sem camada Boundary: pega as duas polilinhas fechadas
+    expect((await parseFrontsDxf(text)).length).toBe(2);
   });
 });

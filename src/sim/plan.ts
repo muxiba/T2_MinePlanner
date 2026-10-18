@@ -18,7 +18,7 @@ export type PlaceKind = 'frente' | 'usina' | 'pilha' | 'terminal' | 'rejeito' | 
 
 export const PLACE_KINDS: { id: PlaceKind; label: string }[] = [
   { id: 'frente', label: 'Frente de lavra (muda por período)' },
-  { id: 'rejeito', label: 'Disposição de rejeito (sólido do período)' },
+  { id: 'rejeito', label: 'Destino com sólido do período (rejeito, estéril, PDE…)' },
   { id: 'usina', label: 'Usina / planta' },
   { id: 'pilha', label: 'Pilha / pátio' },
   { id: 'terminal', label: 'Terminal' },
@@ -124,22 +124,17 @@ export interface MinePlan {
 /* Padrões                                                                    */
 /* ------------------------------------------------------------------------- */
 
-/** Calendário da apresentação Pires (Rev. 14): 4 meses chuvosos e 8 secos, 264 dias trabalháveis. */
+/** Calendário padrão: 12 meses, 26 dias trabalháveis por mês (312 por ano). Editável. */
 export function defaultCalendar(): MonthCal[] {
-  return [
-    { month: 'Mês 1', days: 31, workDays: 11, season: 'chuvoso' },
-    { month: 'Mês 2', days: 31, workDays: 11, season: 'chuvoso' },
-    { month: 'Mês 3', days: 30, workDays: 12, season: 'chuvoso' },
-    { month: 'Mês 4', days: 30, workDays: 12, season: 'chuvoso' },
-    { month: 'Mês 5', days: 31, workDays: 28, season: 'seco' },
-    { month: 'Mês 6', days: 31, workDays: 28, season: 'seco' },
-    { month: 'Mês 7', days: 31, workDays: 28, season: 'seco' },
-    { month: 'Mês 8', days: 30, workDays: 27, season: 'seco' },
-    { month: 'Mês 9', days: 30, workDays: 27, season: 'seco' },
-    { month: 'Mês 10', days: 30, workDays: 27, season: 'seco' },
-    { month: 'Mês 11', days: 30, workDays: 27, season: 'seco' },
-    { month: 'Mês 12', days: 30, workDays: 27, season: 'seco' },
-  ];
+  const days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return days.map((d, i) => ({ month: `Mês ${i + 1}`, days: d, workDays: Math.min(26, d), season: 'seco' as const }));
+}
+
+/** Exemplo com estação chuvosa: 4 meses com ~11 dias e 8 secos com 27–28 (264 dias). */
+export function rainySeasonCalendar(): MonthCal[] {
+  const wd = [11, 11, 12, 12, 28, 28, 28, 27, 27, 27, 27, 27];
+  const days = [31, 31, 30, 30, 31, 31, 31, 30, 30, 30, 30, 30];
+  return wd.map((w, i) => ({ month: `Mês ${i + 1}`, days: days[i], workDays: w, season: i < 4 ? ('chuvoso' as const) : ('seco' as const) }));
 }
 
 export const calendarWorkDays = (c: MonthCal[]) => c.reduce((a, m) => a + (m.workDays || 0), 0);
@@ -147,7 +142,7 @@ export const calendarWorkDays = (c: MonthCal[]) => c.reduce((a, m) => a + (m.wor
 export function emptyPlan(): MinePlan {
   const calendar = defaultCalendar();
   return {
-    periods: Array.from({ length: 16 }, (_, i) => ({ label: `Ano ${i + 1}`, workDays: calendarWorkDays(calendar) })),
+    periods: Array.from({ length: 5 }, (_, i) => ({ label: `Ano ${i + 1}`, workDays: calendarWorkDays(calendar) })),
     calendar,
     hoursPerDay: 20,
     peakFactor: 1,
@@ -505,7 +500,7 @@ export function resolvePlace(plan: MinePlan, placeId: string, period: number): R
     const areas = plan.fronts.filter((f) => f.period === period && f.front === pl.name);
     if (areas.length) {
       const a = areas.reduce((x, y) => (y.areaM2 > x.areaM2 ? y : x));
-      return { p: { x: a.lx, y: a.ly, z: a.z }, source: 'area', label: `${pl.name} · área ${fmtHa(a.areaM2)}` };
+      return { p: { x: a.lx, y: a.ly, z: a.z || pl.z }, source: 'area', label: a.areaM2 > 10 ? `${pl.name} · área ${fmtHa(a.areaM2)}` : `${pl.name} · ponto do período` };
     }
   }
   if (pl.kind === 'rejeito') {
@@ -838,7 +833,7 @@ export function movementsFromCsv(plan: MinePlan, text: string): { plan: MinePlan
     const k = n.trim().toLowerCase();
     let p = places.find((x) => x.name.trim().toLowerCase() === k);
     if (!p && n.trim()) {
-      p = { id: `p${places.length + 1}-csv`, name: n.trim(), kind: /frente|mina|bav|p[aá]tio|pilha 2a/i.test(n) ? 'frente' : 'outro', x: 0, y: 0, z: 0 };
+      p = { id: `p${places.length + 1}-csv`, name: n.trim(), kind: /frente|mina|cava|lavra/i.test(n) ? 'frente' : 'outro', x: 0, y: 0, z: 0 };
       places.push(p);
       warnings.push(`"${n.trim()}" não existia na lista de lugares: foi criado sem posição. Ajuste o tipo e as coordenadas.`);
     }

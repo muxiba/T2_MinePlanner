@@ -4,6 +4,8 @@ import { AlertTriangle, Download, FileUp, Layers, MapPin, Play, Plus, Trash2, Up
 import type { SimModel } from '@/sim/types';
 import {
   PLACE_KINDS,
+  defaultCalendar,
+  rainySeasonCalendar,
   assignFronts,
   buildNetwork,
   buildPeriodModel,
@@ -20,7 +22,7 @@ import {
   type PeriodResult,
   type Place,
 } from '@/sim/plan';
-import type { ParsedFrontArea, ParsedSolid } from '@/sim/planParse';
+import type { LayerInfo, ParsedFrontArea, ParsedSolid } from '@/sim/planParse';
 import { periodFromName } from '@/sim/planParse';
 import { runInWorker } from '@/sim/client';
 import type { Contours } from '@/sim/terrain';
@@ -31,6 +33,21 @@ import { Btn, Card, Num, Progress, inputCls, n1, t0 } from './ui';
 const FRONT_COLORS = ['#2a78d6', '#1baf7a', '#e87ba4', '#eda100', '#8a5cd6'];
 const SOLID_COLOR = '#eb6834';
 const CONFIG_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'];
+
+const NONE = '__nenhuma__';
+
+interface ImportSetup {
+  kind: 'fronts' | 'solids';
+  files: File[];
+  layers: (LayerInfo & { files: number })[];
+  /** arquivo = um arquivo por período; camada = um arquivo com uma camada por período */
+  mode: 'arquivo' | 'camada';
+  fileRows: { file: File; period: number }[];
+  layerRows: { layer: string; period: number }[];
+  areaLayer: string;
+  floorLayer: string;
+  solidLayer: string;
+}
 
 const mt = (t: number) => (t / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ha = (m2: number) => (m2 / 1e4).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -69,68 +86,112 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
   const reassign = (p: MinePlan) => ({ ...p, fronts: assignFronts(p) });
 
   /* ------------------------------ importação ------------------------------ */
-  const importFronts = async (files: FileList) => {
+  const [setup, setSetup] = useState<ImportSetup | null>(null);
+
+  /** Primeiro passo: lê as camadas dos arquivos e abre a conferência (períodos e camadas). */
+  const startImport = async (kind: 'fronts' | 'solids', list: FileList) => {
     onError(null);
-    const fronts: FrontArea[] = [...plan.fronts];
-    const msgs: string[] = [];
-    let i = 0;
-    for (const f of Array.from(files)) {
-      const per = periodFromName(f.name);
-      if (!per) {
-        msgs.push(`${f.name}: não achei o número do período no nome (ex.: 05-Linha.dxf ou Ano5.dxf).`);
-        continue;
-      }
-      setBusy({ what: 'frentes', f: i / files.length, stage: f.name });
+    const files = Array.from(list);
+    const dwg = files.filter((f) => /\.dwg$/i.test(f.name));
+    const dxf = files.filter((f) => !/\.dwg$/i.test(f.name));
+    setWarnings(dwg.map((f) => `${f.name}: o navegador não lê DWG. No CAD, use "Salvar como" → DXF.`));
+    if (!dxf.length) return;
+    const merged = new Map<string, LayerInfo & { files: number }>();
+    for (let i = 0; i < dxf.length; i++) {
+      setBusy({ what: 'camadas', f: i / dxf.length, stage: dxf[i].name });
       try {
-        const areas = await runInWorker<ParsedFrontArea[]>({ kind: 'planFronts', file: f }, (x) => setBusy({ what: 'frentes', f: (i + x) / files.length, stage: f.name }));
-        // substitui as áreas do mesmo período
-        for (let k = fronts.length - 1; k >= 0; k--) if (fronts[k].period === per) fronts.splice(k, 1);
-        if (!areas.length) msgs.push(`${f.name}: nenhum contorno de área encontrado (camada Boundary ou polilinha fechada acima de 0,3 ha).`);
-        areas.forEach((a, j) => fronts.push({ id: `f${per}-${j}-${Date.now().toString(36)}`, period: per, front: frontNames[0] ?? '', ring: a.ring, areaM2: a.areaM2, z: a.z, zMin: a.zMin, zMax: a.zMax, lx: a.lx, ly: a.ly, file: f.name }));
+        const ls = await runInWorker<LayerInfo[]>({ kind: 'dxfLayers', file: dxf[i] }, (x) => setBusy({ what: 'camadas', f: (i + x) / dxf.length, stage: dxf[i].name }));
+        for (const l of ls) {
+          const m = merged.get(l.layer);
+          if (m) {
+            m.polylines += l.polylines; m.closed += l.closed; m.points += l.points; m.faces += l.faces; m.files++;
+          } else merged.set(l.layer, { ...l, files: 1 });
+        }
       } catch (e) {
-        msgs.push(`${f.name}: ${e instanceof Error ? e.message : String(e)}`);
+        setWarnings((w) => [...w, `${dxf[i].name}: ${e instanceof Error ? e.message : String(e)}`]);
       }
-      i++;
     }
     setBusy(null);
-    setWarnings(msgs);
-    const maxPer = Math.max(nPer, ...fronts.map((f) => f.period));
-    setPlan(reassign({ ...withPeriods(plan, maxPer), fronts }));
+    const layers = [...merged.values()].filter((l) => (kind === 'solids' ? l.faces > 0 : l.polylines + l.points > 0));
+    if (!layers.length) {
+      setWarnings((w) => [...w, kind === 'solids' ? 'Nenhuma face 3DFACE encontrada nos arquivos.' : 'Nenhuma polilinha ou ponto encontrado nos arquivos.']);
+      return;
+    }
+    const numbered = layers.filter((l) => periodFromName(l.layer) !== null);
+    const mode: ImportSetup['mode'] = dxf.length === 1 && numbered.length >= 2 ? 'camada' : 'arquivo';
+    setSetup({
+      kind,
+      files: dxf,
+      layers,
+      mode,
+      fileRows: dxf.map((f, i) => ({ file: f, period: periodFromName(f.name) ?? i + 1 })),
+      layerRows: layers.map((l) => ({ layer: l.layer, period: periodFromName(l.layer) ?? 0 })),
+      areaLayer: '',
+      floorLayer: '',
+      solidLayer: '',
+    });
   };
 
-  const importSolids = async (files: FileList) => {
-    onError(null);
-    const solids = [...plan.solids];
+  /** Segundo passo: importa com as escolhas do usuário. */
+  const runImport = async (st: ImportSetup) => {
+    setSetup(null);
+    const jobs: { file: File; period: number; layer?: string; label: string }[] =
+      st.mode === 'arquivo'
+        ? st.fileRows.filter((r) => r.period > 0).map((r) => ({ file: r.file, period: r.period, label: r.file.name }))
+        : st.layerRows.filter((r) => r.period > 0).map((r) => ({ file: st.files[0], period: r.period, layer: r.layer, label: r.layer }));
     const msgs: string[] = [];
-    let i = 0;
-    for (const f of Array.from(files)) {
-      const per = periodFromName(f.name);
-      if (!per) {
-        msgs.push(`${f.name}: não achei o número do período no nome (ex.: Ano5_Rejeito.dxf).`);
-        continue;
+    const floorLayers = st.floorLayer === '' ? undefined : st.floorLayer === NONE ? [] : [st.floorLayer];
+    if (st.kind === 'fronts') {
+      const fronts: FrontArea[] = [...plan.fronts];
+      const replaced = new Set<number>();
+      for (let i = 0; i < jobs.length; i++) {
+        const j = jobs[i];
+        setBusy({ what: 'frentes', f: i / jobs.length, stage: j.label });
+        try {
+          const areaLayers = j.layer ? [j.layer] : st.areaLayer ? [st.areaLayer] : undefined;
+          const areas = await runInWorker<ParsedFrontArea[]>({ kind: 'planFronts', file: j.file, opts: { areaLayers, floorLayers } }, (x) => setBusy({ what: 'frentes', f: (i + x) / jobs.length, stage: j.label }));
+          if (!replaced.has(j.period)) {
+            for (let k = fronts.length - 1; k >= 0; k--) if (fronts[k].period === j.period) fronts.splice(k, 1);
+            replaced.add(j.period);
+          }
+          if (!areas.length) msgs.push(`${j.label}: nada encontrado. Escolha a camada do contorno (ou dos pontos de carga).`);
+          areas.forEach((a, n) => fronts.push({ id: `f${j.period}-${n}-${i}-${Date.now().toString(36)}`, period: j.period, front: frontNames[0] ?? '', ring: a.ring, areaM2: a.areaM2, z: a.z, zMin: a.zMin, zMax: a.zMax, lx: a.lx, ly: a.ly, file: j.label }));
+        } catch (e) {
+          msgs.push(`${j.label}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      if (/\.dwg$/i.test(f.name)) {
-        msgs.push(`${f.name}: o navegador não lê DWG. No CAD, use "Salvar como" → DXF.`);
-        continue;
+      setBusy(null);
+      setWarnings(msgs);
+      const maxPer = Math.max(nPer, ...fronts.map((f) => f.period));
+      setPlan(reassign({ ...withPeriods(plan, maxPer), fronts }));
+    } else {
+      const solids = [...plan.solids];
+      const replaced = new Set<number>();
+      for (let i = 0; i < jobs.length; i++) {
+        const j = jobs[i];
+        setBusy({ what: 'sólidos', f: i / jobs.length, stage: j.label });
+        try {
+          const layers = j.layer ? [j.layer] : st.solidLayer ? [st.solidLayer] : undefined;
+          const sd = await runInWorker<ParsedSolid>({ kind: 'planSolid', file: j.file, layers }, (x) => setBusy({ what: 'sólidos', f: (i + x) / jobs.length, stage: j.label }));
+          if (!replaced.has(j.period)) {
+            for (let k = solids.length - 1; k >= 0; k--) if (solids[k].period === j.period) solids.splice(k, 1);
+            replaced.add(j.period);
+          }
+          solids.push({ id: `s${j.period}-${i}-${Date.now().toString(36)}`, period: j.period, name: `Sólido ${plan.periods[j.period - 1]?.label ?? `período ${j.period}`}`, volumeM3: sd.volumeM3, hull: sd.hull, cx: sd.cx, cy: sd.cy, zMin: sd.zMin, zMax: sd.zMax, faces: sd.faces, file: j.label });
+        } catch (e) {
+          msgs.push(`${j.label}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      setBusy({ what: 'sólidos', f: i / files.length, stage: f.name });
-      try {
-        const s = await runInWorker<ParsedSolid>({ kind: 'planSolid', file: f }, (x) => setBusy({ what: 'sólidos', f: (i + x) / files.length, stage: f.name }));
-        for (let k = solids.length - 1; k >= 0; k--) if (solids[k].period === per) solids.splice(k, 1);
-        solids.push({ id: `s${per}-${Date.now().toString(36)}`, period: per, name: `Rejeito ${plan.periods[per - 1]?.label ?? `período ${per}`}`, volumeM3: s.volumeM3, hull: s.hull, cx: s.cx, cy: s.cy, zMin: s.zMin, zMax: s.zMax, faces: s.faces, file: f.name });
-      } catch (e) {
-        msgs.push(`${f.name}: ${e instanceof Error ? e.message : String(e)}`);
+      setBusy(null);
+      setWarnings(msgs);
+      const maxPer = Math.max(nPer, ...solids.map((x) => x.period));
+      let next = { ...withPeriods(plan, maxPer), solids: solids.sort((a, b) => a.period - b.period) };
+      if (!next.places.some((p) => p.kind === 'rejeito') && solids.length) {
+        const s0 = solids[0];
+        next = { ...next, places: [...next.places, { id: `p-rej-${Date.now().toString(36)}`, name: 'Disposição (sólidos)', kind: 'rejeito', x: s0.cx, y: s0.cy, z: (s0.zMin + s0.zMax) / 2 }] };
       }
-      i++;
+      setPlan(next);
     }
-    setBusy(null);
-    setWarnings(msgs);
-    let next = { ...plan, solids: solids.sort((a, b) => a.period - b.period) };
-    if (!next.places.some((p) => p.kind === 'rejeito')) {
-      const s = solids[0];
-      next = { ...next, places: [...next.places, { id: `p-rej-${Date.now().toString(36)}`, name: 'Rejeito nas cavas', kind: 'rejeito', x: s?.cx ?? 0, y: s?.cy ?? 0, z: s ? (s.zMin + s.zMax) / 2 : 0 }] };
-    }
-    setPlan(next);
   };
 
   /* ------------------------------ períodos ------------------------------ */
@@ -279,6 +340,7 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
         )}
       </Card>
 
+      {setup && <ImportPanel setup={setup} setSetup={setSetup} periods={plan.periods.map((p) => p.label)} onRun={(st) => void runImport(st)} />}
       {busy && <Progress value={busy.f} label={`${busy.what === 'frota' ? 'Dimensionando' : 'Lendo'} ${busy.stage ?? ''}`} />}
       {warnings.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -359,10 +421,10 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* --------------------------- frentes --------------------------- */}
-          <Card title="Frentes de lavra por período (DXF)" description="Um arquivo por período, com o número no nome (01-Linha.dxf, 02-Linha.dxf…). Lê a camada Boundary e a cota do Pit_Toe.">
+          <Card title="Frentes de lavra por período (DXF)" description="Um arquivo por período ou um arquivo com uma camada por período. Contornos de área ou simples pontos de carga; você confere período e camadas antes de importar.">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
               <Layers size={16} /> Importar frentes
-              <input type="file" accept=".dxf" multiple className="sr-only" onChange={(e) => e.target.files && void importFronts(e.target.files)} />
+              <input type="file" accept=".dxf" multiple className="sr-only" onChange={(e) => { if (e.target.files) void startImport('fronts', e.target.files); e.target.value = ''; }} />
             </label>
             {plan.fronts.length > 0 && (
               <div className="mt-4 max-h-80 overflow-y-auto">
@@ -413,15 +475,15 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
           </Card>
 
           {/* --------------------------- rejeito --------------------------- */}
-          <Card title="Disposição de rejeito por período (DXF)" description="Sólidos 3DFACE, um por período (Ano5_Rejeito.dxf…). Calcula volume, posição e cotas.">
+          <Card title="Destinos com sólido por período (DXF)" description="Rejeito, estéril, PDE, pilha… Sólidos 3DFACE por período (um arquivo ou uma camada por período). Calcula volume, posição e cotas.">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
               <Upload size={16} /> Importar sólidos
-              <input type="file" accept=".dxf,.dwg" multiple className="sr-only" onChange={(e) => e.target.files && void importSolids(e.target.files)} />
+              <input type="file" accept=".dxf,.dwg" multiple className="sr-only" onChange={(e) => { if (e.target.files) void startImport('solids', e.target.files); e.target.value = ''; }} />
             </label>
             {plan.solids.length > 0 && (
               <>
                 <div className="mt-3 grid grid-cols-2 gap-3">
-                  <Num label="Densidade do rejeito disposto" suffix="t/m³" step={0.01} value={plan.disposalDensity} onChange={(v) => setPlan({ ...plan, disposalDensity: v })} />
+                  <Num label="Densidade no destino" suffix="t/m³" step={0.01} value={plan.disposalDensity} onChange={(v) => setPlan({ ...plan, disposalDensity: v })} />
                 </div>
                 <div className="mt-3 max-h-80 overflow-y-auto">
                   <table className="w-full text-sm">
@@ -466,7 +528,7 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
         </div>
 
         {/* --------------------------- calendário --------------------------- */}
-        <Card title="Calendário e períodos" description="Dias trabalháveis por mês (padrão: calendário da apresentação, com 4 meses chuvosos). A meta diária de cada período = toneladas ÷ dias trabalháveis.">
+        <Card title="Calendário e períodos" description="Dias trabalháveis por mês (clique em seco/chuva para marcar a estação). A meta diária de cada período = toneladas ÷ dias trabalháveis.">
           <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
@@ -524,6 +586,10 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
               <Num label="Rampa máx. dos acessos" suffix="%" step={0.5} value={plan.rampMaxGrade} onChange={(v) => setPlan({ ...plan, rampMaxGrade: Math.max(2, v) })} />
               <Num label="Sinuosidade dos acessos" step={0.05} value={plan.accessTortuosity} onChange={(v) => setPlan({ ...plan, accessTortuosity: Math.max(1, v) })} />
             </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Btn tone="light" onClick={() => { const c = defaultCalendar(); setPlan({ ...plan, calendar: c, periods: plan.periods.map((p) => ({ ...p, workDays: calendarWorkDays(c) })) }); }}>Calendário uniforme (26 dias/mês)</Btn>
+            <Btn tone="light" onClick={() => { const c = rainySeasonCalendar(); setPlan({ ...plan, calendar: c, periods: plan.periods.map((p) => ({ ...p, workDays: calendarWorkDays(c) })) }); }}>Com estação chuvosa (exemplo)</Btn>
           </div>
           <p className="mt-2 text-xs text-black/45">
             Fator de pico 1 = média do período. Para dimensionar pelo mês chuvoso (menos dias, mesma geração de rejeito), use o fator correspondente (ex.: 1,5).
@@ -697,6 +763,116 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
         )}
       </Card>
     </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Conferência da importação: períodos e camadas                              */
+/* -------------------------------------------------------------------------- */
+
+const ImportPanel: React.FC<{ setup: ImportSetup; setSetup: (s: ImportSetup | null) => void; periods: string[]; onRun: (s: ImportSetup) => void }> = ({ setup: st, setSetup, periods, onRun }) => {
+  const set = (patch: Partial<ImportSetup>) => setSetup({ ...st, ...patch });
+  const fronts = st.kind === 'fronts';
+  const layerLabel = (l: ImportSetup['layers'][number]) =>
+    `${l.layer} (${fronts ? `${l.polylines} linhas${l.closed ? `, ${l.closed} fechadas` : ''}${l.points ? `, ${l.points} pontos` : ''}` : `${l.faces} faces`})`;
+  const rows = st.mode === 'arquivo' ? st.fileRows.length : st.layerRows.filter((r) => r.period > 0).length;
+  return (
+    <section className="rounded-2xl border-2 border-emerald-600/40 bg-white p-5" aria-label="Conferir importação">
+      <header className="mb-4">
+        <h3 className="font-semibold">{fronts ? 'Importar frentes' : 'Importar sólidos'}: confira antes</h3>
+        <p className="mt-0.5 text-sm text-black/50">
+          Diga como os períodos estão organizados e quais camadas usar. Os nomes podem ser quaisquer: o número do período é sugerido a partir do nome, e você corrige se precisar.
+        </p>
+      </header>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="space-y-3">
+          <fieldset>
+            <legend className="mb-1 text-xs text-black/55">Organização</legend>
+            <div className="flex flex-wrap gap-2">
+              <label className={clsx('flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm', st.mode === 'arquivo' ? 'border-emerald-600 bg-emerald-50' : 'border-black/10')}>
+                <input type="radio" checked={st.mode === 'arquivo'} onChange={() => set({ mode: 'arquivo' })} /> Um arquivo por período
+              </label>
+              <label className={clsx('flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm', st.mode === 'camada' ? 'border-emerald-600 bg-emerald-50' : 'border-black/10', st.files.length > 1 && 'opacity-50')}>
+                <input type="radio" disabled={st.files.length > 1} checked={st.mode === 'camada'} onChange={() => set({ mode: 'camada' })} /> Um arquivo, uma camada por período
+              </label>
+            </div>
+          </fieldset>
+          {st.mode === 'arquivo' && (
+            <>
+              <label className="block text-xs text-black/55">
+                {fronts ? 'Camada do contorno da área (ou dos pontos de carga)' : 'Camada do sólido'}
+                <select className={clsx(inputCls, 'mt-1')} value={fronts ? st.areaLayer : st.solidLayer} onChange={(e) => set(fronts ? { areaLayer: e.target.value } : { solidLayer: e.target.value })}>
+                  <option value="">Automático{fronts ? ' (Boundary/Limite/Contorno ou polilinhas fechadas)' : ' (todas as faces)'}</option>
+                  {st.layers.map((l) => (
+                    <option key={l.layer} value={l.layer}>{layerLabel(l)}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          {fronts && (
+            <label className="block text-xs text-black/55">
+              Camada com a cota do piso (opcional)
+              <select className={clsx(inputCls, 'mt-1')} value={st.floorLayer} onChange={(e) => set({ floorLayer: e.target.value })}>
+                <option value="">Automático (camadas com “toe”, “pé” ou “piso”)</option>
+                <option value={NONE}>Nenhuma: usar a cota do próprio contorno/ponto</option>
+                {st.layers.filter((l) => l.polylines + l.points > 0).map((l) => (
+                  <option key={l.layer} value={l.layer}>{layerLabel(l)}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <div className="max-h-72 overflow-y-auto rounded-xl border border-black/[0.06]">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white">
+              <tr className="text-left text-xs text-black/45">
+                <th className="px-3 py-1.5 font-medium">{st.mode === 'arquivo' ? 'Arquivo' : 'Camada'}</th>
+                <th className="w-40 px-3 py-1.5 font-medium">Período</th>
+              </tr>
+            </thead>
+            <tbody>
+              {st.mode === 'arquivo'
+                ? st.fileRows.map((r, i) => (
+                    <tr key={i} className="border-t border-black/5">
+                      <td className="px-3 py-1 text-xs">{r.file.name}</td>
+                      <td className="px-3 py-1">
+                        <PeriodSelect value={r.period} periods={periods} onChange={(v) => set({ fileRows: st.fileRows.map((x, j) => (j === i ? { ...x, period: v } : x)) })} />
+                      </td>
+                    </tr>
+                  ))
+                : st.layerRows.map((r, i) => (
+                    <tr key={r.layer} className="border-t border-black/5">
+                      <td className="px-3 py-1 text-xs">{layerLabel(st.layers.find((l) => l.layer === r.layer)!)}</td>
+                      <td className="px-3 py-1">
+                        <PeriodSelect value={r.period} periods={periods} allowNone onChange={(v) => set({ layerRows: st.layerRows.map((x, j) => (j === i ? { ...x, period: v } : x)) })} />
+                      </td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Btn onClick={() => onRun(st)} disabled={!rows}>
+          Importar {rows} {st.mode === 'arquivo' ? (rows === 1 ? 'arquivo' : 'arquivos') : rows === 1 ? 'camada' : 'camadas'}
+        </Btn>
+        <Btn tone="light" onClick={() => setSetup(null)}>Cancelar</Btn>
+        <span className="text-xs text-black/45">Períodos além dos existentes são criados automaticamente. Importar de novo um período substitui o anterior.</span>
+      </div>
+    </section>
+  );
+};
+
+const PeriodSelect: React.FC<{ value: number; periods: string[]; onChange: (v: number) => void; allowNone?: boolean }> = ({ value, periods, onChange, allowNone }) => {
+  const n = Math.max(periods.length, value, 1) + 5;
+  return (
+    <select className={inputCls} value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label="Período">
+      {allowNone && <option value={0}>Não importar</option>}
+      {Array.from({ length: n }, (_, i) => (
+        <option key={i} value={i + 1}>{periods[i] ?? `Período ${i + 1}`}</option>
+      ))}
+    </select>
   );
 };
 
