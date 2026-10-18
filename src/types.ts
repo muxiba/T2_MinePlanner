@@ -145,6 +145,10 @@ export interface DetailedPremises {
    * 'base_umida': úmida = seca ÷ (1 − umidade) × (1 + perda), para umidade medida sobre a massa úmida.
    */
   moistureMode?: 'somada' | 'base_umida';
+  /** Fila por ciclo (min), padrão de todas as rotas (a manobra já está em Basculamento/Manobra). */
+  queueMin?: number;
+  /** Volume coroado da caçamba do caminhão (m³), padrão de todas as rotas. Vazio = não limita pelo volume. */
+  truckVolumeM3?: number;
   /** Catálogo de classes de equipamentos para comparação (editável pela empresa). */
   equipmentCatalog?: EquipmentCatalog;
   /** Modelo do simulador de eventos discretos (aba Simulação). */

@@ -21,15 +21,15 @@ const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, 
 
 const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, analysis }) => {
   const active = routes.filter((r) => r.active && analysis.routes.some((a) => a.id === r.id));
-  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
-    routeId: active[0]?.id ?? '',
-    truckCount: 1,
-    durationHours: 24,
-    description: '',
-  });
   const calMonth = sumCalendarHours(premises, 'mina');
   // caminhões sem rota (sem contar as alocações por horas)
-  const unassigned = Math.max(0, (premises.truckCount || 0) - analysis.fleet.allocated);
+  const unassigned = Math.max(0, Math.floor((premises.truckCount || 0) - analysis.fleet.allocated + 1e-9));
+  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
+    routeId: active[0]?.id ?? '',
+    truckCount: Math.max(1, unassigned),
+    durationHours: calMonth,
+    description: '',
+  });
   const pool = unassigned * calMonth;
   const used = (premises.extraAllocations ?? []).reduce((a, x) => a + x.truckCount * x.durationHours, 0);
   const remaining = Math.max(0, pool - used);
@@ -55,7 +55,7 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
           <div>
             <h4 className="text-lg font-bold text-black/80">Frota extra por horas (folga)</h4>
             <p className="text-xs text-black/45">
-              {unassigned} caminhão(ões) sem rota. Use para reforços temporários; para alocação no mês inteiro, prefira “Alocar a folga onde falta”.
+              {unassigned} caminhão(ões) sem rota. Escolha a frente, quantos caminhões e por quantas horas (o padrão é o mês inteiro). A produção entra na capacidade da rota.
             </p>
           </div>
         </div>
@@ -83,6 +83,9 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
           <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase">
             Horas de calendário
             <input type="number" min={1} max={calMonth} value={form.durationHours} onChange={(e) => setForm({ ...form, durationHours: Math.max(1, Number(e.target.value) || 1) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
+            <span className="flex gap-2 normal-case tracking-normal">
+              <button type="button" className="font-medium text-blue-600 hover:underline" onClick={() => setForm({ ...form, durationHours: calMonth })}>mês inteiro ({Math.round(calMonth)} h)</button>
+            </span>
           </label>
           <div className="flex items-end">
             <button

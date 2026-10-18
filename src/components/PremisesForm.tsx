@@ -255,6 +255,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
         { label: "Número de Caminhões", key: "truckCount" },
+        { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
         { label: "Frota Baia (t/h)", key: "fleetCapacityBaiaTPH", readOnly: true },
         { label: "Frota Terminal (t/h)", key: "fleetCapacityTerminalTPH", readOnly: true },
         { label: "Capacidade Total Frota (t/h)", key: "maxTotalFleetCapacityTPH", readOnly: true },
@@ -267,6 +268,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Basculamento/Manobra (min)", key: "dumpingTime" },
         { label: "Pesagem Carregado (min)", key: "weighingTimeLoaded" },
         { label: "Pesagem Vazio (min)", key: "weighingTimeEmpty" },
+        { label: "Fila por Ciclo (min)", key: "queueMin" },
       ]
     }
   ];
@@ -420,7 +422,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                     <input
                       type="number"
                       disabled={field.disabled}
-                      value={premises[field.key as keyof DetailedPremises] as number}
+                      value={(premises[field.key as keyof DetailedPremises] as number | undefined) ?? 0}
                       onChange={(e) => handleChange(field.key as keyof DetailedPremises, parseFloat(e.target.value) || 0)}
                       className={`w-full border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all ${field.highlight ? 'bg-red-50/50 border-red-100 font-bold text-red-600' : 'bg-[#F8F9FA]'} ${field.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     />
