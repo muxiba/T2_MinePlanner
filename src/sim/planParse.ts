@@ -35,19 +35,63 @@ async function read(src: Blob | string, h: DxfHandlers, onProgress?: (f: number)
   else await parseDxfFile(src, h, onProgress);
 }
 
-export async function parseFrontsDxf(src: Blob | string, onProgress?: (f: number) => void): Promise<ParsedFrontArea[]> {
-  const polys: { pts: Vec3[]; layer: string; closed: boolean }[] = [];
-  const toe: Vec3[] = [];
+export interface LayerInfo {
+  layer: string;
+  polylines: number;
+  closed: number;
+  points: number;
+  faces: number;
+}
+
+/** Resumo das camadas de um DXF (para o usuário escolher qual é contorno, piso ou sólido). */
+export async function scanLayers(src: Blob | string, onProgress?: (f: number) => void): Promise<LayerInfo[]> {
+  const m = new Map<string, LayerInfo>();
+  const get = (l: string) => {
+    let v = m.get(l);
+    if (!v) m.set(l, (v = { layer: l, polylines: 0, closed: 0, points: 0, faces: 0 }));
+    return v;
+  };
   await read(
     src,
     {
       polyline: (pts, layer, closed) => {
-        if (/toe/i.test(layer)) {
-          for (const p of simplify(pts, 2)) toe.push(p);
-          return;
-        }
-        if (/crest|ramp|contour|curva/i.test(layer)) return;
+        const v = get(layer);
+        v.polylines++;
+        if (closed || Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 2) v.closed++;
+      },
+      point: (_p, layer) => get(layer).points++,
+      face: (_a, _b, _c, _d, layer) => get(layer).faces++,
+    },
+    onProgress,
+  );
+  return [...m.values()].sort((a, b) => a.layer.localeCompare(b.layer, 'pt-BR', { numeric: true }));
+}
+
+export interface FrontParseOptions {
+  /** camadas do contorno da área (vazio/indefinido = automático: Boundary/Limite/Contorno ou polilinhas fechadas) */
+  areaLayers?: string[];
+  /** camadas com a cota do piso (indefinido = automático: camadas com "toe"/"pé"; [] = usar a cota do próprio contorno) */
+  floorLayers?: string[];
+}
+
+export async function parseFrontsDxf(src: Blob | string, onProgress?: (f: number) => void, opts: FrontParseOptions = {}): Promise<ParsedFrontArea[]> {
+  const polys: { pts: Vec3[]; layer: string; closed: boolean }[] = [];
+  const pointsIn: { p: Vec3; layer: string }[] = [];
+  const toe: Vec3[] = [];
+  const chosen = opts.areaLayers && opts.areaLayers.length ? new Set(opts.areaLayers) : null;
+  const floorSet = opts.floorLayers ? new Set(opts.floorLayers) : null;
+  const isFloor = (layer: string) => (floorSet ? floorSet.has(layer) : /toe|p[eé]_?da_?cava|piso|floor/i.test(layer));
+  await read(
+    src,
+    {
+      polyline: (pts, layer, closed) => {
+        if (isFloor(layer)) for (const p of simplify(pts, 2)) toe.push(p);
+        if (chosen ? !chosen.has(layer) : isFloor(layer) || /crest|ramp|contour|curva/i.test(layer)) return;
         polys.push({ pts, layer, closed });
+      },
+      point: (p, layer) => {
+        if (isFloor(layer)) toe.push(p);
+        if (chosen?.has(layer)) pointsIn.push({ p, layer });
       },
     },
     onProgress,
@@ -55,29 +99,46 @@ export async function parseFrontsDxf(src: Blob | string, onProgress?: (f: number
   const gap = (pts: Vec3[]) => Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y);
   const isClosed = (p: { pts: Vec3[]; closed: boolean }) => p.closed || gap(p.pts) < 2;
   const asRing = (pts: Vec3[]) => simplify(pts, 1.5).map((p) => [p.x, p.y] as [number, number]);
-  let cands = polys.filter((p) => /boundary|limite|contorno/i.test(p.layer) && p.pts.length >= 2);
-  const boundaryLayer = cands.length > 0;
-  if (boundaryLayer) cands = chain(cands);
+  // camada escolhida ou camada de contorno: trechos abertos são unidos e fechados
+  let cands = chosen ? polys : polys.filter((p) => /boundary|limite|contorno/i.test(p.layer) && p.pts.length >= 2);
+  const lenient = chosen !== null || cands.length > 0;
+  if (lenient) cands = chain(cands);
   else cands = polys.filter((p) => p.pts.length >= 3 && isClosed(p));
+  const zOf = (ring: [number, number][] | null, own: Vec3[]) => {
+    const inside = ring ? toe.filter((p) => pointInRing(p.x, p.y, ring)) : [];
+    const src = inside.length >= 5 ? inside : own;
+    const zs = src.map((p) => p.z).filter((z) => Number.isFinite(z) && z !== 0);
+    return zs.length ? { z: zs.reduce((a, b) => a + b, 0) / zs.length, zMin: Math.min(...zs), zMax: Math.max(...zs) } : { z: 0, zMin: 0, zMax: 0 };
+  };
   const out: ParsedFrontArea[] = [];
+  const small: Vec3[][] = [];
   for (const c of cands) {
-    // na camada de contorno, trechos abertos são fechados automaticamente
-    if (!isClosed(c) && !boundaryLayer) continue;
-    const ring = asRing(c.pts);
-    if (ring.length < 3) continue;
-    const areaM2 = ringArea(ring);
-    if (areaM2 < MIN_AREA) continue;
-    // duplicado (mesma área em duas camadas)?
+    if (!isClosed(c) && !lenient) continue;
+    const ring = c.pts.length >= 3 ? asRing(c.pts) : [];
+    const areaM2 = ring.length >= 3 ? ringArea(ring) : 0;
+    if (areaM2 < MIN_AREA) {
+      if (chosen) small.push(c.pts);
+      continue;
+    }
     if (out.some((o) => Math.abs(o.areaM2 - areaM2) < 1 && Math.hypot(o.ring[0][0] - ring[0][0], o.ring[0][1] - ring[0][1]) < 1)) continue;
-    const inside = toe.filter((p) => pointInRing(p.x, p.y, ring));
-    const zs = (inside.length >= 5 ? inside : c.pts).map((p) => p.z).filter((z) => Number.isFinite(z) && z !== 0);
-    const zMin = zs.length ? Math.min(...zs) : 0;
-    const zMax = zs.length ? Math.max(...zs) : 0;
-    const z = zs.length ? zs.reduce((a, b) => a + b, 0) / zs.length : 0;
     const [lx, ly] = interiorPoint(ring);
-    out.push({ ring: ring.length > 600 ? simplifyRing(ring, 600) : ring, areaM2, z, zMin, zMax, lx, ly, layer: c.layer });
+    out.push({ ring: ring.length > 600 ? simplifyRing(ring, 600) : ring, areaM2, ...zOf(ring, c.pts), lx, ly, layer: c.layer });
+  }
+  // sem áreas na camada escolhida: pontos (ou linhas curtas) viram pontos de carga
+  if (!out.length && chosen) {
+    const pts: { p: Vec3; layer: string }[] = [...pointsIn, ...small.map((l) => ({ p: centroid(l), layer: '' }))];
+    for (const { p, layer } of pts) {
+      const r = 15;
+      const ring: [number, number][] = [[p.x - r, p.y - r], [p.x + r, p.y - r], [p.x + r, p.y + r], [p.x - r, p.y + r]];
+      out.push({ ring, areaM2: 1, ...zOf(null, [p]), lx: p.x, ly: p.y, layer });
+    }
   }
   return out.sort((a, b) => b.areaM2 - a.areaM2);
+}
+
+function centroid(pts: Vec3[]): Vec3 {
+  const n = pts.length || 1;
+  return { x: pts.reduce((a, p) => a + p.x, 0) / n, y: pts.reduce((a, p) => a + p.y, 0) / n, z: pts.reduce((a, p) => a + p.z, 0) / n };
 }
 
 /** Une trechos abertos da mesma camada cujas pontas se tocam (≤ 3 m). */
@@ -134,7 +195,8 @@ export interface ParsedSolid {
   volumeGridM3: number;
 }
 
-export async function parseSolidDxf(src: Blob | string, onProgress?: (f: number) => void): Promise<ParsedSolid | null> {
+export async function parseSolidDxf(src: Blob | string, onProgress?: (f: number) => void, layers?: string[]): Promise<ParsedSolid | null> {
+  const only = layers && layers.length ? new Set(layers) : null;
   let ox = NaN;
   let oy = NaN;
   let vol = 0;
@@ -167,7 +229,8 @@ export async function parseSolidDxf(src: Blob | string, onProgress?: (f: number)
   await read(
     src,
     {
-      face: (a, b, c, d) => {
+      face: (a, b, c, d, layer) => {
+        if (only && !only.has(layer)) return;
         faces++;
         for (const v of [a, b, c, d]) {
           if (v.z < zMin) zMin = v.z;

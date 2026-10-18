@@ -4,7 +4,7 @@
 import { fleetSweep, replicate, simulate } from './des';
 import { contoursFromFile, hillshade, terrainFromFaces } from './terrain';
 import { buildNetwork, sizePeriod, type PeriodResult } from './plan';
-import { parseFrontsDxf, parseSolidDxf } from './planParse';
+import { parseFrontsDxf, parseSolidDxf, scanLayers, type FrontParseOptions } from './planParse';
 import type { SimModel } from './types';
 
 export type WorkerRequest =
@@ -12,8 +12,9 @@ export type WorkerRequest =
   | { id: number; kind: 'sweep'; model: SimModel; configId: string; scenarioId: string; circuitId: string; maxTrucks: number }
   | { id: number; kind: 'trace'; model: SimModel; configId: string; scenarioId: string; hours: number }
   | { id: number; kind: 'terrain'; file: File; mode: 'faces' | 'contours' }
-  | { id: number; kind: 'planFronts'; file: File }
-  | { id: number; kind: 'planSolid'; file: File }
+  | { id: number; kind: 'dxfLayers'; file: File }
+  | { id: number; kind: 'planFronts'; file: File; opts?: FrontParseOptions }
+  | { id: number; kind: 'planSolid'; file: File; layers?: string[] }
   | { id: number; kind: 'periods'; model: SimModel; configIds: string[]; scenarioId: string; periods?: number[] };
 
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -46,11 +47,13 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const days = Math.max(1, Math.ceil(req.hours / 24));
       const res = simulate(req.model, { config, scenario: { ...scenario, days }, seed: 1000, traceHours: req.hours });
       post({ id: req.id, result: res });
+    } else if (req.kind === 'dxfLayers') {
+      post({ id: req.id, result: await scanLayers(req.file, (f) => post({ id: req.id, progress: f })) });
     } else if (req.kind === 'planFronts') {
-      post({ id: req.id, result: await parseFrontsDxf(req.file, (f) => post({ id: req.id, progress: f })) });
+      post({ id: req.id, result: await parseFrontsDxf(req.file, (f) => post({ id: req.id, progress: f }), req.opts) });
     } else if (req.kind === 'planSolid') {
-      const r = await parseSolidDxf(req.file, (f) => post({ id: req.id, progress: f }));
-      if (!r) return post({ id: req.id, error: `${req.file.name}: nenhuma face 3DFACE encontrada.` });
+      const r = await parseSolidDxf(req.file, (f) => post({ id: req.id, progress: f }), req.layers);
+      if (!r) return post({ id: req.id, error: `${req.file.name}${req.layers?.length ? ` (${req.layers.join(', ')})` : ''}: nenhuma face 3DFACE encontrada.` });
       post({ id: req.id, result: r });
     } else if (req.kind === 'periods') {
       const plan = req.model.plan!;
