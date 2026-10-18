@@ -27,6 +27,8 @@ import { periodFromName } from '@/sim/planParse';
 import { runInWorker } from '@/sim/client';
 import type { Contours } from '@/sim/terrain';
 import MapCanvas, { type MapOverlays, type TerrainLayer } from './MapCanvas';
+import View3D from './View3D';
+import { periodDem, type Dem } from '@/sim/dem';
 import { Btn, Card, Num, Progress, inputCls, n1, t0 } from './ui';
 
 /** Cores das frentes (paleta categórica validada) e do rejeito. */
@@ -53,6 +55,7 @@ const mt = (t: number) => (t / 1e6).toLocaleString('pt-BR', { minimumFractionDig
 const ha = (m2: number) => (m2 / 1e4).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 interface Props {
+  dem?: Dem | null;
   model: SimModel;
   setModel: (m: SimModel) => void;
   canEdit: boolean;
@@ -63,10 +66,12 @@ interface Props {
   onError: (msg: string | null) => void;
 }
 
-const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours, results, setResults, onError }) => {
+const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, contours, results, setResults, onError }) => {
   const plan: MinePlan = model.plan ?? emptyPlan();
   const setPlan = (p: MinePlan) => setModel({ ...model, plan: p });
   const [period, setPeriod] = useState(1);
+  const [show3d, setShow3d] = useState(false);
+  const dem3d = useMemo(() => (show3d && dem ? periodDem(dem, model.plan, period) : null), [show3d, dem, model.plan, period]);
   const [busy, setBusy] = useState<{ what: string; f: number; stage?: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const nPer = plan.periods.length;
@@ -177,7 +182,7 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
             for (let k = solids.length - 1; k >= 0; k--) if (solids[k].period === j.period) solids.splice(k, 1);
             replaced.add(j.period);
           }
-          solids.push({ id: `s${j.period}-${i}-${Date.now().toString(36)}`, period: j.period, name: `Sólido ${plan.periods[j.period - 1]?.label ?? `período ${j.period}`}`, volumeM3: sd.volumeM3, hull: sd.hull, cx: sd.cx, cy: sd.cy, zMin: sd.zMin, zMax: sd.zMax, faces: sd.faces, file: j.label });
+          solids.push({ id: `s${j.period}-${i}-${Date.now().toString(36)}`, period: j.period, name: `Sólido ${plan.periods[j.period - 1]?.label ?? `período ${j.period}`}`, volumeM3: sd.volumeM3, hull: sd.hull, cx: sd.cx, cy: sd.cy, zMin: sd.zMin, zMax: sd.zMax, faces: sd.faces, top: sd.top ?? undefined, file: j.label });
         } catch (e) {
           msgs.push(`${j.label}: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -245,12 +250,13 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
 
   /* ------------------------------ dimensionamento ------------------------------ */
   const [cfgIds, setCfgIds] = useState<string[]>(model.configs.slice(0, 2).map((c) => c.id));
-  const [scenarioId, setScenarioId] = useState(model.scenarios[0]?.id ?? 's1');
+  const [scenIds, setScenIds] = useState<string[]>([model.scenarios[0]?.id ?? 's1']);
+  const [aging, setAging] = useState(true);
   const runSizing = async () => {
     onError(null);
     setBusy({ what: 'frota', f: 0 });
     try {
-      const res = await runInWorker<PeriodResult[]>({ kind: 'periods', model: { ...model, plan }, configIds: cfgIds, scenarioId }, (f, stage) => setBusy({ what: 'frota', f, stage }));
+      const res = await runInWorker<PeriodResult[]>({ kind: 'periods', model: { ...model, plan }, configIds: cfgIds, scenarioIds: scenIds, aging }, (f, stage) => setBusy({ what: 'frota', f, stage }));
       setResults(res);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -260,10 +266,10 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
   };
   const exportResults = () => {
     if (!results) return;
-    const head = ['Configuração', 'Período', 'Circuito', 'Material', 't no período', 'Meta t/dia', 'Simulado t/dia', 'Caminhões', 'Distância (m)', 'Desnível (m)', 'Carga em', 'Descarga em'];
+    const head = ['Configuração', 'Cenário', 'Período', 'Circuito', 'Material', 't no período', 'Meta t/dia', 'Simulado t/dia', 'Caminhões', 'Distância (m)', 'Desnível (m)', 'Carga em', 'Descarga em'];
     const dec = (n: number, d = 0) => n.toFixed(d).replace('.', ',');
     const rows = results.flatMap((r) =>
-      r.circuits.map((c) => [model.configs.find((x) => x.id === r.configId)?.name ?? r.configId, r.label, c.name, c.material, dec(c.tonnes), dec(c.targetTpd), dec(c.achievedTpd), String(c.trucks), dec(c.lengthM), dec(c.dz, 1), c.originLabel, c.destLabel]),
+      r.circuits.map((c) => [model.configs.find((x) => x.id === r.configId)?.name ?? r.configId, model.scenarios.find((x) => x.id === r.scenarioId)?.name ?? '', r.label, c.name, c.material, dec(c.tonnes), dec(c.targetTpd), dec(c.achievedTpd), String(c.trucks), dec(c.lengthM), dec(c.dz, 1), c.originLabel, c.destLabel]),
     );
     const csv = '﻿' + [head, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -301,7 +307,18 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
         }
       >
         <input type="range" min={1} max={Math.max(1, nPer)} value={period} onChange={(e) => setPeriod(Number(e.target.value))} className="mb-3 w-full accent-emerald-600" aria-label="Período no mapa" />
-        <MapCanvas terrain={terrain} contours={contours} routes={model.routes} routesAsNetwork overlays={overlays} height={500} />
+        <div className="mb-3 flex gap-1 rounded-lg bg-black/[0.04] p-1 text-sm" role="group" aria-label="Tipo de vista">
+          {[false, true].map((v) => (
+            <button key={String(v)} type="button" onClick={() => setShow3d(v)} className={clsx('rounded-md px-3 py-1', show3d === v ? 'bg-white font-semibold shadow-sm' : 'text-black/55')}>
+              {v ? '3D (topografia do período)' : '2D'}
+            </button>
+          ))}
+        </div>
+        {show3d ? (
+          <View3D dem={dem3d} routes={model.routes.map((r) => ({ points: r.points, color: '#8a8984' }))} overlays={overlays} height={520} />
+        ) : (
+          <MapCanvas terrain={terrain} contours={contours} routes={model.routes} routesAsNetwork overlays={overlays} height={500} />
+        )}
         {periodView && periodView.info.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
@@ -742,15 +759,21 @@ const PlanView: React.FC<Props> = ({ model, setModel, canEdit, terrain, contours
                 ))}
               </div>
             </fieldset>
-            <label className="text-xs text-black/55">
-              Cenário
-              <select className={clsx(inputCls, 'mt-1 w-48')} value={scenarioId} onChange={(e) => setScenarioId(e.target.value)}>
-                {model.scenarios.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+            <fieldset className="text-xs text-black/55">
+              <legend className="mb-1">Cenários</legend>
+              <div className="flex flex-wrap gap-2">
+                {model.scenarios.map((sc) => (
+                  <label key={sc.id} className="flex items-center gap-1.5 rounded-lg border border-black/10 px-2 py-1.5 text-sm text-black">
+                    <input type="checkbox" checked={scenIds.includes(sc.id)} onChange={(e) => setScenIds(e.target.checked ? [...scenIds, sc.id] : scenIds.filter((x) => x !== sc.id))} />
+                    {sc.name}
+                  </label>
                 ))}
-              </select>
+              </div>
+            </fieldset>
+            <label className="flex items-center gap-1.5 text-sm" title="A disponibilidade cai com a idade da frota (aba Financeiro)">
+              <input type="checkbox" checked={aging} onChange={(e) => setAging(e.target.checked)} /> Desgaste da frota
             </label>
-            <Btn onClick={() => void runSizing()} busy={busy?.what === 'frota'} disabled={!plan.movements.length || !cfgIds.length || !model.routes.length}>
+            <Btn onClick={() => void runSizing()} busy={busy?.what === 'frota'} disabled={!plan.movements.length || !cfgIds.length || !scenIds.length || !model.routes.length}>
               <Play size={15} /> Dimensionar
             </Btn>
           </div>
@@ -881,7 +904,9 @@ const PeriodSelect: React.FC<{ value: number; periods: string[]; onChange: (v: n
 /* -------------------------------------------------------------------------- */
 
 const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: MinePlan; onExport: () => void; onPick: (p: number) => void }> = ({ results, model, plan, onExport, onPick }) => {
-  const cfgs = [...new Set(results.map((r) => r.configId))];
+  const keyOf = (r: PeriodResult) => `${r.configId}|${r.scenarioId ?? ''}`;
+  const cfgs = [...new Set(results.map(keyOf))];
+  const multiScen = new Set(results.map((r) => r.scenarioId)).size > 1;
   const periods = [...new Set(results.map((r) => r.period))].sort((a, b) => a - b);
   const [hover, setHover] = useState<{ p: number; c: string } | null>(null);
   const [detail, setDetail] = useState<string>(cfgs[0]);
@@ -893,8 +918,12 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
   const bw = Math.min(22, (gw - 6) / cfgs.length);
   const ymax = Math.ceil(max / 2) * 2 + 2;
   const y = (v: number) => H - m.b - (v / ymax) * (H - m.t - m.b);
-  const name = (id: string) => model.configs.find((c) => c.id === id)?.name ?? id;
-  const hr = hover ? results.find((r) => r.period === hover.p && r.configId === hover.c) : null;
+  const name = (k: string) => {
+    const [cid, sid] = k.split('|');
+    const c = model.configs.find((x) => x.id === cid)?.name ?? cid;
+    return multiScen ? `${c} · ${model.scenarios.find((x) => x.id === sid)?.name ?? sid}` : c;
+  };
+  const hr = hover ? results.find((r) => r.period === hover.p && keyOf(r) === hover.c) : null;
   const ticks = Array.from({ length: ymax / 2 + 1 }, (_, i) => i * 2);
 
   return (
@@ -903,7 +932,7 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
         {cfgs.map((c, i) => (
           <span key={c} className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-sm" style={{ background: CONFIG_COLORS[i % CONFIG_COLORS.length] }} />
-            {name(c)}: pico de {Math.max(...results.filter((r) => r.configId === c).map((r) => r.trucks))} caminhões · média de {n1(results.filter((r) => r.configId === c && r.trucks > 0).reduce((a, r, _, l) => a + r.trucksExact / l.length, 0))} sem arredondar
+            {name(c)}: pico de {Math.max(...results.filter((r) => keyOf(r) === c).map((r) => r.trucks))} caminhões · média de {n1(results.filter((r) => keyOf(r) === c && r.trucks > 0).reduce((a, r, _, l) => a + r.trucksExact / l.length, 0))} sem arredondar
           </span>
         ))}
         <button type="button" onClick={onExport} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-black/10 px-2.5 py-1 font-medium text-black hover:bg-black/[0.03]">
@@ -923,7 +952,7 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
             return (
               <g key={p}>
                 {cfgs.map((c, ci) => {
-                  const r = results.find((x) => x.period === p && x.configId === c);
+                  const r = results.find((x) => x.period === p && keyOf(x) === c);
                   if (!r) return null;
                   const active = hover?.p === p && hover?.c === c;
                   return (
@@ -943,7 +972,7 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
         </svg>
         {hr && (
           <div className="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 rounded-lg bg-[#151619] px-3 py-2 text-xs text-white shadow-lg">
-            <p className="font-semibold">{hr.label} · {name(hr.configId)}</p>
+            <p className="font-semibold">{hr.label} · {name(keyOf(hr))}</p>
             <p className="tabular-nums">{hr.trucks} caminhões ({n1(hr.trucksExact)} sem arredondar) · {t0(hr.hoursPerTruck)} h por caminhão</p>
             {hr.circuits.map((c) => (
               <p key={c.circuitId} className="tabular-nums text-white/75">{c.name}: {c.trucks} ({t0(c.lengthM)} m)</p>
@@ -971,17 +1000,19 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
                 <th className="py-2 pr-2 text-right font-medium">Sem arredondar</th>
                 <th className="py-2 pr-2 text-right font-medium">Equip. de carga</th>
                 <th className="py-2 pr-2 text-right font-medium">h/caminhão</th>
+                <th className="py-2 pr-2 text-right font-medium">DF · idade média</th>
                 <th className="py-2 font-medium">Por movimentação (caminhões · distância · simulado/meta t/dia)</th>
               </tr>
             </thead>
             <tbody>
-              {results.filter((r) => r.configId === detail).map((r) => (
+              {results.filter((r) => keyOf(r) === detail).map((r) => (
                 <tr key={r.period} className="border-b border-black/[0.04] align-top">
                   <td className="py-2 pr-2 font-medium">{r.label}</td>
                   <td className={clsx('py-2 pr-2 text-right font-semibold tabular-nums', !r.ok && 'text-red-700')}>{r.trucks}</td>
                   <td className="py-2 pr-2 text-right tabular-nums text-black/55">{n1(r.trucksExact)}</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{r.loaders}</td>
                   <td className="py-2 pr-2 text-right tabular-nums">{t0(r.hoursPerTruck)}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums text-black/55">{r.truckDf !== undefined ? `${n1(r.truckDf)}% · ${t0(r.avgAgeH ?? 0)} h` : '—'}</td>
                   <td className="py-2 text-xs">
                     {r.circuits.map((c) => (
                       <span key={c.circuitId} className={clsx('mr-3 inline-block', c.saturated && 'text-red-700')}>

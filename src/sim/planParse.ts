@@ -7,6 +7,7 @@
 import { parseDxfFile, parseDxfText, simplify, type DxfHandlers } from './dxf';
 import { convexHull, interiorPoint, pointInRing, ringArea } from './plan';
 import type { Vec3 } from './types';
+import type { TopGrid } from './dem';
 
 /** Número do período no nome do arquivo: "01-Linha.dxf" → 1, "Ano5_Rejeito.dxf" → 5. */
 export function periodFromName(name: string): number | null {
@@ -193,6 +194,7 @@ export interface ParsedSolid {
   volumeClosedM3: number;
   /** volume pela diferença entre topo e base em grade (vale também para sólidos com falhas) */
   volumeGridM3: number;
+  top: TopGrid | null;
 }
 
 export async function parseSolidDxf(src: Blob | string, onProgress?: (f: number) => void, layers?: string[]): Promise<ParsedSolid | null> {
@@ -249,20 +251,20 @@ export async function parseSolidDxf(src: Blob | string, onProgress?: (f: number)
   let open = 0;
   for (const n of edges.values()) if (n !== 2) open++;
   const openEdges = edges.size ? open / edges.size : 1;
-  const volumeGridM3 = gridVolume(tris);
+  const { volume: volumeGridM3, top } = gridVolume(tris);
   const volumeClosedM3 = Math.abs(vol);
   // a grade vale para sólidos com falhas ou com mais de uma casca (normais invertidas se anulariam na divergência)
-  return { volumeM3: volumeGridM3 > 0 ? volumeGridM3 : volumeClosedM3, volumeClosedM3, volumeGridM3, hull, cx, cy, zMin, zMax, faces, openEdges };
+  return { volumeM3: volumeGridM3 > 0 ? volumeGridM3 : volumeClosedM3, volumeClosedM3, volumeGridM3, top, hull, cx, cy, zMin, zMax, faces, openEdges };
 }
 
 /** Volume em grade: em cada célula, maior cota − menor cota entre os triângulos que a cobrem. */
-function gridVolume(t: number[]) {
+function gridVolume(t: number[]): { volume: number; top: TopGrid | null } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (let i = 0; i < t.length; i += 3) {
     minX = Math.min(minX, t[i]); maxX = Math.max(maxX, t[i]);
     minY = Math.min(minY, t[i + 1]); maxY = Math.max(maxY, t[i + 1]);
   }
-  if (!Number.isFinite(minX)) return 0;
+  if (!Number.isFinite(minX)) return { volume: 0, top: null };
   const cell = Math.max(0.5, Math.sqrt(((maxX - minX) * (maxY - minY)) / 1_500_000));
   const nx = Math.ceil((maxX - minX) / cell) + 1;
   const ny = Math.ceil((maxY - minY) / cell) + 1;
@@ -293,5 +295,17 @@ function gridVolume(t: number[]) {
   }
   let v = 0;
   for (let i = 0; i < lo.length; i++) if (hi[i] > lo[i]) v += hi[i] - lo[i];
-  return v * cell * cell;
+  // topo em grade grossa (até 48 × 48), valor máximo de cada bloco
+  const k = Math.max(1, Math.ceil(Math.max(nx, ny) / 48));
+  const tnx = Math.ceil(nx / k);
+  const tny = Math.ceil(ny / k);
+  const tz: number[] = new Array(tnx * tny).fill(NaN);
+  for (let iy = 0; iy < ny; iy++)
+    for (let ix = 0; ix < nx; ix++) {
+      const h = hi[iy * nx + ix];
+      if (!Number.isFinite(h)) continue;
+      const j = Math.floor(iy / k) * tnx + Math.floor(ix / k);
+      if (!(tz[j] >= h)) tz[j] = Math.round(h * 10) / 10;
+    }
+  return { volume: v * cell * cell, top: { x0: minX, y0: minY, cell: cell * k, nx: tnx, ny: tny, z: tz } };
 }

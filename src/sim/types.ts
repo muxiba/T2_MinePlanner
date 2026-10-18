@@ -125,6 +125,8 @@ export interface SimModel {
   warmupH: number;
   /** plano de lavra por períodos (frentes, destinos e movimentações) */
   plan?: import('./plan').MinePlan;
+  /** dados financeiros (custos, vida útil, receita) */
+  finance?: import('./econ').Finance;
 }
 
 /* ------------------------------ Resultados ------------------------------ */

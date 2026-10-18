@@ -4,6 +4,8 @@
 import { fleetSweep, replicate, simulate } from './des';
 import { contoursFromFile, hillshade, terrainFromFaces } from './terrain';
 import { buildNetwork, sizePeriod, type PeriodResult } from './plan';
+import { demFromContours, demFromGrid } from './dem';
+import { FleetLedger, agedDf, defaultFinance, financeFor } from './econ';
 import { parseFrontsDxf, parseSolidDxf, scanLayers, type FrontParseOptions } from './planParse';
 import type { SimModel } from './types';
 
@@ -15,7 +17,7 @@ export type WorkerRequest =
   | { id: number; kind: 'dxfLayers'; file: File }
   | { id: number; kind: 'planFronts'; file: File; opts?: FrontParseOptions }
   | { id: number; kind: 'planSolid'; file: File; layers?: string[] }
-  | { id: number; kind: 'periods'; model: SimModel; configIds: string[]; scenarioId: string; periods?: number[] };
+  | { id: number; kind: 'periods'; model: SimModel; configIds: string[]; scenarioIds: string[]; periods?: number[]; aging?: boolean };
 
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 
@@ -57,16 +59,27 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       post({ id: req.id, result: r });
     } else if (req.kind === 'periods') {
       const plan = req.model.plan!;
-      const scenario = req.model.scenarios.find((s) => s.id === req.scenarioId) ?? req.model.scenarios[0];
+      const fin = req.model.finance ?? defaultFinance(req.model.configs);
       const list = req.periods ?? plan.periods.map((_, i) => i + 1);
       const net = buildNetwork(req.model.routes);
       const out: PeriodResult[] = [];
-      const total = list.length * req.configIds.length;
+      const total = list.length * req.configIds.length * Math.max(1, req.scenarioIds.length);
       for (const configId of req.configIds) {
         const config = req.model.configs.find((c) => c.id === configId)!;
-        for (const p of list) {
-          out.push(sizePeriod(req.model, plan, p, config, scenario, { net }));
-          post({ id: req.id, progress: out.length / total, stage: `${config.name} · ${plan.periods[p - 1]?.label ?? p}` });
+        for (const scenarioId of req.scenarioIds) {
+          const scenario = req.model.scenarios.find((s) => s.id === scenarioId) ?? req.model.scenarios[0];
+          const tf = financeFor(fin, configId, config.payloadT);
+          const ledger = new FleetLedger(tf);
+          let prevN = 0;
+          for (const p of list) {
+            const avgAgeH = req.aging === false ? 0 : ledger.previewAge(Math.max(1, prevN));
+            const truckDf = req.aging === false ? scenario.truckDf : agedDf(scenario.truckDf, tf, avgAgeH);
+            const r = sizePeriod(req.model, plan, p, config, { ...scenario, truckDf }, { net });
+            ledger.step(r.trucks, r.hoursPerTruck);
+            if (r.trucks > 0) prevN = r.trucks;
+            out.push({ ...r, scenarioId: scenario.id, truckDf, avgAgeH });
+            post({ id: req.id, progress: out.length / total, stage: `${config.name} · ${scenario.name} · ${plan.periods[p - 1]?.label ?? p}` });
+          }
         }
       }
       post({ id: req.id, result: out });
@@ -75,12 +88,15 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         const r = await terrainFromFaces(req.file, (f, stage) => post({ id: req.id, progress: f, stage }));
         if (!r) return post({ id: req.id, error: 'Nenhuma face 3DFACE encontrada no arquivo.' });
         const shade = hillshade(r.grid);
+        const dem = demFromGrid(r.grid);
         const { z, ...meta } = r.grid;
-        post({ id: req.id, result: { kind: 'grid', meta, z, shade, faces: r.faces } }, [z.buffer, shade.buffer]);
+        post({ id: req.id, result: { kind: 'grid', meta, z, shade, faces: r.faces, dem } }, [z.buffer, shade.buffer, dem.z.buffer]);
       } else {
         const c = await contoursFromFile(req.file, (f, stage) => post({ id: req.id, progress: f, stage }));
         if (!c) return post({ id: req.id, error: 'Nenhuma polilinha encontrada no arquivo.' });
-        post({ id: req.id, result: { kind: 'contours', contours: c } });
+        post({ id: req.id, progress: 0.98, stage: 'Montando a superfície 3D' });
+        const dem = demFromContours(c);
+        post({ id: req.id, result: { kind: 'contours', contours: c, dem } }, [dem.z.buffer]);
       }
     }
   } catch (e) {
