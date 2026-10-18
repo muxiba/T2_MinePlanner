@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import {
   AlertTriangle,
@@ -18,7 +18,7 @@ import {
   DEFAULT_CATALOG,
   DEFAULT_LOOSE_DENSITY,
   KIND_LABELS,
-  applySuggestedFleet,
+  optimizeFleet,
   routeKind,
   type Action,
   type FleetAnalysis,
@@ -369,7 +369,7 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
   const a = analysis;
   const catalog = premises.equipmentCatalog ?? DEFAULT_CATALOG;
   const routeById = new Map(routes.map((r) => [r.id, r]));
-  const fleetMatches = a.routes.every((r) => r.trucksAllocated === r.trucksNeeded);
+  const opt = useMemo(() => optimizeFleet(routes, premises, 'folga'), [routes, premises]);
   const romPct = a.romTargetDryT > 0 ? a.romDeliverableDryT / a.romTargetDryT : 1;
 
   const headline = a.meetsTarget
@@ -402,28 +402,44 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
               )}
             </p>
           </div>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <dl className="grid grid-cols-3 gap-x-8 gap-y-3 text-sm">
             <div>
-              <dt className="text-black/50">Caminhões nas rotas</dt>
+              <dt className="text-black/50">Frota (premissas)</dt>
+              <dd className="text-2xl font-semibold tabular-nums">{a.fleet.premise}</dd>
+            </div>
+            <div>
+              <dt className="text-black/50">Nas rotas</dt>
               <dd className="text-2xl font-semibold tabular-nums">{a.fleet.allocated}</dd>
             </div>
             <div>
               <dt className="text-black/50">Necessários</dt>
               <dd className="text-2xl font-semibold tabular-nums">{a.fleet.needed}</dd>
             </div>
+            {a.fleet.spare > 0.01 && (
+              <div className="col-span-3 text-xs text-black/55">{n1(a.fleet.spare)} caminhão(ões) da frota sem rota (folga).</div>
+            )}
             {a.fleet.idle > 0 && (
-              <div className="col-span-2 text-xs text-black/55">{a.fleet.idle} caminhão(ões) não aumentam a produção (sobra ou fila na carga).</div>
+              <div className="col-span-3 text-xs text-black/55">{a.fleet.idle} caminhão(ões) não aumentam a produção (sobra ou fila na carga).</div>
             )}
           </dl>
         </div>
-        {canEdit && !fleetMatches && (
-          <button
-            type="button"
-            onClick={() => setRoutes(applySuggestedFleet(routes, a))}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black"
-          >
-            <Truck size={16} /> Ajustar as rotas para a frota necessária
-          </button>
+        {canEdit && !a.meetsTarget && opt.moves.length > 0 && (
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setRoutes(opt.routes)}
+              className="inline-flex items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black"
+            >
+              <Truck size={16} /> Alocar a folga onde falta
+            </button>
+            <span className="text-sm text-black/60">
+              {opt.moves.map((m) => `${m.name}: ${m.from} → ${m.to}`).join(' · ')}. Chega à planta: {t0(opt.afterDeliverableDryT)} t
+              {opt.meetsTarget ? ' (atende a meta)' : opt.missingForTarget > 0 ? ` (ainda faltam ${opt.missingForTarget} caminhão(ões) além da frota)` : ''}.
+            </span>
+          </div>
+        )}
+        {!a.meetsTarget && opt.moves.length === 0 && opt.missingForTarget > 0 && (
+          <p className="mt-5 text-sm text-black/60">A frota das premissas já está toda nas rotas. Para atingir a meta faltam {opt.missingForTarget} caminhão(ões), ou ganhos de produtividade (ações abaixo).</p>
         )}
       </section>
 

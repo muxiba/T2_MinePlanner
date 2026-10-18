@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeFleet, analyzeRoute, cascade, loaderLoading, routeTargets, wetFromDry } from './fleet';
+import { analyzeFleet, analyzeRoute, cascade, loaderLoading, optimizeFleet, routeTargets, wetFromDry } from './fleet';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
 import type { Route } from '../types';
 
@@ -7,9 +7,22 @@ const P = { ...DEFAULT_PREMISES };
 const mine = INITIAL_ROUTES.find((r) => r.name.includes('Mina'))!;
 
 describe('fundamentos', () => {
-  it('massa úmida = seca / (1 − umidade) × (1 + perda)', () => {
-    expect(wetFromDry(100, 9, 1)).toBeCloseTo(110.989, 2);
+  it('massa úmida: padrão seca × (1 + umidade + perda); opcional base úmida', () => {
+    expect(wetFromDry(100, 9, 1)).toBeCloseTo(110, 6);
+    expect(wetFromDry(100, 9, 1, 'base_umida')).toBeCloseTo(110.989, 2);
     expect(wetFromDry(100, 0, 0)).toBe(100);
+  });
+
+  it('horas efetivas = calendário × DF × UF das premissas (EO não é reaplicado)', () => {
+    const a = analyzeRoute({ ...mine, mechanicalAvailability: 50, operationalEfficiency: 50 }, { ...P, dfMina: 85, ufMina: 85 }, 100000);
+    expect(a.hours.effective).toBeCloseTo(a.hours.calendar * 0.85 * 0.85, 6);
+    const own = analyzeRoute({ ...mine, ownRates: true, mechanicalAvailability: 90, utilization: 80 }, P, 100000);
+    expect(own.hours.effective).toBeCloseTo(own.hours.calendar * 0.9 * 0.8, 6);
+  });
+
+  it('carga útil vem das premissas, salvo valores próprios', () => {
+    expect(analyzeRoute({ ...mine, truckCapacity: 10 }, { ...P, truckCapacity: 40 }, 1000).payloadT).toBe(40);
+    expect(analyzeRoute({ ...mine, truckCapacity: 10, ownRates: true }, { ...P, truckCapacity: 40 }, 1000).payloadT).toBe(10);
   });
 
   it('cascata de horas multiplica DF, UF e EO', () => {
@@ -99,5 +112,20 @@ describe('sistema', () => {
     const opts = a.classComparison!.options;
     const counts = opts.map((o) => o.trucksNeeded);
     expect(counts[0]).toBeGreaterThanOrEqual(counts[counts.length - 1]);
+  });
+
+  it('otimizador aloca a folga na rota que falta e atinge a meta quando a frota é suficiente', () => {
+    const routes = INITIAL_ROUTES.map((r) => ({ ...r, truckCount: 0 }));
+    const fleet = analyzeFleet(routes, { ...P, truckCount: 0 }).fleet.needed;
+    const prem = { ...P, truckCount: fleet + 2 };
+    const base = routes.map((r) => ({ ...r, truckCount: 0 }));
+    const opt = optimizeFleet(base, prem, 'folga');
+    expect(opt.meetsTarget || analyzeFleet(opt.routes, prem).bottleneck?.id === 'planta').toBe(true);
+    const used = opt.routes.filter((r) => r.active).reduce((a, r) => a + r.truckCount, 0);
+    expect(used).toBeLessThanOrEqual(prem.truckCount);
+    expect(opt.spareLeft).toBe(prem.truckCount - used);
+    // frota curta: aponta quantos faltam
+    const short = optimizeFleet(base, { ...P, truckCount: 1 }, 'folga');
+    expect(short.missingForTarget).toBeGreaterThan(0);
   });
 });

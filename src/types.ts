@@ -23,6 +23,13 @@ export interface Route {
   truckVolumeM3?: number;
   /** Equipamento de carga dedicado à rota. Se ausente, usa o tempo de carga das premissas e não limita a rota. */
   loader?: LoaderSetup;
+  /**
+   * Por padrão a rota usa DF, UF e capacidade do caminhão das Premissas Fundamentais (fonte única).
+   * true = a rota usa os próprios valores (mechanicalAvailability = DF, utilization = UF, truckCapacity).
+   */
+  ownRates?: boolean;
+  /** UF própria da rota (%), quando ownRates = true. */
+  utilization?: number;
 }
 
 export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';
@@ -133,6 +140,11 @@ export interface DetailedPremises {
   // --- Dimensionamento v3 (opcionais) ---
   /** Densidade do material solto, úmido (t/m³). Usada no limite de volume e no cálculo de caçambadas. */
   looseDensity?: number;
+  /**
+   * Conversão seca → úmida. 'somada' (padrão, como na planilha): úmida = seca × (1 + umidade + perda).
+   * 'base_umida': úmida = seca ÷ (1 − umidade) × (1 + perda), para umidade medida sobre a massa úmida.
+   */
+  moistureMode?: 'somada' | 'base_umida';
   /** Catálogo de classes de equipamentos para comparação (editável pela empresa). */
   equipmentCatalog?: EquipmentCatalog;
   /** Modelo do simulador de eventos discretos (aba Simulação). */

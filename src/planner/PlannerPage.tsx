@@ -285,7 +285,7 @@ const PlannerPage: React.FC = () => {
             className={analysis.meetsTarget ? 'text-emerald-600' : 'text-red-600'}
           />
           <div className="h-8 w-px bg-black/10" />
-          <Metric label="Caminhões: têm / precisam" value={`${analysis.fleet.allocated} / ${analysis.fleet.needed}`} className="text-[#1A1A1A]" />
+          <Metric label="Caminhões: frota / nas rotas / precisam" value={`${analysis.fleet.premise} / ${analysis.fleet.allocated} / ${analysis.fleet.needed}`} className="text-[#1A1A1A]" />
         </div>
       </header>
 

@@ -1,241 +1,130 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Truck, Clock, Info, TrendingUp } from 'lucide-react';
-import { Route, DetailedPremises, ExtraFleetAllocation } from '../types';
+import { Clock, Info, Plus, Trash2, Truck } from 'lucide-react';
+import type { DetailedPremises, ExtraFleetAllocation, Route } from '../types';
+import { sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
 
-interface ExtraFleetManagerProps {
+/**
+ * Frota extra (folga): caminhões das premissas que não estão em nenhuma rota podem ser alocados
+ * por um número de horas (ex.: reforço de 2 caminhões por 120 h numa frente). O motor soma essa
+ * produção à capacidade da rota (horas × DF × UF × produção horária do caminhão naquela rota).
+ */
+
+interface Props {
   routes: Route[];
   premises: DetailedPremises;
   setPremises: React.Dispatch<React.SetStateAction<DetailedPremises>>;
-  results: any;
+  analysis: FleetAnalysis;
 }
 
-const ExtraFleetManager: React.FC<ExtraFleetManagerProps> = ({ routes, premises, setPremises, results }) => {
-  const [newAllocation, setNewAllocation] = useState<Partial<ExtraFleetAllocation>>({
-    routeId: routes[0]?.id || '',
+const t0 = (n: number) => Math.round(n).toLocaleString('pt-BR');
+const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, analysis }) => {
+  const active = routes.filter((r) => r.active && analysis.routes.some((a) => a.id === r.id));
+  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
+    routeId: active[0]?.id ?? '',
     truckCount: 1,
     durationHours: 24,
-    description: ''
+    description: '',
   });
+  const calMonth = sumCalendarHours(premises, 'mina');
+  // caminhões sem rota (sem contar as alocações por horas)
+  const unassigned = Math.max(0, (premises.truckCount || 0) - analysis.fleet.allocated);
+  const pool = unassigned * calMonth;
+  const used = (premises.extraAllocations ?? []).reduce((a, x) => a + x.truckCount * x.durationHours, 0);
+  const remaining = Math.max(0, pool - used);
+  const req = form.truckCount * form.durationHours;
 
-  const isRejeitoRoute = (name: string) => {
-    const n = name.toLowerCase();
-    return n.includes('baia') || n.includes('rejeito');
+  const add = () => {
+    if (!form.routeId || form.truckCount <= 0 || form.durationHours <= 0 || req > remaining + 0.01 || form.truckCount > unassigned) return;
+    const allocation: ExtraFleetAllocation = { id: Math.random().toString(36).slice(2, 11), ...form };
+    setPremises((prev) => ({ ...prev, extraAllocations: [...(prev.extraAllocations ?? []), allocation] }));
+    setForm({ ...form, description: '' });
   };
+  const remove = (id: string) => setPremises((prev) => ({ ...prev, extraAllocations: (prev.extraAllocations ?? []).filter((a) => a.id !== id) }));
 
-  const visibleActiveRoutes = routes.filter(r => {
-    if (!r.active) return false;
-    if (premises.processType === 'seco' && isRejeitoRoute(r.name)) return false;
-    return true;
-  });
-
-  const totalTrucksUsed = routes.reduce((acc, curr) => acc + curr.truckCount, 0);
-  const extraTrucksAvailable = Math.max(0, premises.truckCount - totalTrucksUsed);
-  const maxMonthlyHours = results.effectiveHoursPerMonthMina || (premises.calendarDays * 24);
-  
-  // Total capacity pool in truck-hours
-  const totalCapacityPool = extraTrucksAvailable * maxMonthlyHours;
-  
-  // Calculate used capacity from existing allocations
-  const usedCapacity = (premises.extraAllocations || []).reduce((acc, curr) => acc + (curr.truckCount * curr.durationHours), 0);
-  const remainingCapacity = Math.max(0, totalCapacityPool - usedCapacity);
-
-  const handleAddAllocation = () => {
-    if (!newAllocation.routeId || !newAllocation.truckCount || !newAllocation.durationHours) return;
-    
-    const requestedCapacity = newAllocation.truckCount * newAllocation.durationHours;
-    if (requestedCapacity > remainingCapacity + 0.01) { // Small epsilon for float precision
-      alert(`Capacidade insuficiente! Você tem apenas ${remainingCapacity.toFixed(1)} h-caminhão disponíveis.`);
-      return;
-    }
-
-    const allocation: ExtraFleetAllocation = {
-      id: Math.random().toString(36).substr(2, 9),
-      routeId: newAllocation.routeId,
-      truckCount: newAllocation.truckCount,
-      durationHours: newAllocation.durationHours,
-      description: newAllocation.description
-    };
-
-    setPremises(prev => ({
-      ...prev,
-      extraAllocations: [...(prev.extraAllocations || []), allocation]
-    }));
-
-    setNewAllocation({
-      routeId: routes[0]?.id || '',
-      truckCount: Math.min(1, extraTrucksAvailable),
-      durationHours: 24,
-      description: ''
-    });
-  };
-
-  const handleRemoveAllocation = (id: string) => {
-    setPremises(prev => ({
-      ...prev,
-      extraAllocations: (prev.extraAllocations || []).filter(a => a.id !== id)
-    }));
-  };
+  if (unassigned <= 0 && !(premises.extraAllocations ?? []).length) return null;
 
   return (
-    <div className="bg-white rounded-3xl shadow-sm border border-black/5 p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-blue-50 text-blue-500 rounded-2xl">
+          <div className="rounded-2xl bg-blue-50 p-3 text-blue-500">
             <Truck size={24} />
           </div>
           <div>
-            <h4 className="text-lg font-bold text-black/80">Alocação de Frota Extra (Folga Teórica)</h4>
-            <p className="text-xs text-black/40">Distribua a capacidade excedente de {extraTrucksAvailable.toFixed(2)} caminhões.</p>
+            <h4 className="text-lg font-bold text-black/80">Frota extra por horas (folga)</h4>
+            <p className="text-xs text-black/45">
+              {unassigned} caminhão(ões) sem rota. Use para reforços temporários; para alocação no mês inteiro, prefira “Alocar a folga onde falta”.
+            </p>
           </div>
         </div>
         <div className="text-right">
-          <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Capacidade Disponível</p>
-          <p className="text-sm font-mono font-bold text-blue-600">{remainingCapacity.toFixed(1)} h-caminhão</p>
-          <p className="text-[8px] text-black/30 uppercase font-bold">Total: {totalCapacityPool.toFixed(1)} h-c</p>
+          <p className="text-[10px] font-bold tracking-widest text-black/40 uppercase">Disponível</p>
+          <p className="font-mono text-sm font-bold text-blue-600">{t0(remaining)} h-caminhão</p>
+          <p className="text-[10px] text-black/35">de {t0(pool)} h ({unassigned} × {t0(calMonth)} h do calendário)</p>
         </div>
       </div>
 
-      {/* Add Allocation Form */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-[#F8F9FA] rounded-2xl border border-black/5">
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Fluxo / Rota</label>
-          <select
-            value={newAllocation.routeId}
-            onChange={(e) => setNewAllocation({ ...newAllocation, routeId: e.target.value })}
-            className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          >
-            {visibleActiveRoutes.map(r => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Caminhões</label>
-          <input
-            type="number"
-            min="0.01"
-            step="0.01"
-            max={premises.truckCount}
-            value={newAllocation.truckCount}
-            onChange={(e) => setNewAllocation({ ...newAllocation, truckCount: parseFloat(e.target.value) || 0 })}
-            className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-sm font-mono"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Duração (Horas)</label>
-          <input
-            type="number"
-            min="1"
-            max={maxMonthlyHours}
-            value={newAllocation.durationHours}
-            onChange={(e) => setNewAllocation({ ...newAllocation, durationHours: parseInt(e.target.value) || 0 })}
-            className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-sm font-mono"
-          />
-        </div>
-        <div className="flex items-end">
-          <button
-            onClick={handleAddAllocation}
-            disabled={
-              !newAllocation.routeId || 
-              (newAllocation.truckCount || 0) <= 0 || 
-              (newAllocation.truckCount || 0) > extraTrucksAvailable + 0.01 || 
-              (newAllocation.durationHours || 0) <= 0 ||
-              ((newAllocation.truckCount || 0) * (newAllocation.durationHours || 0)) > remainingCapacity + 0.01
-            }
-            className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-black/10 disabled:text-black/20 text-white px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
-          >
-            <Plus size={18} />
-            Alocar
-          </button>
-        </div>
-      </div>
-
-      {extraTrucksAvailable <= 0 && (
-        <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-3 rounded-xl border border-amber-100">
-          <Info size={14} />
-          <p className="text-[10px] font-bold uppercase tracking-wider">Toda a frota física já está alocada nos fluxos principais.</p>
+      {unassigned > 0 && (
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-black/5 bg-[#F8F9FA] p-4 md:grid-cols-5">
+          <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase md:col-span-2">
+            Rota
+            <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 text-sm normal-case">
+              {active.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase">
+            Caminhões
+            <input type="number" min={1} step={1} max={unassigned} value={form.truckCount} onChange={(e) => setForm({ ...form, truckCount: Math.max(1, Math.round(Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
+          </label>
+          <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase">
+            Horas de calendário
+            <input type="number" min={1} max={calMonth} value={form.durationHours} onChange={(e) => setForm({ ...form, durationHours: Math.max(1, Number(e.target.value) || 1) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
+          </label>
+          <div className="flex items-end">
+            <button
+              onClick={add}
+              disabled={!form.routeId || req > remaining + 0.01 || form.truckCount > unassigned}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white hover:bg-blue-600 disabled:bg-black/10 disabled:text-black/25"
+            >
+              <Plus size={16} /> Alocar
+            </button>
+          </div>
         </div>
       )}
 
-      {/* List of Allocations */}
-      <div className="space-y-3">
-        <h5 className="text-[10px] font-bold text-black/40 uppercase tracking-widest">Alocações Ativas</h5>
-        {premises.extraAllocations && premises.extraAllocations.length > 0 ? (
-          <div className="grid grid-cols-1 gap-3">
-            {premises.extraAllocations.map(allocation => {
-              const route = routes.find(r => r.id === allocation.routeId);
-              const routeResult = results.routeResults?.find((r: any) => r.id === allocation.routeId);
-              
-              // Calculate individual production for this allocation
-              const hourlyProd = routeResult ? (allocation.truckCount * routeResult.unitaryProductivity * (route?.mechanicalAvailability || 85) / 100 * (route?.operationalEfficiency || 72) / 100) : 0;
-              const totalProd = hourlyProd * allocation.durationHours;
-              
-              return (
-                <div key={allocation.id} className="flex flex-col p-4 bg-white border border-black/5 rounded-2xl hover:border-blue-200 transition-all group">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 bg-blue-50 text-blue-500 rounded-xl">
-                        <Clock size={16} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-black/80">{route?.name || 'Rota Desconhecida'}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest flex items-center gap-1">
-                            <Truck size={10} /> {allocation.truckCount} Caminhões
-                          </span>
-                          <div className="w-1 h-1 rounded-full bg-black/10" />
-                          <span className="text-[10px] font-bold text-black/40 uppercase tracking-widest flex items-center gap-1">
-                            <Clock size={10} /> {allocation.durationHours} Horas
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveAllocation(allocation.id)}
-                      className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4 pt-3 border-t border-black/5">
-                    <div>
-                      <p className="text-[8px] font-bold text-black/40 uppercase tracking-widest">Taxa Horária</p>
-                      <p className="text-xs font-mono font-bold text-blue-600">{hourlyProd.toFixed(2)} t/h</p>
-                    </div>
-                    <div>
-                      <p className="text-[8px] font-bold text-black/40 uppercase tracking-widest">Produção p/ Período</p>
-                      <p className="text-xs font-mono font-bold text-emerald-600">{totalProd.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} t</p>
-                    </div>
-                    <div>
-                      <p className="text-[8px] font-bold text-black/40 uppercase tracking-widest">Prod. Unitária</p>
-                      <p className="text-xs font-mono font-bold text-black/60">{routeResult?.unitaryProductivity?.toFixed(2)} t/h/c</p>
-                    </div>
+      {(premises.extraAllocations ?? []).length > 0 ? (
+        <div className="space-y-2">
+          {(premises.extraAllocations ?? []).map((x) => {
+            const route = routes.find((r) => r.id === x.routeId);
+            const a = analysis.routes.find((r) => r.id === x.routeId);
+            const effH = a ? x.truckCount * x.durationHours * a.hours.df * a.hours.uf : 0;
+            const prod = a ? effH * a.truckRateTph : 0;
+            return (
+              <div key={x.id} className="group flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/5 p-4">
+                <div className="flex items-center gap-3">
+                  <Clock size={16} className="text-blue-500" />
+                  <div>
+                    <p className="text-sm font-bold text-black/80">{route?.name ?? 'Rota removida'}</p>
+                    <p className="text-xs text-black/50">
+                      {x.truckCount} caminhão(ões) × {t0(x.durationHours)} h de calendário → {n1(effH)} h efetivas × {n1(a?.truckRateTph ?? 0)} t/h = <b className="text-emerald-700">{t0(prod)} t</b>
+                    </p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-8 bg-black/[0.01] rounded-2xl border border-dashed border-black/10">
-            <Info size={24} className="text-black/10 mb-2" />
-            <p className="text-xs text-black/30 font-medium">Nenhuma alocação extra definida.</p>
-          </div>
-        )}
-      </div>
-
-      {results.allocatedExtraMonthlyProduction > 0 && (
-        <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp size={16} className="text-emerald-600" />
-              <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Impacto na Produção Mensal</span>
-            </div>
-            <span className="text-lg font-mono font-bold text-emerald-600">
-              + {results.allocatedExtraMonthlyProduction.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} t
-            </span>
-          </div>
+                <button onClick={() => remove(x.id)} className="rounded-xl p-2 text-red-400 hover:bg-red-50" aria-label="Remover alocação">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
         </div>
+      ) : (
+        <p className="flex items-center gap-2 text-xs text-black/40">
+          <Info size={14} /> Nenhuma alocação por horas.
+        </p>
       )}
     </div>
   );

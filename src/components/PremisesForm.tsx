@@ -71,10 +71,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
 
     // Automatically update all routes' truck capacity if the global truck capacity changes
     if (field === "truckCapacity") {
-      setRoutes(prevRoutes => prevRoutes.map(route => ({
-        ...route,
-        truckCapacity: value
-      })));
+      // rotas sem valores próprios seguem a premissa (fonte única)
+      setRoutes(prevRoutes => prevRoutes.map(route => (route.ownRates ? route : { ...route, truckCapacity: value })));
     }
 
     // Automatically deactivate and clear Rejeito routes if process type changes to 'seco'
@@ -208,7 +206,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       fields: [
         { label: "DF Equipamentos (%)", key: "dfMina" },
         { label: "UF Equipamentos (%)", key: "ufMina" },
-        { label: "EO (%)", key: "eoMina", readOnly: true },
+        { label: "Rendimento DF × UF (%)", key: "eoMina", readOnly: true },
         { label: "Capacidade Frota Mina (t/h)", key: "fleetCapacityMinaTPH", readOnly: true },
       ]
     },
@@ -217,7 +215,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       fields: [
         { label: "DF Equipamentos (%)", key: "dfPlanta" },
         { label: "UF Equipamentos (%)", key: "ufPlanta" },
-        { label: "EO (%)", key: "eoPlanta", readOnly: true },
+        { label: "Rendimento DF × UF (%)", key: "eoPlanta", readOnly: true },
         { label: "Capacidade Máxima Planta (t/h)", key: "plantFeedRateTPH", highlight: true },
       ]
     },
@@ -237,6 +235,15 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Rejeito Total (%)", key: "rejeitoTotal", disabled: premises.processType === 'seco' },
         { label: "Umidade Natural (%)", key: "umidadeNatural" },
         { label: "Perda Material (%)", key: "perdaMaterial" },
+        {
+          label: "Conversão seca → úmida",
+          key: "moistureMode",
+          type: "select",
+          options: [
+            { label: "Seca × (1 + umidade + perda)", value: "somada" },
+            { label: "Seca ÷ (1 − umidade) × (1 + perda)", value: "base_umida" },
+          ],
+        },
         { label: "Possui Estéril?", key: "hasWasteRock", type: "select", options: [{ label: "Sim", value: true }, { label: "Não", value: false }] },
         { label: "Meta Estéril (t/mês)", key: "targetMonthlyWasteRock", disabled: !premises.hasWasteRock },
       ]
@@ -387,9 +394,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                   </label>
                   {field.type === "select" ? (
                     <select
-                      value={premises[field.key as keyof DetailedPremises] as any}
+                      value={String(premises[field.key as keyof DetailedPremises] ?? (field.key === "moistureMode" ? "somada" : ""))}
                       onChange={(e) => {
-                        const val = field.key === "processType" ? e.target.value : parseInt(e.target.value);
+                        const val =
+                          field.key === "processType" || field.key === "moistureMode"
+                            ? e.target.value
+                            : field.key === "hasWasteRock"
+                              ? e.target.value === "true"
+                              : parseInt(e.target.value);
                         if (field.key === "month") handleMonthYearChange(val as number, premises.year);
                         else if (field.key === "year") handleMonthYearChange(premises.month, val as number);
                         else handleChange(field.key as keyof DetailedPremises, val);
