@@ -17,6 +17,7 @@ import {
   Loader2,
   Eye,
   History,
+  ClipboardCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/auth/AuthProvider';
@@ -24,6 +25,8 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
+import { analyzeFleet } from '@/engine/fleet';
+import SummaryView from '@/components/summary/SummaryView';
 import { generatePortableHTML } from '@/utils/export';
 import { dismissLegacyData, readLegacyData, usePlan, useScenarios, type SaveState } from './usePlan';
 
@@ -36,22 +39,23 @@ import ProductionLogging from '@/components/ProductionLogging';
 import ReplanningView from '@/components/ReplanningView';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'resumo', label: 'Resumo', icon: ClipboardCheck },
   { id: 'routes', label: 'Rotas de Transporte', icon: Truck },
   { id: 'premises', label: 'Premissas Operacionais', icon: Settings },
   { id: 'logging', label: 'Lançamento Produção', icon: ClipboardList },
   { id: 'replanning', label: 'Replanejamento', icon: RefreshCw },
   { id: 'calendar', label: 'Calendário', icon: Calendar },
   { id: 'scenarios', label: 'Cenários', icon: Save },
+  { id: 'dashboard', label: 'Detalhes de cálculo', icon: LayoutDashboard },
 ] as const;
 
 const WORKFLOW_STEPS = [
   { id: 'premises', label: '1. Premissas Fundamentais', icon: Settings },
   { id: 'routes', label: '2. Dimensionamento de Frota', icon: Truck },
-  { id: 'dashboard', label: '3. Resultados & Simulação', icon: LayoutDashboard },
+  { id: 'resumo', label: '3. Resultado', icon: ClipboardCheck },
 ] as const;
 
-const fmt3 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const t0 = (n: number) => Math.round(n).toLocaleString('pt-BR');
 
 const SaveIndicator: React.FC<{ state: SaveState; lastSavedAt: Date | null; error: string | null; onRetry: () => void }> = ({
   state,
@@ -111,20 +115,8 @@ const PlannerPage: React.FC = () => {
     [routes, premises, productionLogs],
   );
 
-  // Ajusta automaticamente a frota sugerida (rotas sem ajuste manual)
-  useEffect(() => {
-    if (!canEdit || !results.routeResults?.length) return;
-    const updated = routes.map((route) => {
-      if (route.isManualOverride) return route;
-      const rr = results.routeResults.find((r: { id: string }) => r.id === route.id);
-      if (rr && rr.suggestedTrucks > 0) {
-        const suggested = Math.ceil(rr.suggestedTrucks);
-        if (route.truckCount !== suggested) return { ...route, truckCount: suggested };
-      }
-      return route;
-    });
-    if (updated.some((r, i) => r !== routes[i])) setRoutes(updated);
-  }, [results.routeResults, routes, canEdit, setRoutes]);
+  // Motor de dimensionamento v3 (Resumo, cabeçalho e status da barra lateral)
+  const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
 
   const scenarios: Scenario[] = useMemo(
     () =>
@@ -152,7 +144,7 @@ const PlannerPage: React.FC = () => {
       setActiveTab(WORKFLOW_STEPS[currentStepIndex + 1].id);
     } else {
       setWorkflowMode(false);
-      setActiveTab('dashboard');
+      setActiveTab('resumo');
     }
   };
   const prevStep = () => {
@@ -160,13 +152,19 @@ const PlannerPage: React.FC = () => {
   };
 
   const exportToCSV = () => {
-    const headers = ['Data', 'Rota', 'Produção Planejada (t/dia)', 'Produção Realizada (t/dia)'];
-    const today = new Date().toLocaleDateString('pt-BR');
-    const rows = routes.map((route, idx) => [
-      today,
-      `"${route.name.replace(/"/g, '""')}"`,
-      (results.routeResults[idx]?.dailyProduction || 0).toFixed(2).replace('.', ','),
-      '',
+    const headers = ['Rota', 'Tipo', 'Meta (t/mês úmida)', 'Ciclo (min)', 'Carga por viagem (t)', 'Caminhões alocados', 'Caminhões necessários', 'Capacidade (t/mês)', 'Atendimento (%)', 'Limitado por'];
+    const dec = (n: number, d = 1) => n.toFixed(d).replace('.', ',');
+    const rows = analysis.routes.map((r) => [
+      `"${r.name.replace(/"/g, '""')}"`,
+      r.kind,
+      dec(r.targetWetT, 0),
+      dec(r.cycle.totalMin),
+      dec(r.payloadT),
+      String(r.trucksAllocated),
+      String(r.trucksNeeded),
+      dec(r.capacityWetT, 0),
+      dec(r.ratio * 100, 0),
+      r.limitedBy,
     ]);
     // ; e BOM UTF-8 para abrir corretamente no Excel em português
     const csv = '﻿' + [headers, ...rows].map((r) => r.join(';')).join('\r\n');
@@ -237,8 +235,10 @@ const PlannerPage: React.FC = () => {
   const footer = (
     <>
       <div className="mb-4 flex items-center gap-3">
-        <div className={`h-3 w-3 rounded-full ${results.isTargetAtRisk ? 'animate-pulse bg-red-500' : 'bg-emerald-500'}`} />
-        <span className="text-xs font-medium text-white/70">{results.isTargetAtRisk ? 'Meta em risco' : 'Operação normal'}</span>
+        <div className={`h-3 w-3 rounded-full ${analysis.meetsTarget ? 'bg-emerald-500' : 'bg-red-500'}`} />
+        <span className="text-xs font-medium text-white/70">
+          {analysis.meetsTarget ? 'Atende a meta' : `Não atende: ${analysis.bottleneck?.label.toLowerCase() ?? 'verifique as rotas'}`}
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <button onClick={exportToCSV} className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 py-2 text-xs font-medium text-white transition-colors hover:bg-white/20">
@@ -274,14 +274,15 @@ const PlannerPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <Metric label="ROM - Meta (t/dia)" value={fmt3(results.plannedDailyROM)} className="text-emerald-600" />
-          <Metric label="Planta - Meta (t/dia)" value={fmt3(results.plannedDailyPlanta)} className="text-blue-600" />
-          {premises.processType === 'umido' && (
-            <Metric label="Rejeito - Meta (t/dia)" value={fmt3(results.plannedDailyRejeito)} className="text-amber-600" />
-          )}
+        <div className="flex flex-wrap items-center gap-6">
+          <Metric label="Meta de ROM (t/mês)" value={t0(analysis.romTargetDryT)} className="text-[#1A1A1A]" />
+          <Metric
+            label="Chega à planta (t/mês)"
+            value={t0(analysis.romDeliverableDryT)}
+            className={analysis.meetsTarget ? 'text-emerald-600' : 'text-red-600'}
+          />
           <div className="h-8 w-px bg-black/10" />
-          <Metric label="Movimentação Total (t/dia)" value={fmt3(results.movimentacaoTotalDiaria)} className="text-[#1A1A1A]" />
+          <Metric label="Caminhões: têm / precisam" value={`${analysis.fleet.allocated} / ${analysis.fleet.needed}`} className="text-[#1A1A1A]" />
         </div>
       </header>
 
@@ -355,6 +356,16 @@ const PlannerPage: React.FC = () => {
         <fieldset disabled={!canEdit} className="min-w-0">
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              {activeTab === 'resumo' && (
+                <SummaryView
+                  analysis={analysis}
+                  routes={routes}
+                  setRoutes={setRoutes}
+                  premises={premises}
+                  setPremises={setPremises}
+                  canEdit={canEdit}
+                />
+              )}
               {activeTab === 'dashboard' && (
                 <Dashboard
                   results={results}
@@ -395,8 +406,8 @@ const PlannerPage: React.FC = () => {
 
 const Metric: React.FC<{ label: string; value: string; className?: string }> = ({ label, value, className }) => (
   <div className="flex flex-col items-end">
-    <span className="text-[10px] font-bold tracking-widest text-black/40 uppercase">{label}</span>
-    <span className={`font-mono text-xl font-bold ${className ?? ''}`}>{value}</span>
+    <span className="text-xs text-black/45">{label}</span>
+    <span className={`text-xl font-semibold tabular-nums ${className ?? ''}`}>{value}</span>
   </div>
 );
 
