@@ -1,7 +1,12 @@
 import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
 
-const authUrl = import.meta.env.VITE_NEON_AUTH_URL as string | undefined;
-const dataApiUrl = import.meta.env.VITE_NEON_DATA_API_URL as string | undefined;
+// URLs públicas do projeto Neon (produção). Podem ser trocadas por variáveis de ambiente,
+// por exemplo para apontar para um branch de testes do banco.
+const DEFAULT_AUTH_URL = 'https://ep-twilight-butterfly-b67jaa0n.neonauth.c-2.sa-east-1.aws.neon.tech/neondb/auth';
+const DEFAULT_DATA_API_URL = 'https://ep-twilight-butterfly-b67jaa0n.apirest.c-2.sa-east-1.aws.neon.tech/neondb/rest/v1';
+
+const authUrl = (import.meta.env.VITE_NEON_AUTH_URL as string | undefined) || DEFAULT_AUTH_URL;
+const dataApiUrl = (import.meta.env.VITE_NEON_DATA_API_URL as string | undefined) || DEFAULT_DATA_API_URL;
 
 /** true quando as variáveis do Neon foram configuradas (local ou no Vercel). */
 export const isDbConfigured = Boolean(authUrl && dataApiUrl);

@@ -31,9 +31,8 @@ Teste vencido ou empresa bloqueada: os usuários veem uma tela de acesso suspens
    **Refresh schema cache**.
 3. **Better Auth → Configure Auth** — em *Trusted domains*, adicione `http://localhost:3000`, a URL do app no
    Vercel e `https://*-muxibas-projects.vercel.app` (previews).
-4. **Variáveis** — copie `.env.example` para `.env.local` e preencha `VITE_NEON_AUTH_URL` e
-   `VITE_NEON_DATA_API_URL`. No Vercel, cadastre as mesmas em *Settings → Environment Variables*
-   (Production e Preview) e faça um novo deploy.
+4. **Variáveis (opcional)** — as URLs públicas do projeto já estão em `src/lib/db.ts`. Para usar outro
+   projeto ou branch do Neon, defina `VITE_NEON_AUTH_URL` e `VITE_NEON_DATA_API_URL` (`.env.local` ou Vercel).
 5. **Seu acesso de dono** — cadastre-se no app e depois rode no SQL Editor:
    ```sql
    update public.profiles set is_platform_owner = true where email = 'seu@email.com';
