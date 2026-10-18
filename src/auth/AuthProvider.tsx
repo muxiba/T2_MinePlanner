@@ -122,7 +122,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = useCallback(async () => {
-    await db.auth.signOut();
+    try {
+      const { error } = await db.auth.signOut();
+      if (error) console.error('[T2] signOut falhou no servidor:', error);
+    } catch (e) {
+      console.error('[T2] signOut falhou:', e);
+    } finally {
+      // Sai localmente mesmo que o servidor não responda ou não emita o evento de logout.
+      setSession(null);
+      setProfile(null);
+      setMemberships([]);
+      setDataReady(true);
+      try {
+        for (const k of Object.keys(localStorage)) {
+          // tokens em cache do Neon Auth / Better Auth
+          if (/neon|better-auth|auth-token|session/i.test(k) && !k.startsWith('t2mp.')) localStorage.removeItem(k);
+        }
+      } catch {
+        /* armazenamento indisponível */
+      }
+    }
   }, []);
 
   const role = current?.role ?? null;

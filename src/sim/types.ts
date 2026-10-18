@@ -1,0 +1,216 @@
+/**
+ * Tipos do simulador de eventos discretos (aba Simulação).
+ * Unidades: distância em m, cota em m, tempo em minutos, massa em t, velocidade em km/h.
+ */
+
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Faixa da tabela de velocidade: vale até a rampa efetiva `maxGrade` (%), positiva = subida no sentido do movimento. */
+export interface GradeSpeed {
+  maxGrade: number;
+  kmh: number;
+}
+
+export interface SpeedTable {
+  loaded: GradeSpeed[];
+  empty: GradeSpeed[];
+}
+
+/** Rota importada (eixo da via), sempre orientada do ponto de carga para o ponto de descarga. */
+export interface SimRoute {
+  id: string;
+  name: string;
+  points: Vec3[];
+}
+
+/** Configuração de transporte (A, B, C...): o caminhão/implemento avaliado. */
+export interface TruckConfig {
+  id: string;
+  name: string;
+  payloadT: number;
+  /** volume útil da caçamba (m³); se informado, limita a carga com a densidade do circuito */
+  volumeM3?: number;
+  /** tempo de basculamento/descarga (min) */
+  dumpMin: number;
+  /** manobra para descarga (min) */
+  maneuverMin: number;
+  speed: SpeedTable;
+  /** custo de propriedade/locação (R$/h calendário) */
+  costFixedPerH: number;
+  /** custo operacional (R$/h trabalhada): combustível, operador, pneus, manutenção */
+  costVarPerH: number;
+}
+
+export interface Circuit {
+  id: string;
+  name: string;
+  routeId: string;
+  /** caminhões alocados no circuito (pode ser sobrescrito na busca de frota) */
+  trucks: number;
+  /** densidade solta do material (t/m³), para o limite de volume */
+  density: number;
+  /** postos de carga */
+  loaders: number;
+  /** posicionamento sob o equipamento de carga (min) */
+  loadSpotMin: number;
+  /** taxa efetiva do equipamento de carga durante a carga (t/h) — define o tempo de carga de cada configuração */
+  loaderTph: number;
+  /** caçamba do equipamento de carga (t por passe); se informada, a carga = posicionamento + nº de passes × tempo do passe */
+  bucketT?: number;
+  /** tempo de cada passe (min) */
+  passMin?: number;
+  loaderDf: number;
+  /** balança no trajeto carregado */
+  weighing: boolean;
+  weighMin: number;
+  /** pontos de descarga simultâneos */
+  dumpStations: number;
+  /** nome do destino; circuitos com o mesmo destino compartilham descarga e pulmão */
+  destination: string;
+}
+
+/** Recebimento no destino: pulmão (moega/pilha) com saída pela empilhadeira. */
+export interface Receiving {
+  destination: string;
+  /** capacidade do pulmão (t); 0 = descarga direta limitada pela empilhadeira */
+  bufferT: number;
+  /** taxa da empilhadeira/saída (t/h); 0 = sem restrição */
+  stackerTph: number;
+  stackerDf: number;
+  /** consumo da fábrica a partir do estoque (t/h); 0 = não modelar estoque da fábrica */
+  plantTph: number;
+  plantStockInitialT: number;
+  plantStockMaxT: number;
+}
+
+/** Cenário (condição operacional), aplicado sobre o modelo base. */
+export interface Scenario {
+  id: string;
+  name: string;
+  /** horas de operação do transporte por dia */
+  hoursPerDay: number;
+  days: number;
+  /** disponibilidade física dos caminhões (%) */
+  truckDf: number;
+  /** eficiência operacional (%), minutos produtivos por hora trabalhada */
+  efficiency: number;
+  /** multiplicador dos tempos de viagem (ex.: 1,1 = vias 10% mais lentas) */
+  travelFactor: number;
+  /** multiplicador da taxa da empilhadeira (ex.: 0,8 = restrição de recebimento) */
+  receivingFactor: number;
+  /** coeficiente de variação dos tempos (0,15 = ±15%) */
+  cv: number;
+}
+
+export interface SimModel {
+  routes: SimRoute[];
+  configs: TruckConfig[];
+  circuits: Circuit[];
+  receiving: Receiving[];
+  scenarios: Scenario[];
+  /** limite de velocidade da via (km/h) */
+  speedLimitKmh: number;
+  /** resistência ao rolamento (%), somada à rampa */
+  rollingResistance: number;
+  /** tempo médio de reparo de caminhão (h) */
+  truckMttrH: number;
+  /** meta de transporte (t/dia), para a busca da frota mínima */
+  targetTpd: number;
+  replications: number;
+  /** aquecimento descartado das estatísticas (h) */
+  warmupH: number;
+  /** plano de lavra por períodos (frentes, destinos e movimentações) */
+  plan?: import('./plan').MinePlan;
+}
+
+/* ------------------------------ Resultados ------------------------------ */
+
+export type TruckState =
+  | 'fila_carga'
+  | 'carregando'
+  | 'carregado'
+  | 'fila_balanca'
+  | 'pesando'
+  | 'fila_descarga'
+  | 'descarregando'
+  | 'vazio'
+  | 'manutencao'
+  | 'fora_turno'
+  | 'perdas';
+
+export const STATE_LABELS: Record<TruckState, string> = {
+  fila_carga: 'Fila na carga',
+  carregando: 'Carregando',
+  carregado: 'Viagem carregado',
+  fila_balanca: 'Fila na balança',
+  pesando: 'Pesagem',
+  fila_descarga: 'Fila na descarga',
+  descarregando: 'Manobra e descarga',
+  vazio: 'Retorno vazio',
+  manutencao: 'Manutenção',
+  fora_turno: 'Fora do turno',
+  perdas: 'Perdas operacionais',
+};
+
+/** Trecho de animação: um caminhão em um estado entre t0 e t1 (min). Viagens guardam o sentido. */
+export interface TraceItem {
+  truck: number;
+  circuit: number;
+  state: TruckState;
+  t0: number;
+  t1: number;
+}
+
+export interface RunStats {
+  tonnes: number;
+  trips: number;
+  hours: number;
+  /** t/h no período medido */
+  tph: number;
+  /** t/dia (24 h) */
+  tpd: number;
+  /** tempo médio de cada estado por ciclo (min) */
+  cycle: Partial<Record<TruckState, number>>;
+  cycleMin: number;
+  /** fração do tempo de cada estado (soma 1) */
+  stateShare: Partial<Record<TruckState, number>>;
+  loaderUtil: number;
+  dumpUtil: number;
+  stackerUtil: number;
+  queueLoadMin: number;
+  queueDumpMin: number;
+  bufferAvgT: number;
+  bufferMaxT: number;
+  plantStockoutH: number;
+  plantStockMinT: number;
+  costPerT: number;
+  perCircuit: { name: string; tonnes: number; trips: number; tph: number }[];
+}
+
+export interface Summary {
+  mean: number;
+  lo: number;
+  hi: number;
+}
+
+export interface AggregateStats {
+  reps: number;
+  tph: Summary;
+  tpd: Summary;
+  cycleMin: Summary;
+  queueLoadMin: Summary;
+  queueDumpMin: Summary;
+  loaderUtil: Summary;
+  dumpUtil: Summary;
+  stackerUtil: Summary;
+  plantStockoutH: Summary;
+  costPerT: Summary;
+  cycle: Partial<Record<TruckState, number>>;
+  stateShare: Partial<Record<TruckState, number>>;
+  bufferMaxT: number;
+  perCircuit: { name: string; tph: number; tpd: Summary }[];
+}
