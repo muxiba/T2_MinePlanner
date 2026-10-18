@@ -1,4 +1,5 @@
 import { DetailedPremises, Route, ProductionData, DailyLog, OperationalDiagnostic } from "../types";
+import { analyzeRoute, routeKind, routeRates } from "../engine/fleet";
 
 export function calculateRouteProduction(route: Route, premises: DetailedPremises, effectiveHoursPerMonth: number): ProductionData {
   if (!route.active) {
@@ -36,9 +37,12 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   const travelTimeLoaded = route.distance / speedLoadedMmin;
   const travelTimeEmpty = route.distance / speedEmptyMmin;
   
-  const calculatedCycleTime = premises.loadingTime + travelTimeLoaded + premises.weighingTimeLoaded + premises.dumpingTime + travelTimeEmpty + premises.weighingTimeEmpty;
-  const cycleTime = calculatedCycleTime || 1;
-  const truckCapacity = route.truckCapacity || 1;
+  void travelTimeLoaded;
+  void travelTimeEmpty;
+  // Mesmo motor do dimensionamento (engine/fleet): ciclo, carga útil, DF × UF e massa úmida
+  const v3 = analyzeRoute(route, premises, route.targetMass || 0);
+  const cycleTime = v3.cycle.totalMin || 1;
+  const truckCapacity = v3.payloadT || 1;
   
   const fullFleetTripsPerHour = (60 / cycleTime) * premises.truckCount;
   
@@ -64,8 +68,8 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
     }
   }
 
-  // Massa - Base Úmida (t) = Massa - Base Seca (t) * [1 + (Umidade Natural (%) + Perda de Material (%))]
-  const wetMass = baseSeca * (1 + (premises.umidadeNatural + premises.perdaMaterial) / 100);
+  // Massa úmida pela mesma regra do motor (premissa "Conversão seca → úmida")
+  const wetMass = baseSeca > 0 ? analyzeRoute(route, premises, baseSeca).targetWetT : 0;
   
   // Horas necessárias de produção (h) = Massa - Base Úmida (t) / Frota - Produção Horária (t/h)
   const fullFleetHoursNeeded = fullFleetHourlyProduction > 0 ? wetMass / fullFleetHourlyProduction : 0;
@@ -85,7 +89,10 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   // 2. Actual Production (based on assigned trucks)
   // Effective Count considering availability and efficiency
   // We use the route's own factors for the actual production calculation
-  const truckEO = (route.mechanicalAvailability / 100) * (route.operationalEfficiency / 100);
+  // DF × UF das premissas (fonte única), salvo rota com valores próprios
+  const area = routeKind(route) === 'product' || routeKind(route) === 'tailings' ? 'planta' : 'mina';
+  const rates = routeRates(route, premises, area);
+  const truckEO = (rates.df / 100) * (rates.uf / 100);
   
   // tripsPerHour here is the AVERAGE trips per hour of the site being open
   const tripsPerHour = (60 / cycleTime) * route.truckCount * truckEO;
@@ -102,9 +109,9 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
     ? (wetMass / unitaryProductivity) / (effectiveHoursPerMonth) // effectiveHoursPerMonth already has site EO
     : 0;
   
-  // However, if the route has a DIFFERENT EO than the site, we should adjust
-  const siteEO = (premises.dfMina / 100) * (premises.ufMina / 100);
-  const adjustedSuggestedTrucks = (truckEO > 0 && suggestedTrucks > 0) ? suggestedTrucks * (siteEO / truckEO) : suggestedTrucks;
+  // mesma necessidade do motor de dimensionamento
+  void suggestedTrucks;
+  const adjustedSuggestedTrucks = baseSeca > 0 ? analyzeRoute(route, premises, baseSeca).trucksNeededExact : 0;
 
   return {
     hourlyProduction,
@@ -232,7 +239,7 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
         if (routeResult) {
           // Extra production for this allocation
           // unitaryProductivity is t/h per truck
-          const extraProd = allocation.truckCount * routeResult.unitaryProductivity * allocation.durationHours * (route.mechanicalAvailability / 100) * (route.operationalEfficiency / 100);
+          const extraProd = allocation.truckCount * routeResult.unitaryProductivity * allocation.durationHours * (routeResult.equipmentUtilization / 100);
           allocatedExtraMonthlyProduction += extraProd;
         }
       }

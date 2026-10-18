@@ -2,16 +2,20 @@
  * Motor de dimensionamento de frota (v3).
  *
  * Princípios (prática usual de planejamento de lavra):
- *  1. Cascata de horas única por equipamento:
- *       horas calendário × DF (disponibilidade física) × UF (utilização) × EO (eficiência, min produtivos/h)
- *     = horas efetivas de trabalho no mês.
+ *  0. Fonte única: DF, UF, capacidade do caminhão e número de caminhões vêm das Premissas
+ *     Fundamentais. Uma rota só usa valores próprios se marcada (ownRates).
+ *  1. Horas efetivas no mês = horas do calendário × DF × UF
+ *     (o "EO" das premissas é o próprio DF × UF: não é aplicado de novo).
  *  2. Ciclo do caminhão = carga + ida carregado + descarga + volta vazio + pesagens + fila/manobra.
  *     A carga vem do equipamento de carga (nº de caçambadas × ciclo) quando ele é informado.
  *  3. Carga útil = menor entre a capacidade em peso e o volume da caçamba × densidade solta.
  *  4. Rota limitada pelo menor entre transporte (caminhões) e carga (escavadeira/carregadeira).
  *     Fator de compatibilidade (match factor) MF = (Ncam × t_carga) / (Ncarga × t_ciclo):
  *     MF < 1 → caminhões são o limite (carga espera); MF > 1 → carga é o limite (caminhões em fila).
- *  5. Massa úmida = massa seca / (1 − umidade) × (1 + perdas).
+ *  5. Massa úmida = massa seca × (1 + umidade + perda)  (padrão da planilha)
+ *     ou, opcional, massa seca ÷ (1 − umidade) × (1 + perda) para umidade em base úmida.
+ *  6. Caminhões são inteiros por rota; a folga (frota das premissas − caminhões nas rotas) pode ser
+ *     distribuída pelo otimizador nas rotas que não atingem a meta.
  *
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
@@ -23,6 +27,8 @@ export const TRUCK_EXCHANGE_MIN = 0.6;
 export const TARGET_EO = 83;
 /** Disponibilidade física alvo usada nas sugestões. */
 export const TARGET_DF = 90;
+/** Utilização alvo usada nas sugestões. */
+export const TARGET_UF = 90;
 export const DEFAULT_LOOSE_DENSITY = 2.0;
 
 export const DEFAULT_CATALOG: EquipmentCatalog = {
@@ -119,6 +125,11 @@ export interface RouteAnalysis {
   ratio: number;
   /** caminhões alocados que não aumentam produção (acima da saturação da carga ou da necessidade) */
   idleTrucks: number;
+  /** horas efetivas extras de caminhões da folga alocados por horas (Alocação de Frota Extra) */
+  extraEffHours: number;
+  extraCapacityWetT: number;
+  /** a rota usa valores próprios em vez das premissas */
+  ownRates: boolean;
 }
 
 export type StageId = 'carga' | 'transporte_rom' | 'planta' | 'produto' | 'rejeito' | 'esteril';
@@ -166,7 +177,20 @@ export interface FleetAnalysis {
   systemRatio: number;
   romTargetDryT: number;
   romDeliverableDryT: number;
-  fleet: { allocated: number; needed: number; premise: number; idle: number };
+  fleet: {
+    /** caminhões nas rotas (inteiros, informados pelo planejador) */
+    allocated: number;
+    /** soma do necessário por rota (arredondado para cima em cada rota) */
+    needed: number;
+    neededExact: number;
+    /** frota das premissas (fonte única) */
+    premise: number;
+    idle: number;
+    /** caminhões da folga usados em alocações por horas (equivalente em caminhões-mês) */
+    extraEquivalent: number;
+    /** frota sem rota = premissas − nas rotas − alocações extras */
+    spare: number;
+  };
   actions: Action[];
   classComparison: { routeId: string; routeName: string; options: ClassOption[] } | null;
 }
@@ -187,9 +211,24 @@ export function routeKind(route: Route): RouteKind {
 }
 
 /** Massa úmida transportada a partir da massa seca. */
-export function wetFromDry(dryT: number, moisturePct: number, lossPct: number): number {
+export function wetFromDry(dryT: number, moisturePct: number, lossPct: number, mode: 'somada' | 'base_umida' = 'somada'): number {
   const u = Math.min(Math.max(moisturePct, 0), 60) / 100;
-  return (dryT / (1 - u)) * (1 + Math.max(lossPct, 0) / 100);
+  const p = Math.max(lossPct, 0) / 100;
+  return mode === 'base_umida' ? (dryT / (1 - u)) * (1 + p) : dryT * (1 + u + p);
+}
+
+/** DF, UF e capacidade nominal que valem para a rota (premissas, salvo valores próprios marcados). */
+export function routeRates(route: Route, premises: DetailedPremises, area: 'mina' | 'planta') {
+  const own = route.ownRates === true;
+  const df = own ? route.mechanicalAvailability : area === 'mina' ? premises.dfMina : premises.dfPlanta;
+  const uf = own ? (route.utilization ?? (area === 'mina' ? premises.ufMina : premises.ufPlanta)) : area === 'mina' ? premises.ufMina : premises.ufPlanta;
+  const capacityT = own ? route.truckCapacity : premises.truckCapacity || route.truckCapacity;
+  return { df, uf, capacityT, own };
+}
+
+/** Horas de calendário de caminhões da folga alocados nesta rota (Alocação de Frota Extra). */
+export function extraCalendarHours(route: Route, premises: DetailedPremises) {
+  return (premises.extraAllocations ?? []).filter((a) => a.routeId === route.id).reduce((acc, a) => acc + a.truckCount * a.durationHours, 0);
 }
 
 export function sumCalendarHours(premises: DetailedPremises, area: 'mina' | 'planta'): number {
@@ -286,15 +325,16 @@ export function analyzeRoute(
   route: Route,
   premises: DetailedPremises,
   targetDryT: number,
-  overrides: { payloadT?: number; volumeM3?: number; trucks?: number; df?: number; eo?: number; queueMin?: number; speedFactor?: number } = {},
+  overrides: { payloadT?: number; volumeM3?: number; trucks?: number; df?: number; uf?: number; eo?: number; queueMin?: number; speedFactor?: number; extraHours?: number } = {},
 ): RouteAnalysis {
   const kind = routeKind(route);
   const area = kind === 'product' || kind === 'tailings' ? 'planta' : 'mina';
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : DEFAULT_LOOSE_DENSITY;
-  const targetWetT = wetFromDry(targetDryT, premises.umidadeNatural, premises.perdaMaterial);
+  const targetWetT = wetFromDry(targetDryT, premises.umidadeNatural, premises.perdaMaterial, premises.moistureMode);
+  const rates = routeRates(route, premises, area);
 
   const { payloadT, limitedBy: payloadLimitedBy } = effectivePayload(
-    overrides.payloadT ?? route.truckCapacity,
+    overrides.payloadT ?? rates.capacityT,
     overrides.volumeM3 ?? route.truckVolumeM3,
     density,
   );
@@ -307,19 +347,23 @@ export function analyzeRoute(
   const cycle = cycleFor({ ...route, queueMin: overrides.queueMin ?? route.queueMin }, effPremises, loadMin);
 
   const calendar = sumCalendarHours(premises, area);
-  const uf = area === 'mina' ? premises.ufMina : premises.ufPlanta;
-  const hours = cascade(calendar, overrides.df ?? route.mechanicalAvailability, uf, overrides.eo ?? route.operationalEfficiency);
+  const uf = overrides.uf ?? rates.uf;
+  // horas efetivas = calendário × DF × UF (EO só entra como alavanca de cenário, padrão 100%)
+  const hours = cascade(calendar, overrides.df ?? rates.df, uf, overrides.eo ?? 100);
 
   const truckRateTph = (payloadT * 60) / cycle.totalMin;
   const truckMonthT = truckRateTph * hours.effective;
   const trucksAllocated = Math.max(0, overrides.trucks ?? route.truckCount ?? 0);
   const trucksNeededExact = truckMonthT > 0 ? targetWetT / truckMonthT : 0;
   const trucksNeeded = Math.ceil(trucksNeededExact - 1e-6);
-  const transportCapacityWetT = trucksAllocated * truckMonthT;
+  // caminhões da folga alocados por horas: horas de calendário × DF × UF
+  const extraEffHours = (overrides.extraHours ?? extraCalendarHours(route, premises)) * hours.df * hours.uf * hours.eo;
+  const extraCapacityWetT = truckRateTph * extraEffHours;
+  const transportCapacityWetT = trucksAllocated * truckMonthT + extraCapacityWetT;
 
   let loader: LoaderAnalysis | null = null;
   if (route.loader && loading) {
-    const lh = cascade(calendar, route.loader.availability, uf, overrides.eo ?? route.operationalEfficiency);
+    const lh = cascade(calendar, route.loader.availability, uf, overrides.eo ?? 100);
     const serviceMin = loading.loadMin + TRUCK_EXCHANGE_MIN;
     const count = Math.max(route.loader.count, 0);
     const capacityWetT = count * (60 / serviceMin) * payloadT * lh.effective;
@@ -370,6 +414,9 @@ export function analyzeRoute(
     limitedBy,
     ratio,
     idleTrucks,
+    extraEffHours,
+    extraCapacityWetT,
+    ownRates: rates.own,
   };
 }
 
@@ -417,7 +464,7 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
     stages.push({
       id: 'transporte_rom',
       label: 'Transporte de ROM',
-      needT: wetFromDry(premises.targetMonthlyROM, premises.umidadeNatural, premises.perdaMaterial),
+      needT: wetFromDry(premises.targetMonthlyROM, premises.umidadeNatural, premises.perdaMaterial, premises.moistureMode),
       capacityT: 0,
       ratio: 0,
       unit: 't/mês',
@@ -451,7 +498,11 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
 
   const allocated = analyses.reduce((a, r) => a + r.trucksAllocated, 0);
   const needed = analyses.reduce((a, r) => a + r.trucksNeeded, 0);
+  const neededExact = analyses.reduce((a, r) => a + r.trucksNeededExact, 0);
   const idle = analyses.reduce((a, r) => a + r.idleTrucks, 0);
+  const calMina = sumCalendarHours(premises, 'mina') || 1;
+  const extraEquivalent = active.reduce((a, r) => a + extraCalendarHours(r, premises), 0) / calMina;
+  const spare = Math.max(0, (premises.truckCount || 0) - allocated - extraEquivalent);
 
   const actions = buildActions(active, analyses, premises, targets, stages, plantCapacityDry);
   const mainRom = [...rom].sort((a, b) => b.targetWetT - a.targetWetT)[0];
@@ -473,7 +524,7 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
     systemRatio,
     romTargetDryT,
     romDeliverableDryT,
-    fleet: { allocated, needed, premise: premises.truckCount || 0, idle },
+    fleet: { allocated, needed, neededExact, premise: premises.truckCount || 0, idle, extraEquivalent, spare },
     actions,
     classComparison,
   };
@@ -495,12 +546,12 @@ export function compareTruckClasses(route: Route, premises: DetailedPremises, ta
       trucksNeededExact: a.trucksNeededExact,
       passes: a.loader ? a.loader.passes : null,
       passesStatus: a.loader ? a.loader.passesStatus : null,
-      current: Math.abs(t.payloadT - route.truckCapacity) < 0.5,
+      current: Math.abs(t.payloadT - current.payloadT) < 0.5,
     };
   });
   if (!options.some((o) => o.current)) {
     options.unshift({
-      truck: { id: 'atual', name: `Frota atual (${fmtN(route.truckCapacity, 0)} t)`, payloadT: route.truckCapacity, volumeM3: route.truckVolumeM3 ?? 0 },
+      truck: { id: 'atual', name: `Frota atual (${fmtN(current.payloadT, 0)} t)`, payloadT: current.payloadT, volumeM3: route.truckVolumeM3 ?? 0 },
       payloadT: current.payloadT,
       trucksNeeded: current.trucksNeeded,
       trucksNeededExact: current.trucksNeededExact,
@@ -661,20 +712,21 @@ function buildActions(
       (r) => ({ queueMin: (r.queueMin ?? 0) / 2 }),
     );
   }
-  const lowDf = routes.filter((r) => r.mechanicalAvailability < TARGET_DF);
+  const rateOf = (r: Route) => routeRates(r, premises, routeKind(r) === 'product' || routeKind(r) === 'tailings' ? 'planta' : 'mina');
+  const lowDf = routes.filter((r) => rateOf(r).df < TARGET_DF);
   if (lowDf.length) {
     lever(
       `Elevar a disponibilidade física dos caminhões para ${TARGET_DF}%`,
-      `Rotas abaixo de ${TARGET_DF}%: ${lowDf.map((r) => `"${r.name}" (${fmtN(r.mechanicalAvailability, 0)}%)`).join(', ')}. Manutenção preventiva e estoque de peças críticas.`,
-      (r) => ({ df: Math.max(r.mechanicalAvailability, TARGET_DF) }),
+      `Hoje: ${[...new Set(lowDf.map((r) => `${fmtN(rateOf(r).df, 0)}%`))].join(', ')}. Manutenção preventiva e estoque de peças críticas.`,
+      (r) => ({ df: Math.max(rateOf(r).df, TARGET_DF) }),
     );
   }
-  const lowEo = routes.filter((r) => r.operationalEfficiency < TARGET_EO);
-  if (lowEo.length) {
+  const lowUf = routes.filter((r) => rateOf(r).uf < TARGET_UF);
+  if (lowUf.length) {
     lever(
-      `Elevar a eficiência operacional para ${TARGET_EO}% (50 min/h)`,
-      `Rotas abaixo: ${lowEo.map((r) => `"${r.name}" (${fmtN(r.operationalEfficiency, 0)}%)`).join(', ')}. Reduzir paradas de troca de turno, refeição em revezamento e abastecimento fora do horário de pico.`,
-      (r) => ({ eo: Math.max(r.operationalEfficiency, TARGET_EO) }),
+      `Elevar a utilização (UF) para ${TARGET_UF}%`,
+      `Hoje: ${[...new Set(lowUf.map((r) => `${fmtN(rateOf(r).uf, 0)}%`))].join(', ')}. Troca de turno no campo, refeição em revezamento e abastecimento fora do pico aumentam as horas trabalhadas.`,
+      (r) => ({ uf: Math.max(rateOf(r).uf, TARGET_UF) }),
     );
   }
   lever(
@@ -691,7 +743,7 @@ function buildActions(
         kind: 'equipamento',
         priority: 3,
         title: `${a.name}: caçamba limita a carga pelo volume`,
-        detail: `Com ${fmtN(r.truckVolumeM3, 0)} m³ e densidade solta de ${fmtN(density, 2)} t/m³ cabem ${fmtN(a.payloadT, 1)} t, abaixo das ${fmtN(r.truckCapacity, 0)} t de capacidade. Uma caçamba maior (prolongador lateral) aproveita a capacidade nominal.`,
+        detail: `Com ${fmtN(r.truckVolumeM3, 0)} m³ e densidade solta de ${fmtN(density, 2)} t/m³ cabem ${fmtN(a.payloadT, 1)} t, abaixo das ${fmtN(rateOf(r).capacityT, 0)} t de capacidade. Uma caçamba maior (prolongador lateral) aproveita a capacidade nominal.`,
       });
     }
     if (a.loader && a.loader.passesStatus !== 'ok') {
@@ -747,3 +799,92 @@ export function applySuggestedFleet(routes: Route[], analysis: FleetAnalysis): R
   return routes.map((r) => (need.has(r.id) ? { ...r, truckCount: need.get(r.id)!, isManualOverride: true } : r));
 }
 
+
+/* -------------------------------------------------------------------------- */
+/* Otimização da alocação da frota                                             */
+/* -------------------------------------------------------------------------- */
+
+export interface OptimizeResult {
+  routes: Route[];
+  /** caminhões acrescentados por rota */
+  moves: { routeId: string; name: string; from: number; to: number }[];
+  beforeDeliverableDryT: number;
+  afterDeliverableDryT: number;
+  meetsTarget: boolean;
+  /** caminhões da frota que continuam sem rota (reserva) */
+  spareLeft: number;
+  /** caminhões que faltariam (além da frota) para todas as rotas atingirem a meta */
+  missingForTarget: number;
+}
+
+/**
+ * Distribui a frota das premissas entre as rotas para atingir as metas.
+ * 'folga': mantém o que o planejador alocou e acrescenta só os caminhões sem rota.
+ * 'zero': redistribui toda a frota do zero.
+ * Regra: cada caminhão vai para a rota com a menor razão capacidade ÷ meta (ROM primeiro no empate),
+ * desde que ele aumente a capacidade (não adianta caminhão onde a carga é o gargalo).
+ * Maximizar a menor razão é o que maximiza o que chega à planta e o atendimento de todos os fluxos.
+ */
+export function optimizeFleet(routes: Route[], premises: DetailedPremises, mode: 'folga' | 'zero' = 'folga'): OptimizeResult {
+  const targets = routeTargets(routes, premises);
+  const before = analyzeFleet(routes, premises);
+  const active = routes.filter((r) => r.active && (targets.get(r.id) || 0) > 0);
+  const count = new Map<string, number>(routes.map((r) => [r.id, mode === 'zero' && r.active ? 0 : Math.max(0, Math.round(r.truckCount || 0))]));
+  const used = routes.filter((r) => r.active).reduce((a, r) => a + (count.get(r.id) || 0), 0);
+  let pool = Math.max(0, Math.floor((premises.truckCount || 0) - used - before.fleet.extraEquivalent + 1e-9));
+  const ratio = (r: Route, n: number) => analyzeRoute(r, premises, targets.get(r.id) || 0, { trucks: n }).ratio;
+  const pick = () => {
+    let best: Route | null = null;
+    let bestKey = Infinity;
+    for (const r of active) {
+      const n = count.get(r.id) || 0;
+      const now = ratio(r, n);
+      if (now >= 0.999) continue;
+      if (ratio(r, n + 1) <= now + 1e-9) continue; // carga é o gargalo: caminhão não ajuda
+      const key = now - (routeKind(r) === 'rom' ? 1e-6 : 0);
+      if (key < bestKey) {
+        bestKey = key;
+        best = r;
+      }
+    }
+    return best;
+  };
+  while (pool > 0) {
+    const r = pick();
+    if (!r) break;
+    count.set(r.id, (count.get(r.id) || 0) + 1);
+    pool--;
+  }
+  // quantos faltariam além da frota
+  const virtual = new Map(count);
+  let missing = 0;
+  for (let guard = 0; guard < 200; guard++) {
+    let best: Route | null = null;
+    let bestKey = Infinity;
+    for (const r of active) {
+      const n = virtual.get(r.id) || 0;
+      const now = ratio(r, n);
+      if (now >= 0.999 || ratio(r, n + 1) <= now + 1e-9) continue;
+      if (now < bestKey) {
+        bestKey = now;
+        best = r;
+      }
+    }
+    if (!best) break;
+    virtual.set(best.id, (virtual.get(best.id) || 0) + 1);
+    missing++;
+  }
+  const next = routes.map((r) => (r.active ? { ...r, truckCount: count.get(r.id) || 0, isManualOverride: true } : r));
+  const after = analyzeFleet(next, premises);
+  return {
+    routes: next,
+    moves: routes
+      .filter((r) => r.active && (count.get(r.id) || 0) !== Math.round(r.truckCount || 0))
+      .map((r) => ({ routeId: r.id, name: r.name, from: Math.round(r.truckCount || 0), to: count.get(r.id) || 0 })),
+    beforeDeliverableDryT: before.romDeliverableDryT,
+    afterDeliverableDryT: after.romDeliverableDryT,
+    meetsTarget: after.meetsTarget,
+    spareLeft: pool,
+    missingForTarget: missing,
+  };
+}
