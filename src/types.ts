@@ -11,6 +11,53 @@ export interface Route {
   processType?: 'umido' | 'seco';
   targetMass?: number; // tons (monthly target for this specific route)
   isManualOverride?: boolean; // If true, auto-sync won't touch this route
+
+  // --- Dimensionamento v3 (opcionais; rotas antigas continuam válidas) ---
+  /** Tipo de fluxo. Se ausente, é deduzido do nome (compatibilidade). */
+  kind?: RouteKind;
+  /** 'calculated' = ciclo pelas velocidades e DMT; 'informed' = usa cycleTime digitado (cronometrado). */
+  cycleMode?: 'calculated' | 'informed';
+  /** Fila + manobra por ciclo (min). */
+  queueMin?: number;
+  /** Volume coroado da caçamba do caminhão (m³). Se informado, limita a carga útil pelo volume. */
+  truckVolumeM3?: number;
+  /** Equipamento de carga dedicado à rota. Se ausente, usa o tempo de carga das premissas e não limita a rota. */
+  loader?: LoaderSetup;
+}
+
+export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';
+
+export interface LoaderSetup {
+  name: string;
+  /** Quantidade de equipamentos de carga atendendo a rota. */
+  count: number;
+  /** Capacidade da caçamba (m³). */
+  bucketM3: number;
+  /** Fator de enchimento da caçamba (%). */
+  fillFactor: number;
+  /** Ciclo de uma caçambada (s). */
+  cycleSec: number;
+  /** Disponibilidade física do equipamento de carga (%). */
+  availability: number;
+}
+
+export interface TruckClass {
+  id: string;
+  name: string;
+  payloadT: number;
+  volumeM3: number;
+}
+
+export interface LoaderClass {
+  id: string;
+  name: string;
+  bucketM3: number;
+  cycleSec: number;
+}
+
+export interface EquipmentCatalog {
+  trucks: TruckClass[];
+  loaders: LoaderClass[];
 }
 
 export interface DailyCalendarData {
@@ -82,6 +129,12 @@ export interface DetailedPremises {
   // Estéril
   hasWasteRock: boolean;
   targetMonthlyWasteRock: number;
+
+  // --- Dimensionamento v3 (opcionais) ---
+  /** Densidade do material solto, úmido (t/m³). Usada no limite de volume e no cálculo de caçambadas. */
+  looseDensity?: number;
+  /** Catálogo de classes de equipamentos para comparação (editável pela empresa). */
+  equipmentCatalog?: EquipmentCatalog;
 }
 
 export interface DailyLog {
