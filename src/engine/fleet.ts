@@ -19,7 +19,7 @@
  *
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
-import type { DetailedPremises, EquipmentCatalog, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 
 /** Tempo de troca de caminhão sob o equipamento de carga (posicionamento), em minutos. */
 export const TRUCK_EXCHANGE_MIN = 0.6;
@@ -896,5 +896,89 @@ export function optimizeFleet(routes: Route[], premises: DetailedPremises, mode:
     meetsTarget: after.meetsTarget,
     spareLeft: pool,
     missingForTarget: missing,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Coerência rotas + frota extra ≤ frota das premissas                          */
+/* -------------------------------------------------------------------------- */
+
+/** Caminhões das premissas que não estão em nenhuma rota ativa (inteiro). */
+export function trucksWithoutRoute(routes: Route[], premises: DetailedPremises): number {
+  const onRoutes = routes.filter((r) => r.active).reduce((a, r) => a + Math.max(0, Math.round(r.truckCount || 0)), 0);
+  return Math.max(0, Math.floor((premises.truckCount || 0) - onRoutes + 1e-9));
+}
+
+/**
+ * Ajusta as alocações da frota extra para caberem nos caminhões sem rota:
+ * nenhuma alocação usa mais caminhões do que os sem rota, e a soma das horas-caminhão
+ * não passa de (sem rota × horas do mês). Alocações de rotas apagadas/inativas saem.
+ * Devolve null quando nada muda.
+ */
+export function fitExtraAllocations(routes: Route[], premises: DetailedPremises): ExtraFleetAllocation[] | null {
+  const list = premises.extraAllocations ?? [];
+  if (!list.length) return null;
+  const free = trucksWithoutRoute(routes, premises);
+  const cal = sumCalendarHours(premises, 'mina') || 1;
+  let budget = free * cal;
+  const activeIds = new Set(routes.filter((r) => r.active).map((r) => r.id));
+  const out: ExtraFleetAllocation[] = [];
+  let changed = false;
+  for (const x of list) {
+    if (!activeIds.has(x.routeId)) {
+      changed = true;
+      continue;
+    }
+    let trucks = Math.min(x.truckCount, free);
+    let hours = Math.min(x.durationHours, cal);
+    if (trucks * hours > budget + 1e-6) {
+      // primeiro reduz caminhões inteiros, depois as horas
+      trucks = Math.min(trucks, Math.floor(budget / Math.max(hours, 1e-9) + 1e-9));
+      if (trucks <= 0 && budget > 1e-6) {
+        trucks = 1;
+        hours = budget;
+      }
+    }
+    if (trucks <= 0 || hours <= 0) {
+      changed = true;
+      continue;
+    }
+    if (trucks !== x.truckCount || Math.abs(hours - x.durationHours) > 1e-6) changed = true;
+    budget -= trucks * hours;
+    out.push({ ...x, truckCount: trucks, durationHours: hours });
+  }
+  return changed ? out : null;
+}
+
+export interface AdjustResult {
+  routes: Route[];
+  extraAllocations: ExtraFleetAllocation[];
+  moves: { routeId: string; name: string; from: number; to: number }[];
+  /** caminhões que ficam sem rota (frota extra) */
+  freeTrucks: number;
+  /** caminhões que faltariam para todas as rotas baterem a meta */
+  shortfall: number;
+  meetsTarget: boolean;
+}
+
+/**
+ * Ajusta a frota inteira à produção: cada rota recebe o número inteiro de caminhões que atende a sua
+ * meta (necessário exato arredondado para cima), sem contar a frota extra. Se a frota não der para
+ * todas, os caminhões vão para quem está mais longe da meta (ROM primeiro). O que sobra fica sem rota,
+ * na frota extra, e as alocações por horas são reajustadas para caberem nessa sobra.
+ */
+export function adjustFleetToTarget(routes: Route[], premises: DetailedPremises): AdjustResult {
+  const clean = { ...premises, extraAllocations: [] };
+  const opt = optimizeFleet(routes, clean, 'zero');
+  const freeTrucks = trucksWithoutRoute(opt.routes, premises);
+  const fitted = fitExtraAllocations(opt.routes, premises) ?? premises.extraAllocations ?? [];
+  const after = analyzeFleet(opt.routes, { ...premises, extraAllocations: fitted });
+  return {
+    routes: opt.routes,
+    extraAllocations: fitted,
+    moves: opt.moves,
+    freeTrucks,
+    shortfall: opt.missingForTarget,
+    meetsTarget: after.meetsTarget,
   };
 }

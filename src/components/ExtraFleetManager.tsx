@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, Info, Plus, Trash2, Truck } from 'lucide-react';
 import type { DetailedPremises, ExtraFleetAllocation, Route } from '../types';
-import { sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
+import { sumCalendarHours, trucksWithoutRoute, type FleetAnalysis } from '@/engine/fleet';
 
 /**
  * Frota extra (folga): caminhões das premissas que não estão em nenhuma rota podem ser alocados
@@ -22,17 +22,29 @@ const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, 
 const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, analysis }) => {
   const active = routes.filter((r) => r.active && analysis.routes.some((a) => a.id === r.id));
   const calMonth = sumCalendarHours(premises, 'mina');
-  // caminhões sem rota (sem contar as alocações por horas)
-  const unassigned = Math.max(0, Math.floor((premises.truckCount || 0) - analysis.fleet.allocated + 1e-9));
-  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
-    routeId: active[0]?.id ?? '',
-    truckCount: Math.max(1, unassigned),
-    durationHours: calMonth,
-    description: '',
-  });
+  // caminhões da frota que não estão em nenhuma rota = frota extra
+  const unassigned = trucksWithoutRoute(routes, premises);
   const pool = unassigned * calMonth;
   const used = (premises.extraAllocations ?? []).reduce((a, x) => a + x.truckCount * x.durationHours, 0);
   const remaining = Math.max(0, pool - used);
+  // caminhões ainda livres para o mês inteiro
+  const freeNow = Math.max(0, Math.floor(remaining / (calMonth || 1) + 1e-9));
+  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
+    routeId: active[0]?.id ?? '',
+    truckCount: Math.max(1, freeNow),
+    durationHours: calMonth,
+    description: '',
+  });
+  // acompanha a frota: quando sobram ou faltam caminhões, o formulário propõe os livres
+  useEffect(() => {
+    setForm((f) => ({
+      ...f,
+      routeId: active.some((r) => r.id === f.routeId) ? f.routeId : active[0]?.id ?? '',
+      truckCount: Math.max(1, freeNow || Math.min(f.truckCount, unassigned) || 1),
+      durationHours: Math.min(f.durationHours || calMonth, calMonth),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freeNow, unassigned, calMonth, active.length]);
   const req = form.truckCount * form.durationHours;
 
   const add = () => {
@@ -55,7 +67,7 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
           <div>
             <h4 className="text-lg font-bold text-black/80">Frota extra por horas (folga)</h4>
             <p className="text-xs text-black/45">
-              {unassigned} caminhão(ões) sem rota. Escolha a frente, quantos caminhões e por quantas horas (o padrão é o mês inteiro). A produção entra na capacidade da rota.
+              {unassigned} caminhão(ões) sem rota{used > 0 ? ` (${freeNow} livre(s) para o mês inteiro)` : ''}. Escolha a frente, quantos caminhões e por quantas horas (o padrão é o mês inteiro). A produção entra na capacidade da rota.
             </p>
           </div>
         </div>

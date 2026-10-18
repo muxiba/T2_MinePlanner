@@ -26,7 +26,7 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
-import { analyzeFleet } from '@/engine/fleet';
+import { analyzeFleet, fitExtraAllocations } from '@/engine/fleet';
 import SummaryView from '@/components/summary/SummaryView';
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
@@ -117,6 +117,14 @@ const PlannerPage: React.FC = () => {
     () => calculateTotalProduction(routes, premises, productionLogs),
     [routes, premises, productionLogs],
   );
+
+  // Rotas + frota extra nunca passam da frota das premissas: ao mudar rotas ou frota,
+  // as alocações por horas são reajustadas para caberem nos caminhões sem rota.
+  useEffect(() => {
+    if (plan.status !== 'ready' || !canEdit) return;
+    const fitted = fitExtraAllocations(routes, premises);
+    if (fitted) setPremises((prev) => ({ ...prev, extraAllocations: fitted }));
+  }, [routes, premises, plan.status, canEdit, setPremises]);
 
   // Motor de dimensionamento v3 (Resumo, cabeçalho e status da barra lateral)
   const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);

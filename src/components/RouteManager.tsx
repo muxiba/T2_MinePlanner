@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
-import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
+import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
 import type { DetailedPremises, Route } from '../types';
-import { analyzeFleet, optimizeFleet, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
+import { adjustFleetToTarget, analyzeFleet, optimizeFleet, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
 import ExtraFleetManager from './ExtraFleetManager';
 
 /**
@@ -31,10 +31,26 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
   const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
   const optFolga = useMemo(() => optimizeFleet(routes, premises, 'folga'), [routes, premises]);
   const optZero = useMemo(() => optimizeFleet(routes, premises, 'zero'), [routes, premises]);
+  const adjust = useMemo(() => adjustFleetToTarget(routes, premises), [routes, premises]);
   const f = analysis.fleet;
   const over = f.allocated + f.extraEquivalent > f.premise + 1e-6;
+  const [adjustMsg, setAdjustMsg] = React.useState<string | null>(null);
 
-  const handleUpdateRoute = (id: string, updates: Partial<Route>) => setRoutes(routes.map((r) => (r.id === id ? { ...r, ...updates } : r)));
+  /** Ajusta toda a frota: cada rota com o inteiro que atende a meta; a sobra vai para a frota extra. */
+  const applyAdjust = () => {
+    setRoutes(adjust.routes);
+    setPremises((prev) => ({ ...prev, extraAllocations: adjust.extraAllocations }));
+    const parts = adjust.moves.length ? adjust.moves.map((m) => `${m.name}: ${m.from} → ${m.to}`).join(' · ') : 'as rotas já estavam ajustadas';
+    setAdjustMsg(
+      `${parts}. ${adjust.freeTrucks} caminhão(ões) ficam na frota extra.` +
+        (adjust.shortfall > 0 ? ` Faltam ${adjust.shortfall} caminhão(ões) para todas as rotas baterem a meta.` : ''),
+    );
+  };
+
+  const handleUpdateRoute = (id: string, updates: Partial<Route>) => {
+    setAdjustMsg(null);
+    setRoutes(routes.map((r) => (r.id === id ? { ...r, ...updates } : r)));
+  };
   const handleDeleteRoute = (id: string) => setRoutes(routes.filter((r) => r.id !== id));
 
   const handleAddRoute = () => {
@@ -125,6 +141,16 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
             tone={analysis.meetsTarget ? 'ok' : 'bad'}
           />
         </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button onClick={applyAdjust} className="inline-flex items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+            <Scale size={15} /> Ajustar frota à meta
+          </button>
+          <span className="text-xs text-black/50">
+            Cada rota recebe o número inteiro de caminhões que atende a sua meta (arredondado para cima); o que sobrar da frota de {f.premise} vai para a frota extra.
+          </span>
+        </div>
+        {adjustMsg && <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-900">{adjustMsg}</p>}
 
         {over && (
           <p className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -217,6 +243,9 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                 <div className="flex items-center gap-2">
                   <button onClick={() => handleUpdateRoute(route.id, { active: !route.active })} className={`rounded-xl p-2.5 ${route.active ? 'bg-emerald-50 text-emerald-500' : 'bg-black/5 text-black/40'}`} title={route.active ? 'Desativar' : 'Ativar'}>
                     <Activity size={18} />
+                  </button>
+                  <button onClick={applyAdjust} className="rounded-xl bg-black/5 p-2.5 text-black/50 hover:bg-emerald-50 hover:text-emerald-600" title="Ajustar toda a frota à meta (inteiro acima em cada rota, sobra para a frota extra)">
+                    <Scale size={18} />
                   </button>
                   <button onClick={() => setEditingId(editing ? null : route.id)} className={`rounded-xl p-2.5 ${editing ? 'bg-emerald-500 text-white' : 'bg-black/5 text-black/40 hover:bg-black/10'}`} title="Editar">
                     {editing ? <Check size={18} /> : <Edit2 size={18} />}

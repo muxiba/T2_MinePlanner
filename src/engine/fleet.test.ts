@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeFleet, analyzeRoute, cascade, loaderLoading, optimizeFleet, routeTargets, wetFromDry } from './fleet';
+import { adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
 import type { Route } from '../types';
 
@@ -127,5 +127,33 @@ describe('sistema', () => {
     // frota curta: aponta quantos faltam
     const short = optimizeFleet(base, { ...P, truckCount: 1 }, 'folga');
     expect(short.missingForTarget).toBeGreaterThan(0);
+  });
+});
+
+describe('ajuste da frota à meta e frota extra', () => {
+  const base: Route[] = INITIAL_ROUTES.map((r) => ({ ...r, truckCount: 0 }));
+  it('cada rota recebe o inteiro acima do necessário e a sobra fica sem rota', () => {
+    const prem = { ...P, truckCount: 40, extraAllocations: [] };
+    const adj = adjustFleetToTarget(base, prem);
+    const a = analyzeFleet(adj.routes, prem);
+    for (const r of a.routes) if (r.targetWetT > 0 && !r.loader) expect(r.trucksAllocated).toBe(Math.ceil(r.trucksNeededExact - 1e-6));
+    const used = adj.routes.filter((r) => r.active).reduce((s, r) => s + r.truckCount, 0);
+    expect(used + adj.freeTrucks).toBe(40);
+  });
+  it('rotas + frota extra nunca passam da frota', () => {
+    const cal = sumCalendarHours(P, 'mina');
+    const routes = base.map((r, i) => ({ ...r, truckCount: i === 0 ? 8 : 1 }));
+    const onRoutes = routes.filter((r) => r.active).reduce((s, r) => s + r.truckCount, 0);
+    const prem = { ...P, truckCount: onRoutes + 2, extraAllocations: [{ id: 'x', routeId: routes[0].id, truckCount: 2, durationHours: cal, description: '' }] };
+    expect(fitExtraAllocations(routes, prem)).toBe(null); // cabe
+    // a rota ganha 1 caminhão: a frota extra perde 1
+    const more = routes.map((r, i) => (i === 0 ? { ...r, truckCount: 9 } : r));
+    const fit = fitExtraAllocations(more, prem)!;
+    expect(fit[0].truckCount).toBe(1);
+    expect(trucksWithoutRoute(more, prem)).toBe(1);
+    // a rota perde 2: sobra 4 sem rota, alocação de 2 continua
+    const less = routes.map((r, i) => (i === 0 ? { ...r, truckCount: 6 } : r));
+    expect(trucksWithoutRoute(less, prem)).toBe(4);
+    expect(fitExtraAllocations(less, prem)).toBe(null);
   });
 });
