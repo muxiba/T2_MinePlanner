@@ -227,6 +227,15 @@ export function routeRates(route: Route, premises: DetailedPremises, area: 'mina
 }
 
 /** Horas de calendário de caminhões da folga alocados nesta rota (Alocação de Frota Extra). */
+/** Fila por ciclo e volume da caçamba: valor da rota, se informado, senão o das premissas. */
+export function routeQueueMin(route: Route, premises: DetailedPremises) {
+  return route.queueMin ?? premises.queueMin ?? 0;
+}
+export function routeVolumeM3(route: Route, premises: DetailedPremises) {
+  const v = route.truckVolumeM3 ?? premises.truckVolumeM3;
+  return v && v > 0 ? v : undefined;
+}
+
 export function extraCalendarHours(route: Route, premises: DetailedPremises) {
   return (premises.extraAllocations ?? []).filter((a) => a.routeId === route.id).reduce((acc, a) => acc + a.truckCount * a.durationHours, 0);
 }
@@ -335,7 +344,7 @@ export function analyzeRoute(
 
   const { payloadT, limitedBy: payloadLimitedBy } = effectivePayload(
     overrides.payloadT ?? rates.capacityT,
-    overrides.volumeM3 ?? route.truckVolumeM3,
+    overrides.volumeM3 ?? routeVolumeM3(route, premises),
     density,
   );
 
@@ -344,7 +353,7 @@ export function analyzeRoute(
 
   const speedFactor = overrides.speedFactor ?? 1;
   const effPremises = speedFactor === 1 ? premises : { ...premises, velocidadeCheio: premises.velocidadeCheio * speedFactor, velocidadeVazio: premises.velocidadeVazio * speedFactor };
-  const cycle = cycleFor({ ...route, queueMin: overrides.queueMin ?? route.queueMin }, effPremises, loadMin);
+  const cycle = cycleFor({ ...route, queueMin: overrides.queueMin ?? routeQueueMin(route, premises) }, effPremises, loadMin);
 
   const calendar = sumCalendarHours(premises, area);
   const uf = overrides.uf ?? rates.uf;
@@ -551,7 +560,7 @@ export function compareTruckClasses(route: Route, premises: DetailedPremises, ta
   });
   if (!options.some((o) => o.current)) {
     options.unshift({
-      truck: { id: 'atual', name: `Frota atual (${fmtN(current.payloadT, 0)} t)`, payloadT: current.payloadT, volumeM3: route.truckVolumeM3 ?? 0 },
+      truck: { id: 'atual', name: `Frota atual (${fmtN(current.payloadT, 0)} t)`, payloadT: current.payloadT, volumeM3: routeVolumeM3(route, premises) ?? 0 },
       payloadT: current.payloadT,
       trucksNeeded: current.trucksNeeded,
       trucksNeededExact: current.trucksNeededExact,
@@ -704,12 +713,12 @@ function buildActions(
     });
   };
 
-  const withQueue = routes.filter((r) => (r.queueMin ?? 0) > 0);
+  const withQueue = routes.filter((r) => routeQueueMin(r, premises) > 0);
   if (withQueue.length) {
     lever(
-      'Reduzir fila e manobra pela metade',
-      `Hoje há ${withQueue.map((r) => `${fmtN(r.queueMin ?? 0)} min em "${r.name}"`).join(', ')} por ciclo. Organizar o despacho (sequência de carga, praça de manobra, sinalização) reduz esse tempo.`,
-      (r) => ({ queueMin: (r.queueMin ?? 0) / 2 }),
+      'Reduzir a fila pela metade',
+      `Hoje há ${withQueue.map((r) => `${fmtN(routeQueueMin(r, premises))} min em "${r.name}"`).join(', ')} por ciclo. Organizar o despacho (sequência de carga, praça de manobra, sinalização) reduz esse tempo.`,
+      (r) => ({ queueMin: routeQueueMin(r, premises) / 2 }),
     );
   }
   const rateOf = (r: Route) => routeRates(r, premises, routeKind(r) === 'product' || routeKind(r) === 'tailings' ? 'planta' : 'mina');
@@ -738,12 +747,13 @@ function buildActions(
   // 4. Equipamento: carga útil por volume e caçambadas
   for (const a of analyses) {
     const r = byId.get(a.id)!;
-    if (a.payloadLimitedBy === 'volume' && r.truckVolumeM3) {
+    const vol = routeVolumeM3(r, premises);
+    if (a.payloadLimitedBy === 'volume' && vol) {
       actions.push({
         kind: 'equipamento',
         priority: 3,
         title: `${a.name}: caçamba limita a carga pelo volume`,
-        detail: `Com ${fmtN(r.truckVolumeM3, 0)} m³ e densidade solta de ${fmtN(density, 2)} t/m³ cabem ${fmtN(a.payloadT, 1)} t, abaixo das ${fmtN(rateOf(r).capacityT, 0)} t de capacidade. Uma caçamba maior (prolongador lateral) aproveita a capacidade nominal.`,
+        detail: `Com ${fmtN(vol, 0)} m³ e densidade solta de ${fmtN(density, 2)} t/m³ cabem ${fmtN(a.payloadT, 1)} t, abaixo das ${fmtN(rateOf(r).capacityT, 0)} t de capacidade. Uma caçamba maior (prolongador lateral) aproveita a capacidade nominal.`,
       });
     }
     if (a.loader && a.loader.passesStatus !== 'ok') {

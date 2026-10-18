@@ -41,15 +41,15 @@ import ProductionLogging from '@/components/ProductionLogging';
 import ReplanningView from '@/components/ReplanningView';
 
 const NAV_ITEMS = [
-  { id: 'resumo', label: 'Resumo', icon: ClipboardCheck },
-  { id: 'simulacao', label: 'Simulação', icon: Waypoints },
-  { id: 'routes', label: 'Rotas de Transporte', icon: Truck },
-  { id: 'premises', label: 'Premissas Operacionais', icon: Settings },
+  { id: 'premises', label: '1. Premissas Fundamentais', icon: Settings },
+  { id: 'routes', label: '2. Dimensionamento de Frota', icon: Truck },
+  { id: 'resumo', label: '3. Resultado', icon: ClipboardCheck },
   { id: 'logging', label: 'Lançamento Produção', icon: ClipboardList },
   { id: 'replanning', label: 'Replanejamento', icon: RefreshCw },
   { id: 'calendar', label: 'Calendário', icon: Calendar },
   { id: 'scenarios', label: 'Cenários', icon: Save },
   { id: 'dashboard', label: 'Detalhes de cálculo', icon: LayoutDashboard },
+  { id: 'simulacao', label: 'Simulação', icon: Waypoints },
 ] as const;
 
 const WORKFLOW_STEPS = [

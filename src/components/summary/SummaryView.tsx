@@ -105,13 +105,14 @@ const ACTION_ICON: Record<Action['kind'], React.ElementType> = {
 const inputCls =
   'w-full rounded-lg border border-black/12 bg-white px-2.5 py-1.5 text-sm tabular-nums focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25 focus:outline-none disabled:bg-black/[0.03]';
 
-const NumField: React.FC<{ label: string; value: number | undefined; onChange: (v: number) => void; step?: number; suffix?: string; hint?: string }> = ({
+const NumField: React.FC<{ label: string; value: number | undefined; onChange: (v: number) => void; step?: number; suffix?: string; hint?: string; onReset?: () => void }> = ({
   label,
   value,
   onChange,
   step = 1,
   suffix,
   hint,
+  onReset,
 }) => {
   const id = React.useId();
   return (
@@ -128,7 +129,16 @@ const NumField: React.FC<{ label: string; value: number | undefined; onChange: (
         value={Number.isFinite(value) ? value : ''}
         onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
       />
-      {hint && <p className="mt-1 text-[11px] text-black/40">{hint}</p>}
+      {(hint || onReset) && (
+        <p className="mt-1 text-[11px] text-black/40">
+          {hint}
+          {onReset && (
+            <button type="button" onClick={onReset} className="ml-1 font-medium text-emerald-700 underline">
+              usar o das premissas
+            </button>
+          )}
+        </p>
+      )}
     </div>
   );
 };
@@ -137,8 +147,9 @@ const RouteEditor: React.FC<{
   route: Route;
   analysis: RouteAnalysis;
   catalog: EquipmentCatalog;
+  premises: DetailedPremises;
   onChange: (r: Route) => void;
-}> = ({ route, analysis, catalog, onChange }) => {
+}> = ({ route, analysis, catalog, premises, onChange }) => {
   const set = <K extends keyof Route>(k: K, v: Route[K]) => onChange({ ...route, [k]: v });
   const setLoader = (patch: Partial<LoaderSetup>) =>
     onChange({ ...route, loader: { ...(route.loader ?? { name: '', count: 1, bucketM3: 2, fillFactor: 90, cycleSec: 24, availability: 85 }), ...patch } });
@@ -149,7 +160,7 @@ const RouteEditor: React.FC<{
     { label: 'Descarga', v: c.dumpMin, cls: 'bg-sky-500' },
     { label: 'Volta vazio', v: c.travelEmptyMin, cls: 'bg-emerald-300' },
     { label: 'Pesagens', v: c.weighMin, cls: 'bg-violet-400' },
-    { label: 'Fila/manobra', v: c.queueMin, cls: 'bg-red-400' },
+    { label: 'Fila', v: c.queueMin, cls: 'bg-red-400' },
   ].filter((p) => p.v > 0.01);
 
   return (
@@ -204,15 +215,24 @@ const RouteEditor: React.FC<{
         {route.cycleMode === 'informed' ? (
           <NumField label="Ciclo cronometrado" suffix="min" step={0.1} value={route.cycleTime} onChange={(v) => set('cycleTime', v)} />
         ) : (
-          <NumField label="Fila e manobra por ciclo" suffix="min" step={0.5} value={route.queueMin ?? 0} onChange={(v) => set('queueMin', v)} />
+          <NumField
+            label="Fila por ciclo"
+            suffix="min"
+            step={0.5}
+            value={route.queueMin ?? premises.queueMin ?? 0}
+            onChange={(v) => set('queueMin', v === (premises.queueMin ?? 0) ? undefined : v)}
+            hint={route.queueMin === undefined ? 'Das premissas. A manobra já está no tempo de basculamento.' : 'Valor próprio desta rota.'}
+            onReset={route.queueMin !== undefined ? () => set('queueMin', undefined) : undefined}
+          />
         )}
         <NumField
           label="Volume da caçamba"
           suffix="m³"
           step={0.5}
-          value={route.truckVolumeM3}
-          onChange={(v) => set('truckVolumeM3', v > 0 ? v : undefined)}
-          hint="Opcional. Limita a carga pelo volume."
+          value={route.truckVolumeM3 ?? premises.truckVolumeM3}
+          onChange={(v) => set('truckVolumeM3', v > 0 && v !== premises.truckVolumeM3 ? v : undefined)}
+          hint={route.truckVolumeM3 === undefined ? (premises.truckVolumeM3 ? 'Das premissas. Limita a carga pelo volume.' : 'Informe nas premissas (ou aqui só para esta rota).') : 'Valor próprio desta rota.'}
+          onReset={route.truckVolumeM3 !== undefined ? () => set('truckVolumeM3', undefined) : undefined}
         />
       </div>
 
@@ -545,6 +565,7 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
                       route={route}
                       analysis={r}
                       catalog={catalog}
+                      premises={premises}
                       onChange={(nr) => setRoutes(routes.map((x) => (x.id === nr.id ? nr : x)))}
                     />
                   </fieldset>
