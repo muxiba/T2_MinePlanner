@@ -8,10 +8,14 @@ import { defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
 import { payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
 import { makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
+import { combineDem, periodDem, type Dem } from '@/sim/dem';
+import View3D from './View3D';
 import { runInWorker } from '@/sim/client';
 import { loadLocal, removeLocal, saveLocal } from '@/sim/storage';
 import MapCanvas, { DOT_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
 import PlanView from './PlanView';
+import FinanceView from './FinanceView';
+import DecisionView from './DecisionView';
 import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
 import { CycleBars, SweepChart } from './charts';
 import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
@@ -44,7 +48,7 @@ function regroupDestinations(m: SimModel): SimModel {
 /* Tela                                                                        */
 /* -------------------------------------------------------------------------- */
 
-type Tab = 'modelo' | 'plano' | 'config' | 'resultados' | 'animacao';
+type Tab = 'modelo' | 'plano' | 'config' | 'financeiro' | 'resultados' | 'decisao' | 'animacao';
 type MatrixCell = { configId: string; scenarioId: string; stats: AggregateStats };
 
 interface Props {
@@ -64,14 +68,16 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   const [contours, setContours] = useState<Contours | null>(null);
   const [terrainBusy, setTerrainBusy] = useState<{ f: number; stage?: string } | null>(null);
   const [terrainInfo, setTerrainInfo] = useState<string | null>(null);
+  const [dem, setDem] = useState<{ grid: Dem | null; contours: Dem | null }>({ grid: null, contours: null });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadLocal<{ terrain: TerrainLayer | null; contours: Contours | null; info: string | null }>(`${storageKey}:terrain`).then((v) => {
+    void loadLocal<{ terrain: TerrainLayer | null; contours: Contours | null; info: string | null; dem?: { grid: Dem | null; contours: Dem | null } }>(`${storageKey}:terrain`).then((v) => {
       if (!v) return;
       setTerrain(v.terrain);
       setContours(v.contours);
       setTerrainInfo(v.info);
+      if (v.dem) setDem(v.dem);
     });
   }, [storageKey]);
 
@@ -82,18 +88,22 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
       const res = await runInWorker<any>({ kind: 'terrain', file, mode }, (f, stage) => setTerrainBusy({ f, stage }));
       let t = terrain;
       let c = contours;
+      let d = dem;
       let info: string;
       if (res.kind === 'grid') {
         t = { meta: res.meta, shade: res.shade };
+        d = { ...d, grid: res.dem };
         info = `${file.name}: ${t0(res.faces)} triângulos → grade de ${res.meta.nx}×${res.meta.ny} células de ${n1(res.meta.cell)} m, cotas ${n1(res.meta.zmin)} a ${n1(res.meta.zmax)} m`;
         setTerrain(t);
       } else {
         c = res.contours as Contours;
+        d = { ...d, contours: res.dem };
         info = `${file.name}: ${t0(c.lines.length)} curvas, cotas ${n1(c.zmin)} a ${n1(c.zmax)} m`;
         setContours(c);
       }
       setTerrainInfo(info);
-      void saveLocal(`${storageKey}:terrain`, { terrain: t, contours: c, info });
+      setDem(d);
+      void saveLocal(`${storageKey}:terrain`, { terrain: t, contours: c, info, dem: d });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -226,11 +236,21 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   };
 
   /* ------------------------------- animação ------------------------------ */
-  const [periodResults, setPeriodResults] = useState<PeriodResult[] | null>(null);
+  const [periodResults, setPeriodResultsState] = useState<PeriodResult[] | null>(null);
+  const setPeriodResults = (r: PeriodResult[] | null) => {
+    setPeriodResultsState(r);
+    void (r ? saveLocal(`${storageKey}:periods`, r) : removeLocal(`${storageKey}:periods`));
+  };
+  useEffect(() => {
+    void loadLocal<PeriodResult[]>(`${storageKey}:periods`).then((v) => v && setPeriodResultsState(v));
+  }, [storageKey]);
   const [animPeriod, setAnimPeriod] = useState(0); // 0 = circuito da aba Circuito
   const [animRoutes, setAnimRoutes] = useState<SimRoute[] | null>(null);
   const [animOverlays, setAnimOverlays] = useState<MapOverlays | undefined>(undefined);
   const [anim, setAnim] = useState<RunResult | null>(null);
+  const [view3d, setView3d] = useState(false);
+  const baseDem = useMemo(() => combineDem(dem.grid, dem.contours), [dem]);
+  const animDem = useMemo(() => (baseDem && animPeriod > 0 ? periodDem(baseDem, model.plan, animPeriod) : baseDem), [baseDem, animPeriod, model.plan]);
   const [animBusy, setAnimBusy] = useState(false);
   const [animT, setAnimT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -300,7 +320,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
     { id: 'modelo', label: 'Circuito' },
     { id: 'plano', label: 'Plano de lavra' },
     { id: 'config', label: 'Configurações e cenários' },
-    { id: 'resultados', label: 'Resultados' },
+    { id: 'financeiro', label: 'Financeiro' },
+    { id: 'resultados', label: 'Resultados do circuito' },
+    { id: 'decisao', label: 'Resultados e decisão' },
     { id: 'animacao', label: 'Animação' },
   ];
 
@@ -403,6 +425,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                       setTerrain(null);
                       setContours(null);
                       setTerrainInfo(null);
+                      setDem({ grid: null, contours: null });
                       void removeLocal(`${storageKey}:terrain`);
                     }}
                   >
@@ -484,6 +507,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
       {/* ============================ PLANO DE LAVRA ========================== */}
       {tab === 'plano' && (
         <PlanView
+          dem={baseDem}
           model={model}
           setModel={setModel}
           canEdit={canEdit}
@@ -494,6 +518,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
           onError={setError}
         />
       )}
+
+      {tab === 'financeiro' && <FinanceView model={model} setModel={setModel} canEdit={canEdit} />}
+      {tab === 'decisao' && <DecisionView model={model} results={periodResults} setResults={setPeriodResults} onError={setError} />}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
       {tab === 'config' && (
@@ -822,7 +849,23 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
               </div>
             }
           >
-            <MapCanvas
+            <div className="mb-3 flex gap-1 rounded-lg bg-black/[0.04] p-1 text-sm" role="group" aria-label="Tipo de vista">
+              {[false, true].map((v) => (
+                <button key={String(v)} type="button" onClick={() => setView3d(v)} className={clsx('rounded-md px-3 py-1', view3d === v ? 'bg-white font-semibold shadow-sm' : 'text-black/55')}>
+                  {v ? '3D' : '2D'}
+                </button>
+              ))}
+            </div>
+            {view3d ? (
+              <View3D
+                dem={animDem}
+                routes={(animRoutes ?? model.routes).map((r) => ({ points: r.points }))}
+                overlays={animOverlays}
+                dots={frame?.dots}
+                height={560}
+              />
+            ) : (
+              <MapCanvas
               terrain={terrain}
               contours={contours}
               routes={animRoutes ?? model.routes}
@@ -832,6 +875,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
               circuitRoutes={anim ? anim.geometry.map((g) => (animRoutes ? `r-${g.circuitId}` : model.circuits.find((c) => c.id === g.circuitId)?.routeId ?? '')) : undefined}
               height={520}
             />
+            )}
             {animator && (
               <div className="mt-4 space-y-3">
                 <div className="flex flex-wrap items-center gap-4">

@@ -68,6 +68,8 @@ export interface DisposalSolid {
   zMax: number;
   faces: number;
   file?: string;
+  /** topo do sólido em grade grossa (para a topografia do período na vista 3D) */
+  top?: import('./dem').TopGrid;
 }
 
 export interface Movement {
@@ -623,6 +625,11 @@ export interface PeriodResult {
   period: number;
   label: string;
   configId: string;
+  scenarioId?: string;
+  /** disponibilidade física usada no período (já descontado o envelhecimento) */
+  truckDf?: number;
+  /** idade média da frota no início do período (h) */
+  avgAgeH?: number;
   circuits: PeriodCircuitResult[];
   trucks: number;
   /** necessidade sem arredondar (soma de caminhões × meta ÷ produção simulada): compara configurações */
@@ -706,7 +713,13 @@ export function sizePeriod(
   const nTrucks = Object.values(trucks).reduce((a, b) => a + b, 0);
   const worked = 1 - (agg.stateShare.manutencao ?? 0) - (agg.stateShare.fora_turno ?? 0);
   const days = Math.max(1, plan.periods[period - 1]?.workDays ?? 1);
-  const truckHours = nTrucks * worked * 24 * days;
+  // horas efetivamente trabalhadas: a frota inteira passa da meta (não existe fração de caminhão),
+  // então cada movimentação trabalha só o necessário para a meta e o resto fica parado
+  const truckHours = model.circuits.reduce((a, c, i) => {
+    const got = agg.perCircuit[i]?.tpd.mean ?? 0;
+    const use = got > 0 ? Math.min(1, info[i].targetTpd / got) : 1;
+    return a + trucks[c.id] * use * worked * 24 * days;
+  }, 0);
   const circuits: PeriodCircuitResult[] = model.circuits.map((c, i) => {
     const got = agg.perCircuit[i]?.tpd.mean ?? 0;
     return {
