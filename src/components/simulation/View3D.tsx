@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Dem } from '@/sim/dem';
 import { sampleDem } from '@/sim/dem';
-import type { TruckDot } from '@/sim/animation';
+import { EQUIP_SIZE, type LoaderDot, type TruckDot } from '@/sim/animation';
 import type { Vec3 } from '@/sim/types';
 import type { MapOverlays } from './MapCanvas';
-import { DOT_COLORS } from './MapCanvas';
+import { DOT_COLORS, LOADER_COLORS } from './MapCanvas';
 
 /**
  * Vista 3D em WebGL2 puro (sem bibliotecas): terreno sombreado com exagero vertical,
@@ -17,6 +17,7 @@ interface Props {
   overlays?: MapOverlays;
   routes?: { points: Vec3[]; color?: string }[];
   dots?: TruckDot[];
+  loaders?: LoaderDot[];
   height?: number;
 }
 
@@ -111,7 +112,8 @@ precision mediump float; in vec3 vC; uniform float round; out vec4 o;
 void main(){ if (round > 0.5) { vec2 c = gl_PointCoord - 0.5; float r = length(c); if (r > 0.5) discard; if (r > 0.36) { o = vec4(1.0); return; } }
  o = vec4(vC, 1.0); }`;
 
-const View3D: React.FC<Props> = ({ dem, overlays, routes, dots, height = 520 }) => {
+const View3D: React.FC<Props> = ({ dem, overlays, routes, dots, loaders, height = 520 }) => {
+  const [enlarge, setEnlarge] = useState(1);
   const ref = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<{
     gl: WebGL2RenderingContext;
@@ -278,20 +280,62 @@ const View3D: React.FC<Props> = ({ dem, overlays, routes, dots, height = 520 }) 
     draw();
   }, [overlays, routes, dem, ref0, exag]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // caminhões
+  // caminhões e equipamentos de carga, em escala (caixas orientadas)
   useEffect(() => {
     const g = glRef.current;
     if (!g || !ref0) return;
     const p: number[] = [];
     const c: number[] = [];
+    const groundAt = (x: number, y: number, z: number) => Math.max(z, dem ? sampleDem(dem, x, y) - 0.5 : z);
+    /** caixa centrada em (cx, cy) ao longo do eixo `h`, do deslocamento a0..a1 (m) no eixo, largura w, de z0 a z1 */
+    const box = (cx: number, cy: number, h: number, a0: number, a1: number, w: number, z0: number, z1: number, col: [number, number, number]) => {
+      const ux = Math.cos(h);
+      const uy = Math.sin(h);
+      const vx = -uy;
+      const vy = ux;
+      const corner = (a: number, b: number, z: number) => W({ x: cx + ux * a + vx * b, y: cy + uy * a + vy * b }, z);
+      const P = [
+        corner(a0, -w / 2, z0), corner(a1, -w / 2, z0), corner(a1, w / 2, z0), corner(a0, w / 2, z0),
+        corner(a0, -w / 2, z1), corner(a1, -w / 2, z1), corner(a1, w / 2, z1), corner(a0, w / 2, z1),
+      ];
+      const faces: [number[], number][] = [
+        [[4, 5, 6, 7], 1], // topo
+        [[0, 1, 5, 4], 0.72],
+        [[1, 2, 6, 5], 0.85],
+        [[2, 3, 7, 6], 0.72],
+        [[3, 0, 4, 7], 0.6],
+      ];
+      for (const [f, k] of faces) {
+        const cc = [col[0] * k, col[1] * k, col[2] * k];
+        for (const i of [f[0], f[1], f[2], f[0], f[2], f[3]]) {
+          p.push(...P[i]);
+          c.push(...cc);
+        }
+      }
+    };
+    const k = enlarge;
+    const T = EQUIP_SIZE.truck;
     for (const d of dots ?? []) {
-      const z = Math.max(d.p.z, dem ? sampleDem(dem, d.p.x, d.p.y) - 0.5 : d.p.z) + 4;
-      p.push(...W(d.p, z));
-      c.push(...hex(DOT_COLORS[d.kind]));
+      const z = groundAt(d.p.x, d.p.y, d.p.z);
+      const L = T.length * k;
+      const Wd = T.width * k;
+      const col = hex(DOT_COLORS[d.kind]);
+      // caçamba (cor do estado) e cabine (escura) na frente
+      box(d.p.x, d.p.y, d.heading, -L / 2, L / 2 - L * 0.24, Wd, z + 0.9 * k, z + T.height * 0.8 * k, col);
+      box(d.p.x, d.p.y, d.heading, L / 2 - L * 0.22, L / 2, Wd * 0.95, z + 0.9 * k, z + T.height * k, [0.12, 0.13, 0.15]);
+      if (d.loaded) box(d.p.x, d.p.y, d.heading, -L / 2 + 0.6 * k, L / 2 - L * 0.3, Wd * 0.7, z + T.height * 0.8 * k, z + T.height * 0.95 * k, [0.55, 0.36, 0.2]);
     }
-    upload('dots', g.flat, { pos: { data: new Float32Array(p), size: 3 }, col: { data: new Float32Array(c), size: 3 } }, p.length / 3, g.gl.POINTS);
+    const Ld = EQUIP_SIZE.loader;
+    for (const l of loaders ?? []) {
+      const z = groundAt(l.p.x, l.p.y, l.p.z);
+      const L = Ld.length * k;
+      const Wd = Ld.width * k;
+      box(l.p.x, l.p.y, l.heading, -L / 2, L / 2 - L * 0.25, Wd, z + 0.6 * k, z + Ld.height * k, hex(LOADER_COLORS[l.state]));
+      box(l.p.x, l.p.y, l.heading, L / 2 - L * 0.25, L / 2, Wd * 1.15, z, z + 1.4 * k, [0.25, 0.26, 0.28]);
+    }
+    upload('dots', g.flat, { pos: { data: new Float32Array(p), size: 3 }, col: { data: new Float32Array(c), size: 3 } }, p.length / 3, g.gl.TRIANGLES);
     draw();
-  }, [dots, dem, ref0, exag]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dots, loaders, dem, ref0, exag, enlarge]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => draw(), [cam]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -338,11 +382,8 @@ const View3D: React.FC<Props> = ({ dem, overlays, routes, dots, height = 520 }) 
     }
     const d = g.buf.dots;
     if (d && d.count) {
-      gl.disable(gl.DEPTH_TEST);
-      gl.uniform1f(gl.getUniformLocation(g.flat, 'round'), 1);
-      gl.uniform1f(gl.getUniformLocation(g.flat, 'ps'), 13 * dpr);
       gl.bindVertexArray(d.vao);
-      gl.drawArrays(gl.POINTS, 0, d.count);
+      gl.drawArrays(gl.TRIANGLES, 0, d.count);
     }
     gl.bindVertexArray(null);
   }
@@ -400,6 +441,16 @@ const View3D: React.FC<Props> = ({ dem, overlays, routes, dots, height = 520 }) 
             ))}
           </select>
         </label>
+        {(dots || loaders) && (
+          <label className="flex items-center gap-1.5">
+            Equipamentos
+            <select className="rounded border border-black/10 px-1 py-0.5" value={enlarge} onChange={(e) => setEnlarge(Number(e.target.value))}>
+              <option value={1}>em escala</option>
+              <option value={3}>ampliados 3×</option>
+              <option value={8}>ampliados 8×</option>
+            </select>
+          </label>
+        )}
         <button type="button" className="rounded px-1.5 py-0.5 font-medium hover:bg-black/5" onClick={() => ref0 && setCam({ yaw: -0.6, pitch: 0.75, dist: ref0.size * 1.1, tx: 0, ty: 0 })}>
           Enquadrar
         </button>

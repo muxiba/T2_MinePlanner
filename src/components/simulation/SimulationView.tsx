@@ -6,13 +6,14 @@ import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, 
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
 import { payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
-import { makeAnimator } from '@/sim/animation';
+import { DOT_KINDS, makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
 import { combineDem, periodDem, type Dem } from '@/sim/dem';
 import View3D from './View3D';
 import { runInWorker } from '@/sim/client';
 import { loadLocal, removeLocal, saveLocal } from '@/sim/storage';
-import MapCanvas, { DOT_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
+import MapCanvas, { DOT_COLORS, LOADER_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
+import AnimTables from './AnimTables';
 import PlanView from './PlanView';
 import FinanceView from './FinanceView';
 import DecisionView from './DecisionView';
@@ -271,7 +272,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   const [animT, setAnimT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(120);
-  const animator = useMemo(() => (anim ? makeAnimator(anim.trace, anim.geometry) : null), [anim]);
+  const animator = useMemo(() => (anim ? makeAnimator(anim.trace, anim.geometry, anim.loaderTrace) : null), [anim]);
+  const [animInfo, setAnimInfo] = useState<{ name: string; material: string }[]>([]);
   const raf = useRef<number | null>(null);
 
   useEffect(() => {
@@ -317,6 +319,18 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
       }
       const res = await runInWorker<RunResult>({ kind: 'trace', model: m, configId: sel.configId, scenarioId: sel.scenarioId, hours: 24 });
       setAnimRoutes(animPeriod > 0 ? m.routes : null);
+      // material de cada circuito animado (para a tabela de produção)
+      setAnimInfo(
+        res.geometry.map((g) => {
+          const c = m.circuits.find((x) => x.id === g.circuitId);
+          if (animPeriod > 0 && model.plan) {
+            const mv = model.plan.movements.find((x) => `pm-${x.id}` === g.circuitId);
+            return { name: c?.name ?? g.circuitId, material: mv?.material ?? 'Material' };
+          }
+          const flow = c ? calc.find((x) => x.circuitId === c.id)?.flow : undefined;
+          return { name: c?.name ?? g.circuitId, material: flow ? FLOW_LABELS[flow] : 'Material' };
+        }),
+      );
       setAnimOverlays(ov);
       setAnim(res);
       setAnimT(model.warmupH * 60);
@@ -1081,6 +1095,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                 routes={(animRoutes ?? model.routes).map((r) => ({ points: r.points }))}
                 overlays={animOverlays}
                 dots={frame?.dots}
+                loaders={frame?.loaders}
                 height={560}
               />
             ) : (
@@ -1090,6 +1105,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
               routes={animRoutes ?? model.routes}
               overlays={animOverlays}
               dots={frame?.dots}
+              loaders={frame?.loaders}
               queues={frame?.queues}
               circuitRoutes={anim ? anim.geometry.map((g) => (animRoutes ? `r-${g.circuitId}` : model.circuits.find((c) => c.id === g.circuitId)?.routeId ?? '')) : undefined}
               height={520}
@@ -1111,10 +1127,19 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     </select>
                   </label>
                   <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-xs text-black/60">
-                    {([['carregado', 'Carregado'], ['vazio', 'Vazio'], ['ponto', 'Na carga ou descarga'], ['parado', 'Parado (manutenção, turno, perdas)']] as const).map(([k, l]) => (
+                    {DOT_KINDS.map(({ id: k, label: l }) => (
                       <span key={k} className="flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: DOT_COLORS[k] }} />
+                        <span className="inline-block h-2.5 w-4 rounded-sm" style={{ background: DOT_COLORS[k] }} />
                         {l} <span className="tabular-nums text-black/40">({frame?.dots.filter((d) => d.kind === k).length ?? 0})</span>
+                      </span>
+                    ))}
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#8c5a33]" /> Material na caçamba
+                    </span>
+                    {(['carregando', 'parado', 'manutencao'] as const).map((k) => (
+                      <span key={k} className="flex items-center gap-1.5">
+                        <span className="inline-block h-3 w-3 rounded-[3px] border-2 border-[#3f4146]" style={{ background: LOADER_COLORS[k] }} />
+                        Escavadeira {k === 'carregando' ? 'carregando' : k === 'parado' ? 'sem caminhão' : 'em manutenção'}
                       </span>
                     ))}
                   </div>
@@ -1132,7 +1157,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   className="w-full accent-emerald-600"
                   aria-label="Linha do tempo"
                 />
+                <AnimTables animator={animator} from={model.warmupH * 60} t={animT} info={animInfo} />
                 <p className="text-xs text-black/45">
+                  Equipamentos desenhados em escala (caminhão 10,5 × 2,6 m; escavadeira 9,5 × 3,3 m): aproxime com a roda do mouse. Com pouco zoom, ficam com um tamanho mínimo para continuar visíveis.{' '}
                   {animPeriod > 0 && (periodResults?.some((r) => r.period === animPeriod && r.configId === sel.configId) ? 'Frota dimensionada para o período. ' : 'Rode “Dimensionar” no Plano de lavra para usar a frota do período; por ora, 1 caminhão por movimentação. ')}
                   Produção nas 24 h desta rodada: {t0(anim!.stats.tonnes)} t em {anim!.stats.trips} viagens. A animação mostra uma repetição; os
                   resultados usam a média de {model.replications}.

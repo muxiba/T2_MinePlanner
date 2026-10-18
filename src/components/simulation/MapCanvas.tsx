@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Contours, TerrainGrid } from '@/sim/terrain';
 import type { SimRoute, Vec3 } from '@/sim/types';
-import type { PointQueue, TruckDot } from '@/sim/animation';
+import { EQUIP_SIZE, type LoaderDot, type LoaderState, type PointQueue, type TruckDot } from '@/sim/animation';
 
 export interface TerrainLayer {
   meta: Omit<TerrainGrid, 'z'>;
@@ -22,14 +22,25 @@ interface Props {
   routes: SimRoute[];
   highlight?: string | null;
   dots?: TruckDot[];
+  loaders?: LoaderDot[];
   queues?: PointQueue[];
   /** índice de circuito → rota (para posicionar as filas) */
   circuitRoutes?: string[];
   height?: number;
 }
 
-/** Cores dos caminhões na animação (3 classes validadas para leitura sobreposta). */
-export const DOT_COLORS = { carregado: '#2a78d6', vazio: '#1baf7a', ponto: '#eb6834', parado: '#8a8984' } as const;
+/** Cores dos estados dos caminhões na animação. */
+export const DOT_COLORS = {
+  carregado: '#2a78d6',
+  vazio: '#1baf7a',
+  carregando: '#eda100',
+  descarregando: '#8a5cd6',
+  fila: '#eb6834',
+  manutencao: '#d12f2f',
+  ocioso: '#8a8984',
+} as const;
+/** Cores dos equipamentos de carga. */
+export const LOADER_COLORS: Record<LoaderState, string> = { carregando: '#eda100', parado: '#8a8984', manutencao: '#d12f2f' };
 
 type View = { cx: number; cy: number; scale: number }; // centro (m) e px por metro
 
@@ -105,7 +116,7 @@ function useBaseLayer(terrain?: TerrainLayer | null, contours?: Contours | null)
   }, [terrain, contours]);
 }
 
-const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots, queues, circuitRoutes, height = 460, overlays, routesAsNetwork }) => {
+const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots, loaders, queues, circuitRoutes, height = 460, overlays, routesAsNetwork }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View | null>(null);
@@ -263,15 +274,51 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
       });
     }
 
-    // caminhões
+    // equipamentos em escala (com tamanho mínimo para continuar visíveis com pouco zoom)
+    const shape = (x: number, y: number, heading: number, lenM: number, widM: number, draw: (L: number, Wd: number) => void) => {
+      const L = Math.max(lenM * view.scale, 22);
+      const Wd = Math.max(widM * view.scale, 8);
+      ctx.save();
+      ctx.translate(X(x), Y(y));
+      ctx.rotate(-heading);
+      draw(L, Wd);
+      ctx.restore();
+    };
+    for (const l of loaders ?? []) {
+      shape(l.p.x, l.p.y, l.heading, EQUIP_SIZE.loader.length, EQUIP_SIZE.loader.width, (L, Wd) => {
+        ctx.fillStyle = LOADER_COLORS[l.state];
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(-L / 2, -Wd / 2, L * 0.72, Wd, 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#3f4146';
+        ctx.fillRect(L / 2 - L * 0.26, -Wd * 0.6, L * 0.26, Wd * 1.2); // caçamba
+        ctx.fillStyle = '#151619';
+        ctx.fillRect(-L * 0.1, -Wd * 0.35, L * 0.22, Wd * 0.7); // cabine
+      });
+    }
     for (const d of dots ?? []) {
-      ctx.beginPath();
-      ctx.arc(X(d.p.x), Y(d.p.y), d.kind === 'parado' ? 4 : 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = DOT_COLORS[d.kind];
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
+      shape(d.p.x, d.p.y, d.heading, EQUIP_SIZE.truck.length, EQUIP_SIZE.truck.width, (L, Wd) => {
+        ctx.fillStyle = DOT_COLORS[d.kind];
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(-L / 2, -Wd / 2, L * 0.76, Wd, 1.5); // caçamba
+        ctx.fill();
+        ctx.stroke();
+        if (d.loaded) {
+          ctx.fillStyle = '#8c5a33';
+          ctx.beginPath();
+          ctx.ellipse(-L / 2 + L * 0.38, 0, L * 0.3, Wd * 0.33, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = '#151619';
+        ctx.beginPath();
+        ctx.roundRect(L / 2 - L * 0.22, -Wd / 2, L * 0.22, Wd, 1.5); // cabine na frente
+        ctx.fill();
+      });
     }
 
     // filas (empilhadas quando dois circuitos usam o mesmo ponto)
@@ -303,7 +350,7 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
     ctx.fillRect(16, size.h - 22, meters * view.scale, 3);
     ctx.font = '11px Inter, system-ui, sans-serif';
     ctx.fillText(`${meters} m`, 16, size.h - 28);
-  }, [view, size, base, routes, highlight, dots, queues, circuitRoutes, overlays, routesAsNetwork]);
+  }, [view, size, base, routes, highlight, dots, loaders, queues, circuitRoutes, overlays, routesAsNetwork]);
 
   const onWheel = (e: React.WheelEvent) => {
     if (!view) return;

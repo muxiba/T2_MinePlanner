@@ -247,6 +247,10 @@ export interface RunOptions {
 export interface CircuitGeometry {
   circuitId: string;
   points: { x: number; y: number; z: number }[];
+  /** carga por viagem (t) */
+  payloadT?: number;
+  /** equipamentos de carga no ponto de carga */
+  loaders?: number;
   loadedMin: number;
   emptyMin: number;
   s: number[];
@@ -258,6 +262,8 @@ export interface RunResult {
   stats: RunStats;
   trace: TraceItem[];
   geometry: CircuitGeometry[];
+  /** paradas para reparo dos equipamentos de carga (min), dentro da janela do trace */
+  loaderTrace?: { circuit: number; unit: number; t0: number; t1: number }[];
 }
 
 export function payloadFor(cfg: TruckConfig, c: Circuit) {
@@ -282,6 +288,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const shiftMin = Math.min(24, Math.max(0.5, sc.hoursPerDay)) * 60;
   const traceEnd = (opt.traceHours ?? 0) * 60;
   const trace: TraceItem[] = [];
+  const loaderTrace: { circuit: number; unit: number; t0: number; t1: number }[] = [];
   const heap = new Heap();
 
   const routes = new Map(model.routes.map((x) => [x.id, x]));
@@ -331,6 +338,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     geometry.push({
       circuitId: c.id,
       points: route.points,
+      payloadT: payloadFor(cfg, c),
+      loaders: Math.max(1, c.loaders),
       loadedMin: tt.loaded,
       emptyMin: tt.empty,
       s: tt.s,
@@ -407,6 +416,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     if (x.loaderClock[unit] <= 0) {
       const rep = exp(r, x.loaderMttr);
       x.loaderClock[unit] = exp(r, x.loaderFailMean);
+      if (traceEnd > 0 && t < traceEnd) loaderTrace.push({ circuit: k.ci, unit, t0: t, t1: Math.min(t + rep, traceEnd) });
       // o caminhão espera o reparo ocupando o posto
       heap.push(t + rep, () => beginLoad2(k, t + rep, unit));
       return;
@@ -548,7 +558,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     costPerT: tonnes > 0 ? costTotal / tonnes : 0,
     perCircuit: perC.map((p) => ({ ...p, tph: p.tonnes / hours })),
   };
-  return { stats, trace, geometry };
+  return { stats, trace, geometry, loaderTrace };
 }
 
 /* ------------------------------------------------------------------------- */
