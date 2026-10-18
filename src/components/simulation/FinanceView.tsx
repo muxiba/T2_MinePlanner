@@ -2,6 +2,8 @@ import React from 'react';
 import type { SimModel } from '@/sim/types';
 import { defaultFinance, defaultTruckFinance, type EquipFinance, type Finance } from '@/sim/econ';
 import { Card, Num, inputCls } from './ui';
+import { REVENUE_REF_PER_T, SICRO_REF, overheadReference } from '@/sim/references';
+import { calendarWorkDays, emptyPlan } from '@/sim/plan';
 
 interface Props {
   model: SimModel;
@@ -34,6 +36,10 @@ const FinanceView: React.FC<Props> = ({ model, setModel, canEdit }) => {
     { id: '__loader', name: 'Equipamento de carga (por unidade)', get: () => fin.loader, set: (p: Partial<EquipFinance>) => setFin({ ...fin, loader: { ...fin.loader, ...p } }) },
   ];
   const wageYear = fin.salaryMonthly * 12 * (1 + fin.chargesPct / 100);
+  const [ovh, setOvh] = React.useState({ graderH: 4, sup: 1, salary: 7000 });
+  const workDaysYear = calendarWorkDays((model.plan ?? emptyPlan()).calendar);
+  const ref = overheadReference({ workDaysYear, graderHoursPerDay: ovh.graderH, supervisorsPerShift: ovh.sup, supervisorSalary: ovh.salary, shifts: fin.shifts, reliefFactor: fin.reliefFactor, chargesPct: fin.chargesPct });
+  const brl0 = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
   return (
     <fieldset disabled={!canEdit} className="min-w-0 space-y-6">
@@ -55,6 +61,49 @@ const FinanceView: React.FC<Props> = ({ model, setModel, canEdit }) => {
         <p className="mt-3 text-xs text-black/50">
           Custo anual de um operador com encargos: {wageYear.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}. Pessoas por equipamento = operadores por turno × turnos × fator de folguistas.
           {fin.revenuePerT > 0 ? ' Com receita, a decisão econômica usa o VPL (receita − custos).' : ' Sem receita, a decisão econômica usa o custo nivelado por tonelada (VPL dos custos ÷ VPL das toneladas).'}
+        </p>
+      </Card>
+
+      <Card title="Valores de referência" description="Pontos de partida editáveis. Substitua pelos números de vocês quando tiver.">
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="rounded-xl bg-[#F8F9FA] p-4 text-sm">
+            <p className="font-semibold">Custos fixos do transporte</p>
+            <p className="mt-1 text-xs text-black/55">
+              Manutenção das vias com motoniveladora ({SICRO_REF.grader.code}, {SICRO_REF.label}: R$ {SICRO_REF.grader.productive.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/h) + supervisão por turno.
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <Num label="Motoniveladora" suffix="h/dia" step={0.5} value={ovh.graderH} onChange={(v) => setOvh({ ...ovh, graderH: Math.max(0, v) })} />
+              <Num label="Supervisores" suffix="por turno" step={0.5} value={ovh.sup} onChange={(v) => setOvh({ ...ovh, sup: Math.max(0, v) })} />
+              <Num label="Salário supervisor" suffix="R$/mês" step={100} value={ovh.salary} onChange={(v) => setOvh({ ...ovh, salary: Math.max(0, v) })} />
+            </div>
+            <p className="mt-2 text-xs text-black/60">
+              Vias {brl0(ref.roads)} ({workDaysYear} dias trabalhados no calendário do plano) + supervisão {brl0(ref.supervision)} ({fin.shifts} turnos, folguistas {fin.reliefFactor}, encargos {fin.chargesPct}%) = <b>{brl0(ref.total)}/ano</b>.
+            </p>
+            <button type="button" className="mt-2 rounded-lg bg-[#151619] px-3 py-1.5 text-xs font-semibold text-white hover:bg-black" onClick={() => setFin({ ...fin, overheadPerYear: ref.total })}>
+              Usar {brl0(ref.total)}/ano
+            </button>
+          </div>
+          <div className="rounded-xl bg-[#F8F9FA] p-4 text-sm">
+            <p className="font-semibold">Receita</p>
+            <p className="mt-1 text-xs text-black/55">Valor indicativo de R$ {REVENUE_REF_PER_T}/t de produto (concentrado), definido por vocês. Com receita, a decisão econômica usa o VPL (receita − custos).</p>
+            <button type="button" className="mt-3 rounded-lg bg-[#151619] px-3 py-1.5 text-xs font-semibold text-white hover:bg-black" onClick={() => setFin({ ...fin, revenuePerT: REVENUE_REF_PER_T, revenueMaterial: fin.revenueMaterial || 'Produto' })}>
+              Usar R$ {REVENUE_REF_PER_T}/t
+            </button>
+            <p className="mt-4 font-semibold">Equipamentos de carga (SICRO)</p>
+            <ul className="mt-1 space-y-0.5 text-xs text-black/60">
+              {[SICRO_REF.wheelLoader, SICRO_REF.excavator].map((x) => (
+                <li key={x.code}>
+                  {x.code} {x.description}: produtivo R$ {x.productive.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/h{x.acquisition ? `, aquisição ${brl0(x.acquisition)}` : ''}
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="mt-2 rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-black/[0.03]" onClick={() => setFin({ ...fin, loader: { ...fin.loader, price: Math.round(SICRO_REF.wheelLoader.acquisition! / 1000) * 1000 } })}>
+              Usar o valor da carregadeira no equipamento de carga
+            </button>
+          </div>
+        </div>
+        <p className="mt-3 text-[11px] text-black/45">
+          Fonte: <a className="underline" href={SICRO_REF.url} target="_blank" rel="noreferrer">SICRO – DNIT</a>, custos horários de equipamentos, {SICRO_REF.label}. O custo improdutivo de MG é estimado pela proporção da tabela nacional.
         </p>
       </Card>
 

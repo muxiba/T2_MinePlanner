@@ -55,6 +55,8 @@ export interface Finance {
   trucks: Record<string, EquipFinance>;
   /** equipamento de carga (escavadeira/carregadeira), por unidade */
   loader: EquipFinance;
+  /** referências (SICRO, receita) já aplicadas uma vez; depois tudo é do usuário */
+  refApplied?: boolean;
 }
 
 export function defaultTruckFinance(payloadT = 40): EquipFinance {
@@ -82,12 +84,15 @@ export function defaultFinance(configIds: { id: string; payloadT: number }[] = [
     chargesPct: 80,
     shifts: 3,
     reliefFactor: 1.25,
-    overheadPerYear: 0,
-    revenuePerT: 0,
-    revenueMaterial: '',
+    // referência: vias (motoniveladora SICRO, 4 h/dia, 276 dias) + 1 supervisor por turno; editável
+    overheadPerYear: 964_000,
+    revenuePerT: 400,
+    revenueMaterial: 'Produto',
+    refApplied: true,
     trucks: Object.fromEntries(configIds.map((c) => [c.id, defaultTruckFinance(c.payloadT)])),
     loader: {
-      price: 2_200_000,
+      // SICRO E9511 carregadeira de pneus 3,40 m³ (valor de aquisição de referência)
+      price: 2_140_000,
       residualPct: 20,
       lifeH: 50_000,
       dieselMode: 'lph',

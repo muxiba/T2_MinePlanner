@@ -17,6 +17,7 @@ import PlanView from './PlanView';
 import FinanceView from './FinanceView';
 import DecisionView from './DecisionView';
 import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
+import { REVENUE_REF_PER_T, SICRO_REF, sicroTruckCosts, withReferenceCosts } from '@/sim/references';
 import { FLOW_LABELS, PERIOD_KINDS, PREMISES_CONFIG_ID, circuitPeriod, circuitTargets, flowWetTonnes, hoursBreakdown, linkOn, premisesLoaderTph, receivingLoaders, withPremises, type Flow, type PeriodKind } from '@/sim/link';
 import { CycleBars, SweepChart } from './charts';
 import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
@@ -62,7 +63,14 @@ interface Props {
 const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, storageKey }) => {
   const stored: SimModel = premises.simulation ?? emptyModel();
   // modelo efetivo: DF, UF, horas, velocidades, tempos e caminhão vêm das Premissas Fundamentais
-  const model: SimModel = useMemo(() => withPremises(stored, premises), [stored, premises]);
+  const model: SimModel = useMemo(() => {
+    let m = withReferenceCosts(withPremises(stored, premises));
+    // receita e custos fixos de referência aplicados uma vez nos planos que já tinham financeiro
+    if (m.finance && !m.finance.refApplied) {
+      m = { ...m, finance: { ...m.finance, refApplied: true, revenuePerT: m.finance.revenuePerT || REVENUE_REF_PER_T, revenueMaterial: m.finance.revenueMaterial || 'Produto', overheadPerYear: m.finance.overheadPerYear || 964_000 } };
+    }
+    return m;
+  }, [stored, premises]);
   const setModel = (m: SimModel) => setPremises({ ...premises, simulation: m });
   const linked = linkOn(model);
   const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
@@ -750,6 +758,20 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     <Num label="Custo fixo" suffix="R$/h" step={5} value={c.costFixedPerH} onChange={(v) => setConfig(c.id, { costFixedPerH: v })} />
                     <Num label="Custo operacional" suffix="R$/h" step={5} value={c.costVarPerH} onChange={(v) => setConfig(c.id, { costVarPerH: v })} />
                   </div>
+                  {(() => {
+                    const ref = sicroTruckCosts(model.scenarios[0]?.hoursPerDay ?? 24);
+                    const isRef = Math.abs(c.costFixedPerH - ref.costFixedPerH) < 0.01 && Math.abs(c.costVarPerH - ref.costVarPerH) < 0.01;
+                    return (
+                      <p className="mt-2 text-[11px] text-black/50">
+                        Referência {SICRO_REF.label}: {SICRO_REF.truck.code} {SICRO_REF.truck.description}, produtivo R$ {n1(SICRO_REF.truck.productive)}/h e improdutivo ≈ R$ {n1(SICRO_REF.truck.unproductive)}/h → custo fixo R$ {n1(ref.costFixedPerH)}/h de calendário e operacional R$ {n1(ref.costVarPerH)}/h trabalhada. É a classe mais próxima publicada; ajuste para o caminhão de vocês.{' '}
+                        {isRef ? (
+                          <span className="font-medium text-emerald-700">Usando a referência.</span>
+                        ) : (
+                          <button type="button" className="font-medium text-emerald-700 hover:underline" onClick={() => setConfig(c.id, ref)}>Voltar à referência</button>
+                        )}
+                      </p>
+                    );
+                  })()}
                   <details className="mt-3">
                     <summary className="cursor-pointer text-sm font-medium text-emerald-700">Velocidade por rampa e tempos por rota</summary>
                     <div className="mt-3 grid gap-4 lg:grid-cols-2">
