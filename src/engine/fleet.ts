@@ -33,6 +33,7 @@ export const DEFAULT_LOOSE_DENSITY = 2.0;
 
 export const DEFAULT_CATALOG: EquipmentCatalog = {
   trucks: [
+    { id: 'rod-40', name: 'Basculante rodoviário 8x4 (40 t)', payloadT: 40, volumeM3: 22 },
     { id: 'rod-30', name: 'Basculante rodoviário 6x4 (~30 t)', payloadT: 30, volumeM3: 18 },
     { id: 'art-40', name: 'Articulado 6x6 (~38 t)', payloadT: 38, volumeM3: 23 },
     { id: 'rig-60', name: 'Rígido fora de estrada (~60 t)', payloadT: 60, volumeM3: 38 },
@@ -47,6 +48,14 @@ export const DEFAULT_CATALOG: EquipmentCatalog = {
     { id: 'pa-55', name: 'Pá carregadeira grande (5,5 m³)', bucketM3: 5.5, cycleSec: 40 },
   ],
 };
+
+/** Catálogo do plano, com as classes padrão que faltarem (planos antigos ganham as novas). */
+export function catalogOf(premises: DetailedPremises): EquipmentCatalog {
+  const c = premises.equipmentCatalog;
+  if (!c) return DEFAULT_CATALOG;
+  const missing = DEFAULT_CATALOG.trucks.filter((t) => !c.trucks.some((x) => x.id === t.id));
+  return missing.length ? { ...c, trucks: [...missing, ...c.trucks] } : c;
+}
 
 export const KIND_LABELS: Record<RouteKind, string> = {
   rom: 'ROM (mina → planta)',
@@ -177,6 +186,8 @@ export interface FleetAnalysis {
   systemRatio: number;
   romTargetDryT: number;
   romDeliverableDryT: number;
+  /** capacidade do caminho mina → planta sem o teto da meta (t seca/mês) */
+  romPossibleDryT: number;
   fleet: {
     /** caminhões nas rotas (inteiros, informados pelo planejador) */
     allocated: number;
@@ -504,6 +515,9 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
   // o ROM que chega e é processado é limitado pela pior etapa do caminho mina → planta
   const romPathRatio = Math.min(1, ...stages.filter((s) => ['carga', 'transporte_rom', 'planta'].includes(s.id)).map((s) => s.ratio));
   const romDeliverableDryT = romTargetDryT * (Number.isFinite(romPathRatio) ? romPathRatio : 1);
+  // capacidade do caminho mina → planta sem o teto da meta (folga de produção da frota)
+  const pathRatios = stages.filter((s) => ['carga', 'transporte_rom', 'planta'].includes(s.id)).map((s) => s.ratio);
+  const romPossibleDryT = romTargetDryT * (pathRatios.length ? Math.min(...pathRatios) : 1);
 
   const allocated = analyses.reduce((a, r) => a + r.trucksAllocated, 0);
   const needed = analyses.reduce((a, r) => a + r.trucksNeeded, 0);
@@ -533,6 +547,7 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
     systemRatio,
     romTargetDryT,
     romDeliverableDryT,
+    romPossibleDryT,
     fleet: { allocated, needed, neededExact, premise: premises.truckCount || 0, idle, extraEquivalent, spare },
     actions,
     classComparison,
@@ -544,7 +559,7 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
 /* -------------------------------------------------------------------------- */
 
 export function compareTruckClasses(route: Route, premises: DetailedPremises, targetDryT: number): ClassOption[] {
-  const catalog = premises.equipmentCatalog ?? DEFAULT_CATALOG;
+  const catalog = catalogOf(premises);
   const current = analyzeRoute(route, premises, targetDryT);
   const options: ClassOption[] = catalog.trucks.map((t) => {
     const a = analyzeRoute(route, premises, targetDryT, { payloadT: t.payloadT, volumeM3: t.volumeM3 });
@@ -905,7 +920,7 @@ export function optimizeFleet(routes: Route[], premises: DetailedPremises, mode:
 
 /** Caminhões das premissas que não estão em nenhuma rota ativa (inteiro). */
 export function trucksWithoutRoute(routes: Route[], premises: DetailedPremises): number {
-  const onRoutes = routes.filter((r) => r.active).reduce((a, r) => a + Math.max(0, Math.round(r.truckCount || 0)), 0);
+  const onRoutes = routes.filter((r) => r.active).reduce((a, r) => a + Math.max(0, r.truckCount || 0), 0);
   return Math.max(0, Math.floor((premises.truckCount || 0) - onRoutes + 1e-9));
 }
 
@@ -969,7 +984,8 @@ export interface AdjustResult {
  */
 export function adjustFleetToTarget(routes: Route[], premises: DetailedPremises): AdjustResult {
   const clean = { ...premises, extraAllocations: [] };
-  const opt = optimizeFleet(routes, clean, 'zero');
+  const opt0 = optimizeFleet(routes, clean, 'zero');
+  const opt = { ...opt0, routes: opt0.routes.map((r) => (r.active ? { ...r, fleetMode: 'inteiro' as const } : r)) };
   const freeTrucks = trucksWithoutRoute(opt.routes, premises);
   const fitted = fitExtraAllocations(opt.routes, premises) ?? premises.extraAllocations ?? [];
   const after = analyzeFleet(opt.routes, { ...premises, extraAllocations: fitted });
@@ -981,4 +997,64 @@ export function adjustFleetToTarget(routes: Route[], premises: DetailedPremises)
     shortfall: opt.missingForTarget,
     meetsTarget: after.meetsTarget,
   };
+}
+
+/**
+ * Mantém as rotas em modo automático ('inteiro' ou 'exato') sempre ajustadas à meta, também quando
+ * as premissas mudam (fila, DMT, DF…). A soma nunca passa da frota: se faltar caminhão, ele vai
+ * primeiro para a rota mais longe da meta (ROM no empate). Devolve null quando nada muda.
+ */
+export function syncAutoFleet(routes: Route[], premises: DetailedPremises): Route[] | null {
+  const auto = routes.filter((r) => r.active && (r.fleetMode === 'inteiro' || r.fleetMode === 'exato'));
+  if (!auto.length) return null;
+  const targets = routeTargets(routes, premises);
+  const manual = routes.filter((r) => r.active && !auto.includes(r)).reduce((a, r) => a + Math.max(0, r.truckCount || 0), 0);
+  let pool = Math.max(0, (premises.truckCount || 0) - manual);
+  const desired = new Map<string, number>();
+  for (const r of auto) {
+    const ex = analyzeRoute(r, premises, targets.get(r.id) || 0, { trucks: 0 }).trucksNeededExact;
+    desired.set(r.id, r.fleetMode === 'inteiro' ? Math.ceil(ex - 1e-6) : Math.ceil(ex * 100 - 1e-6) / 100);
+  }
+  const total = [...desired.values()].reduce((a, b) => a + b, 0);
+  const given = new Map<string, number>();
+  if (total <= pool + 1e-9) {
+    for (const [k, v] of desired) given.set(k, v);
+  } else {
+    for (const r of auto) given.set(r.id, 0);
+    for (let guard = 0; guard < 10000 && pool > 1e-9; guard++) {
+      let best: Route | null = null;
+      let key = Infinity;
+      for (const r of auto) {
+        const d = desired.get(r.id)!;
+        const g = given.get(r.id)!;
+        if (g >= d - 1e-9) continue;
+        const k = g / Math.max(d, 1e-9) - (routeKind(r) === 'rom' ? 1e-6 : 0);
+        if (k < key) {
+          key = k;
+          best = r;
+        }
+      }
+      if (!best) break;
+      const d = desired.get(best.id)!;
+      const g = given.get(best.id)!;
+      const step = Math.min(1, d - g, pool);
+      given.set(best.id, Math.round((g + step) * 100) / 100);
+      pool -= step;
+    }
+  }
+  let changed = false;
+  const next = routes.map((r) => {
+    if (!given.has(r.id)) return r;
+    const v = given.get(r.id)!;
+    if (Math.abs((r.truckCount || 0) - v) < 1e-9) return r;
+    changed = true;
+    return { ...r, truckCount: v, isManualOverride: true };
+  });
+  return changed ? next : null;
+}
+
+/** Formata número de caminhões: inteiro sem casas, quebrado com 2 casas (3,60). */
+export function fmtTrucks(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? String(r) : r.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

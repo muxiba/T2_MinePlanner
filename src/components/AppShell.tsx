@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router';
 import clsx from 'clsx';
 import { Building2, ChevronsUpDown, LogOut, ShieldCheck, TrendingUp, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthProvider';
+import { NewVersionBanner } from './NewVersionBanner';
 import { ROLE_LABELS, STATUS_LABELS, isCompanyUsable, trialDaysLeft } from '@/lib/db-types';
 
 /**
@@ -105,7 +106,10 @@ export const AppShell: React.FC<{
         </div>
       </aside>
 
-      <main className="relative flex-1 overflow-y-auto">{children}</main>
+      <main className="relative flex-1 overflow-y-auto">
+        <NewVersionBanner />
+        {children}
+      </main>
     </div>
   );
 };

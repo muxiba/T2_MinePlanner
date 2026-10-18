@@ -3,6 +3,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "d
 import { ptBR } from "date-fns/locale";
 import { Download } from "lucide-react";
 import { DetailedPremises, Route } from "../types";
+import { catalogOf } from "@/engine/fleet";
 
 interface PremisesFormProps {
   premises: DetailedPremises;
@@ -67,6 +68,21 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         ...day,
         hoursPlanta: value
       }));
+    }
+
+    // classe do caminhão: preenche capacidade e volume da caçamba
+    if (field === "truckClassId") {
+      const t = catalogOf(premises).trucks.find((x) => x.id === value);
+      if (t) {
+        newPremises.truckCapacity = t.payloadT;
+        newPremises.truckVolumeM3 = t.volumeM3;
+        setRoutes(prevRoutes => prevRoutes.map(route => (route.ownRates ? route : { ...route, truckCapacity: t.payloadT })));
+      } else newPremises.truckClassId = undefined;
+    }
+    // capacidade ou volume digitados à mão deixam de seguir a classe
+    if ((field === "truckCapacity" || field === "truckVolumeM3") && premises.truckClassId) {
+      const t = catalogOf(premises).trucks.find((x) => x.id === premises.truckClassId);
+      if (t && (newPremises.truckCapacity !== t.payloadT || newPremises.truckVolumeM3 !== t.volumeM3)) newPremises.truckClassId = undefined;
     }
 
     // Automatically update all routes' truck capacity if the global truck capacity changes
@@ -253,6 +269,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       fields: [
         { label: "Velocidade Vazio (km/h)", key: "velocidadeVazio" },
         { label: "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
+        { label: "Classe do Caminhão", key: "truckClassId", type: "select", options: [...catalogOf(premises).trucks.map((t) => ({ label: t.name, value: t.id })), { label: "Outra (informar abaixo)", value: "" }] },
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
         { label: "Número de Caminhões", key: "truckCount" },
         { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
@@ -399,7 +416,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                       value={String(premises[field.key as keyof DetailedPremises] ?? (field.key === "moistureMode" ? "somada" : ""))}
                       onChange={(e) => {
                         const val =
-                          field.key === "processType" || field.key === "moistureMode"
+                          field.key === "processType" || field.key === "moistureMode" || field.key === "truckClassId"
                             ? e.target.value
                             : field.key === "hasWasteRock"
                               ? e.target.value === "true"

@@ -29,29 +29,27 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
   const remaining = Math.max(0, pool - used);
   // caminhões ainda livres para o mês inteiro
   const freeNow = Math.max(0, Math.floor(remaining / (calMonth || 1) + 1e-9));
-  const [form, setForm] = useState<{ routeId: string; truckCount: number; durationHours: number; description: string }>({
+  const [form, setForm] = useState<{ routeId: string; truckCount: number | null; durationHours: number; description: string }>({
     routeId: active[0]?.id ?? '',
-    truckCount: Math.max(1, freeNow),
+    truckCount: null, // null = acompanha os caminhões livres
     durationHours: calMonth,
     description: '',
   });
-  // acompanha a frota: quando sobram ou faltam caminhões, o formulário propõe os livres
+  // o número proposto acompanha a frota em tempo real até o planejador digitar outro
+  const trucks = Math.max(1, Math.min(form.truckCount ?? freeNow, Math.max(unassigned, 1)));
+  const routeId = active.some((r) => r.id === form.routeId) ? form.routeId : active[0]?.id ?? '';
+  const hours = Math.min(form.durationHours || calMonth, calMonth);
   useEffect(() => {
-    setForm((f) => ({
-      ...f,
-      routeId: active.some((r) => r.id === f.routeId) ? f.routeId : active[0]?.id ?? '',
-      truckCount: Math.max(1, freeNow || Math.min(f.truckCount, unassigned) || 1),
-      durationHours: Math.min(f.durationHours || calMonth, calMonth),
-    }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [freeNow, unassigned, calMonth, active.length]);
-  const req = form.truckCount * form.durationHours;
+    // quando a frota muda, volta a propor os livres
+    setForm((f) => ({ ...f, truckCount: null }));
+  }, [unassigned, freeNow]);
+  const req = trucks * hours;
 
   const add = () => {
-    if (!form.routeId || form.truckCount <= 0 || form.durationHours <= 0 || req > remaining + 0.01 || form.truckCount > unassigned) return;
-    const allocation: ExtraFleetAllocation = { id: Math.random().toString(36).slice(2, 11), ...form };
+    if (!routeId || trucks <= 0 || hours <= 0 || req > remaining + 0.01 || trucks > unassigned) return;
+    const allocation: ExtraFleetAllocation = { id: Math.random().toString(36).slice(2, 11), routeId, truckCount: trucks, durationHours: hours, description: form.description };
     setPremises((prev) => ({ ...prev, extraAllocations: [...(prev.extraAllocations ?? []), allocation] }));
-    setForm({ ...form, description: '' });
+    setForm({ ...form, truckCount: null, description: '' });
   };
   const remove = (id: string) => setPremises((prev) => ({ ...prev, extraAllocations: (prev.extraAllocations ?? []).filter((a) => a.id !== id) }));
 
@@ -82,7 +80,7 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
         <div className="grid grid-cols-1 gap-3 rounded-2xl border border-black/5 bg-[#F8F9FA] p-4 md:grid-cols-5">
           <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase md:col-span-2">
             Rota
-            <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 text-sm normal-case">
+            <select value={routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 text-sm normal-case">
               {active.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
@@ -90,11 +88,11 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
           </label>
           <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase">
             Caminhões
-            <input type="number" min={1} step={1} max={unassigned} value={form.truckCount} onChange={(e) => setForm({ ...form, truckCount: Math.max(1, Math.round(Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
+            <input type="number" min={1} step={1} max={unassigned} value={trucks} onChange={(e) => setForm({ ...form, truckCount: Math.max(1, Math.round(Number(e.target.value) || 1)) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
           </label>
           <label className="space-y-1 text-[10px] font-bold tracking-widest text-black/40 uppercase">
             Horas de calendário
-            <input type="number" min={1} max={calMonth} value={form.durationHours} onChange={(e) => setForm({ ...form, durationHours: Math.max(1, Number(e.target.value) || 1) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
+            <input type="number" min={1} max={calMonth} value={hours} onChange={(e) => setForm({ ...form, durationHours: Math.max(1, Number(e.target.value) || 1) })} className="w-full rounded-xl border border-black/5 bg-white px-3 py-2 font-mono text-sm" />
             <span className="flex gap-2 normal-case tracking-normal">
               <button type="button" className="font-medium text-blue-600 hover:underline" onClick={() => setForm({ ...form, durationHours: calMonth })}>mês inteiro ({Math.round(calMonth)} h)</button>
             </span>
@@ -102,7 +100,7 @@ const ExtraFleetManager: React.FC<Props> = ({ routes, premises, setPremises, ana
           <div className="flex items-end">
             <button
               onClick={add}
-              disabled={!form.routeId || req > remaining + 0.01 || form.truckCount > unassigned}
+              disabled={!routeId || req > remaining + 0.01 || trucks > unassigned}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white hover:bg-blue-600 disabled:bg-black/10 disabled:text-black/25"
             >
               <Plus size={16} /> Alocar

@@ -18,6 +18,7 @@ import {
   DEFAULT_CATALOG,
   DEFAULT_LOOSE_DENSITY,
   KIND_LABELS,
+  fmtTrucks,
   optimizeFleet,
   routeKind,
   type Action,
@@ -429,7 +430,7 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
             </div>
             <div>
               <dt className="text-black/50">Nas rotas</dt>
-              <dd className="text-2xl font-semibold tabular-nums">{a.fleet.allocated}</dd>
+              <dd className="text-2xl font-semibold tabular-nums">{fmtTrucks(a.fleet.allocated)}</dd>
             </div>
             <div>
               <dt className="text-black/50">Necessários</dt>
@@ -549,7 +550,7 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
                     {n1(r.cycle.totalMin)} min{r.cycle.mode === 'informed' && <span className="text-black/40"> (cronom.)</span>}
                   </span>
                   <span className="tabular-nums md:text-right">
-                    {r.trucksAllocated} / <strong>{r.trucksNeeded}</strong>
+                    {fmtTrucks(r.trucksAllocated)} / <strong>{r.trucksNeeded}</strong>
                   </span>
                   <span className="md:text-right">
                     <span className={clsx('inline-block rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', tn.chip)}>

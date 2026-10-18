@@ -3,6 +3,7 @@ import { db, translateError } from '@/lib/db';
 import type { PlanRow, ScenarioRow } from '@/lib/db-types';
 import type { DailyLog, DetailedPremises, Route } from '@/types';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '@/constants';
+import { DEFAULT_CATALOG } from '@/engine/fleet';
 
 export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
@@ -12,7 +13,18 @@ const AUTOSAVE_DELAY_MS = 1200;
 
 /** Mescla premissas salvas com os padrões atuais, para planos antigos ganharem campos novos. */
 function withDefaults(p: DetailedPremises | null): DetailedPremises {
-  return { ...DEFAULT_PREMISES, ...(p ?? {}) };
+  const out = { ...DEFAULT_PREMISES, ...(p ?? {}) };
+  // volume da caçamba vazio: usa a classe do catálogo com a mesma capacidade (ex.: 8x4 40 t)
+  if (!(out.truckVolumeM3 && out.truckVolumeM3 > 0)) {
+    const t = DEFAULT_CATALOG.trucks.find((x) => x.id === out.truckClassId) ?? DEFAULT_CATALOG.trucks.find((x) => x.payloadT === out.truckCapacity);
+    if (t && t.payloadT === out.truckCapacity) {
+      out.truckVolumeM3 = t.volumeM3;
+      out.truckClassId = t.id;
+    }
+  }
+  const cls = DEFAULT_CATALOG.trucks.find((x) => x.id === out.truckClassId);
+  if (cls && cls.payloadT !== out.truckCapacity) out.truckClassId = undefined;
+  return out;
 }
 
 /**

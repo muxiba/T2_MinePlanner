@@ -56,6 +56,8 @@ export const DEFAULT_PREMISES: DetailedPremises = {
   // Frota Geral
   truckCapacity: 40,
   truckCount: 8,
+  truckClassId: 'rod-40',
+  truckVolumeM3: 22,
   
   fleetCapacityMinaTPH: 310,
   fleetCapacityBaiaTPH: 310,

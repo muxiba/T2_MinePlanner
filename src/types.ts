@@ -28,6 +28,13 @@ export interface Route {
    * true = a rota usa os próprios valores (mechanicalAvailability = DF, utilization = UF, truckCapacity).
    */
   ownRates?: boolean;
+  /**
+   * Como a frota da rota é definida:
+   * 'inteiro' = ajustada à meta, arredondada para cima (segue as premissas automaticamente);
+   * 'exato' = frota quebrada, exatamente a necessária (ex.: 3,60);
+   * 'manual' (ou ausente) = número digitado pelo planejador.
+   */
+  fleetMode?: 'manual' | 'inteiro' | 'exato';
   /** UF própria da rota (%), quando ownRates = true. */
   utilization?: number;
 }
@@ -149,6 +156,8 @@ export interface DetailedPremises {
   queueMin?: number;
   /** Volume coroado da caçamba do caminhão (m³), padrão de todas as rotas. Vazio = não limita pelo volume. */
   truckVolumeM3?: number;
+  /** Classe do caminhão da frota (id do catálogo), ex.: 'rod-40' = basculante 8x4 40 t. */
+  truckClassId?: string;
   /** Catálogo de classes de equipamentos para comparação (editável pela empresa). */
   equipmentCatalog?: EquipmentCatalog;
   /** Modelo do simulador de eventos discretos (aba Simulação). */

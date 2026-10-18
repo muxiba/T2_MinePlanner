@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
+import { adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, syncAutoFleet, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
 import type { Route } from '../types';
 
@@ -155,5 +155,28 @@ describe('ajuste da frota à meta e frota extra', () => {
     const less = routes.map((r, i) => (i === 0 ? { ...r, truckCount: 6 } : r));
     expect(trucksWithoutRoute(less, prem)).toBe(4);
     expect(fitExtraAllocations(less, prem)).toBe(null);
+  });
+});
+
+describe('frota automática por rota', () => {
+  const base: Route[] = INITIAL_ROUTES.map((r) => ({ ...r, truckCount: 0 }));
+  it('inteiro = necessário arredondado para cima; exato = quebrado; acompanha a fila', () => {
+    const prem = { ...P, truckCount: 60 };
+    const r1 = syncAutoFleet(base.map((r) => ({ ...r, fleetMode: 'inteiro' as const })), prem)!;
+    const a1 = analyzeFleet(r1, prem);
+    for (const x of a1.routes) if (x.targetWetT > 0) expect(x.trucksAllocated).toBe(Math.ceil(x.trucksNeededExact - 1e-6));
+    const r2 = syncAutoFleet(base.map((r) => ({ ...r, fleetMode: 'exato' as const })), prem)!;
+    const a2 = analyzeFleet(r2, prem);
+    for (const x of a2.routes) if (x.targetWetT > 0) expect(x.trucksAllocated).toBeCloseTo(x.trucksNeededExact, 1);
+    // mais fila → mais caminhões, sem clicar de novo
+    const prem2 = { ...prem, queueMin: 10 };
+    const r3 = syncAutoFleet(r1, prem2)!;
+    expect(r3.reduce((s, r) => s + (r.active ? r.truckCount : 0), 0)).toBeGreaterThan(r1.reduce((s, r) => s + (r.active ? r.truckCount : 0), 0));
+    expect(syncAutoFleet(r3, prem2)).toBe(null);
+  });
+  it('nunca passa da frota', () => {
+    const prem = { ...P, truckCount: 3 };
+    const r = syncAutoFleet(base.map((x) => ({ ...x, fleetMode: 'inteiro' as const })), prem)!;
+    expect(r.filter((x) => x.active).reduce((s, x) => s + x.truckCount, 0)).toBeLessThanOrEqual(3 + 1e-9);
   });
 });

@@ -26,7 +26,7 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
-import { analyzeFleet, fitExtraAllocations } from '@/engine/fleet';
+import { analyzeFleet, fitExtraAllocations, fmtTrucks, syncAutoFleet } from '@/engine/fleet';
 import SummaryView from '@/components/summary/SummaryView';
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
@@ -122,9 +122,12 @@ const PlannerPage: React.FC = () => {
   // as alocações por horas são reajustadas para caberem nos caminhões sem rota.
   useEffect(() => {
     if (plan.status !== 'ready' || !canEdit) return;
+    // rotas em modo automático (inteiro acima / exato) acompanham as premissas
+    const synced = syncAutoFleet(routes, premises);
+    if (synced) return setRoutes(synced);
     const fitted = fitExtraAllocations(routes, premises);
     if (fitted) setPremises((prev) => ({ ...prev, extraAllocations: fitted }));
-  }, [routes, premises, plan.status, canEdit, setPremises]);
+  }, [routes, premises, plan.status, canEdit, setPremises, setRoutes]);
 
   // Motor de dimensionamento v3 (Resumo, cabeçalho e status da barra lateral)
   const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
@@ -293,7 +296,7 @@ const PlannerPage: React.FC = () => {
             className={analysis.meetsTarget ? 'text-emerald-600' : 'text-red-600'}
           />
           <div className="h-8 w-px bg-black/10" />
-          <Metric label="Caminhões: frota / nas rotas / precisam" value={`${analysis.fleet.premise} / ${analysis.fleet.allocated} / ${analysis.fleet.needed}`} className="text-[#1A1A1A]" />
+          <Metric label="Caminhões: frota / nas rotas / precisam" value={`${analysis.fleet.premise} / ${fmtTrucks(analysis.fleet.allocated)} / ${analysis.fleet.needed}`} className="text-[#1A1A1A]" />
         </div>
       </header>
 
@@ -387,6 +390,7 @@ const PlannerPage: React.FC = () => {
                   results={results}
                   premises={premises}
                   routes={routes}
+                  analysis={analysis}
                   productionLogs={productionLogs}
                   setLogs={setProductionLogs}
                   onReset={resetSimulation}

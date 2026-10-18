@@ -12,6 +12,7 @@ interface ProductionCalendarProps {
 
 const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premises, logs }) => {
   const [includeExtraFleet, setIncludeExtraFleet] = React.useState(false);
+  const [view, setView] = React.useState<'mes' | 'tabela'>('mes');
   const today = new Date();
   const monthStart = startOfMonth(new Date(premises.year, premises.month));
   const monthEnd = endOfMonth(monthStart);
@@ -36,129 +37,175 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
   const extraDailyImpact = includeExtraFleet ? (results.allocatedExtraMonthlyProduction / premises.calendarDays) : 0;
   const extraRemainingImpact = includeExtraFleet && results.remainingDays > 0 ? (results.allocatedExtraMonthlyProduction / results.remainingDays) : 0;
 
-  const renderCalendarTable = (title: string, color: string) => (
-    <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-      <div className={`p-4 ${color} text-white font-bold text-center flex items-center justify-center gap-2 relative`}>
-        <CalendarIcon size={18} />
-        {title}
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10">
-          <input 
-            type="checkbox" 
-            id="extra-fleet-toggle"
-            checked={includeExtraFleet}
-            onChange={(e) => setIncludeExtraFleet(e.target.checked)}
-            className="w-4 h-4 rounded border-white/20 bg-transparent text-emerald-500 focus:ring-emerald-500"
-          />
-          <label htmlFor="extra-fleet-toggle" className="text-[10px] uppercase tracking-widest cursor-pointer select-none">Incluir Frota Extra</label>
+  /** Valores de um dia (mesma lógica de antes, só reunida para a grade e a tabela). */
+  const computeDay = (day: Date) => {
+    const dayData = premises.dailyCalendar.find(d => isSameDay(parseISO(d.date), day));
+    const isMaintenanceMina = !!dayData?.isMaintenanceMina;
+    const isMaintenancePlanta = !!dayData?.isMaintenancePlanta;
+    const isToday = isSameDay(day, today);
+    // Base planejada vem da META (consumo da planta), não da simulação da frota
+    const plannedMina = results.plannedDailyROM;
+    const plannedPlanta = results.plannedDailyPlanta;
+    const plannedRejeito = results.plannedDailyRejeito;
+    let extraMina = 0;
+    let extraPlanta = 0;
+    let extraRejeito = 0;
+    if (includeExtraFleet) {
+      (premises.extraAllocations || []).forEach(alloc => {
+        const route = results.routeResults.find((r: any) => r.id === alloc.routeId);
+        if (route) {
+          const hourlyProd = (alloc.truckCount * route.unitaryProductivity * (route.mechanicalAvailability / 100) * (route.operationalEfficiency / 100));
+          const dailyProd = hourlyProd * (results.effectiveHoursPerMonthMina / premises.calendarDays);
+          const name = route.name.toLowerCase();
+          if (name.includes('terminal')) extraPlanta += dailyProd;
+          else if (name.includes('baia')) extraRejeito += dailyProd;
+          else extraMina += dailyProd;
+        }
+      });
+    }
+    const actual = getActualForDay(day);
+    const extraRemainingImpactMina = includeExtraFleet && results.remainingDays > 0 ? (extraMina * premises.calendarDays / results.remainingDays) : 0;
+    const recalculated = (day >= today && results.daysPassed > 0) ? (results.requiredDailyProduction + extraRemainingImpactMina) : 0;
+    const maxPossibleDaily = results.plantCapacityTPH * results.effectiveHoursPerDayPlanta;
+    const isOverLimit = recalculated > maxPossibleDaily;
+    // o realizado lançado é ROM da mina: compara com o ROM planejado do dia
+    const romPlan = plannedMina + extraMina;
+    const pct = actual > 0 && romPlan > 0 ? (actual / romPlan) * 100 : null;
+    return { dayData, isMaintenanceMina, isMaintenancePlanta, isMaintenance: isMaintenanceMina || isMaintenancePlanta, isToday, plannedMina, plannedPlanta, plannedRejeito, extraMina, extraPlanta, extraRejeito, actual, recalculated, isOverLimit, romPlan, pct };
+  };
+
+  const fmt0 = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+
+  const extraToggle = (
+    <label className="flex items-center gap-2 rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-semibold text-black/60">
+      <input type="checkbox" checked={includeExtraFleet} onChange={(e) => setIncludeExtraFleet(e.target.checked)} className="h-4 w-4 rounded text-emerald-500" />
+      Incluir frota extra
+    </label>
+  );
+
+  /** Grade do mês: um cartão por dia com planejado, realizado e meta recalculada. */
+  const renderMonthGrid = () => {
+    const lead = (monthStart.getDay() + 6) % 7; // segunda = 0
+    const weekdays = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'];
+    return (
+      <div className="rounded-3xl border border-black/5 bg-white p-4 shadow-sm md:p-6">
+        <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+          {weekdays.map((w) => (
+            <div key={w} className="pb-1 text-center text-[10px] font-bold tracking-widest text-black/40 uppercase">{w}</div>
+          ))}
+          {Array.from({ length: lead }, (_, i) => <div key={`e${i}`} />)}
+          {days.map((day, idx) => {
+            const d = computeDay(day);
+            const future = !d.actual && d.recalculated > 0;
+            const tone = d.pct === null ? '' : d.pct >= 100 ? 'border-emerald-200 bg-emerald-50' : d.pct >= 90 ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50';
+            return (
+              <div
+                key={idx}
+                className={`min-h-[92px] rounded-xl border p-2 text-[11px] leading-tight ${tone || (d.isMaintenance ? 'border-orange-200 bg-orange-50/60' : 'border-black/5 bg-[#FAFBFB]')} ${d.isToday ? 'ring-2 ring-emerald-500' : ''}`}
+                title={`${format(day, "EEEE, dd/MM", { locale: ptBR })}`}
+              >
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="font-mono text-sm font-bold text-black/75">{format(day, 'dd')}</span>
+                  {d.isMaintenance && (
+                    <span className="rounded bg-orange-500 px-1 text-[9px] font-bold text-white uppercase" title={`Parada ${d.isMaintenanceMina ? 'mina' : ''}${d.isMaintenanceMina && d.isMaintenancePlanta ? ' e ' : ''}${d.isMaintenancePlanta ? 'planta' : ''}`}>
+                      parada
+                    </span>
+                  )}
+                </div>
+                <p className="text-black/45">plano <span className="font-mono text-black/65">{fmt0(d.romPlan)}</span></p>
+                {d.actual > 0 ? (
+                  <p className="mt-0.5 font-mono font-bold text-black/80">
+                    {fmt0(d.actual)} t <span className={d.pct! >= 100 ? 'text-emerald-700' : d.pct! >= 90 ? 'text-amber-700' : 'text-red-600'}>{Math.round(d.pct!)}%</span>
+                  </p>
+                ) : future ? (
+                  <p className={`mt-0.5 font-mono font-bold ${d.isOverLimit ? 'text-red-600' : d.recalculated > d.romPlan ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    meta {fmt0(d.recalculated)}
+                    {d.isOverLimit && <span className="block text-[9px] uppercase">acima da planta</span>}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-black/25">sem lançamento</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-black/55">
+          <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-emerald-200 bg-emerald-50" /> realizado ≥ 100% do plano</span>
+          <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-amber-200 bg-amber-50" /> 90–100%</span>
+          <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-red-200 bg-red-50" /> abaixo de 90%</span>
+          <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded border border-orange-200 bg-orange-50" /> parada programada</span>
+          <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded ring-2 ring-emerald-500" /> hoje</span>
+          <span>“meta” = meta recalculada pelo replanejamento (t de ROM)</span>
         </div>
       </div>
+    );
+  };
+
+  const renderCalendarTable = () => (
+    <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[800px]">
           <thead className="bg-[#F8F9FA] text-black/40 text-[10px] uppercase font-bold tracking-widest">
             <tr>
               <th className="px-4 py-3 border-b border-black/5 sticky left-0 bg-[#F8F9FA] z-10">Dia</th>
-              <th className="px-4 py-3 border-b border-black/5">ROM Mina (t)</th>
-              <th className="px-4 py-3 border-b border-black/5">Planta (t)</th>
-              {premises.processType === 'umido' && <th className="px-4 py-3 border-b border-black/5">Rejeito (t)</th>}
-              <th className="px-4 py-3 border-b border-black/5">Realizado Total (t)</th>
-              <th className="px-4 py-3 border-b border-black/5 text-right">Meta Recalculada (Mina)</th>
+              <th className="px-4 py-3 border-b border-black/5">ROM mina planejado (t)</th>
+              <th className="px-4 py-3 border-b border-black/5">Planta planejado (t)</th>
+              {premises.processType === 'umido' && <th className="px-4 py-3 border-b border-black/5">Rejeito planejado (t)</th>}
+              <th className="px-4 py-3 border-b border-black/5">ROM realizado (t)</th>
+              <th className="px-4 py-3 border-b border-black/5 text-right">Meta recalculada (ROM)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black/5">
             {days.map((day, idx) => {
-              const dayData = premises.dailyCalendar.find(d => isSameDay(parseISO(d.date), day));
-              const isMaintenanceMina = dayData?.isMaintenanceMina;
-              const isMaintenancePlanta = dayData?.isMaintenancePlanta;
-              const isMaintenance = isMaintenanceMina || isMaintenancePlanta;
-              
-              const isToday = isSameDay(day, today);
-              
-              // Base planned values come from the TARGET (Consumo Planta meta), not from fleet simulation
-              const plannedMina = results.plannedDailyROM;
-              const plannedPlanta = results.plannedDailyPlanta;
-              const plannedRejeito = results.plannedDailyRejeito;
-
-              // Extra impact per type of route
-              let extraMina = 0;
-              let extraPlanta = 0;
-              let extraRejeito = 0;
-
-              if (includeExtraFleet) {
-                (premises.extraAllocations || []).forEach(alloc => {
-                  const route = results.routeResults.find((r: any) => r.id === alloc.routeId);
-                  if (route) {
-                    const hourlyProd = (alloc.truckCount * route.unitaryProductivity * (route.mechanicalAvailability / 100) * (route.operationalEfficiency / 100));
-                    const dailyProd = hourlyProd * (results.effectiveHoursPerMonthMina / premises.calendarDays);
-                    
-                    const name = route.name.toLowerCase();
-                    if (name.includes('terminal')) extraPlanta += dailyProd;
-                    else if (name.includes('baia')) extraRejeito += dailyProd;
-                    else extraMina += dailyProd;
-                  }
-                });
-              }
-
-              const totalPlanned = plannedMina + plannedPlanta + plannedRejeito + extraMina + extraPlanta + extraRejeito;
-              const actual = getActualForDay(day);
-              
-              // Recalculated target logic (Mina focus)
-              const extraRemainingImpactMina = includeExtraFleet && results.remainingDays > 0 ? (extraMina * premises.calendarDays / results.remainingDays) : 0;
-              const recalculated = (day >= today && results.daysPassed > 0) ? (results.requiredDailyProduction + extraRemainingImpactMina) : 0;
-              const maxPossibleDaily = results.plantCapacityTPH * results.effectiveHoursPerDayPlanta;
-              const isOverLimit = recalculated > maxPossibleDaily;
-
+              const d = computeDay(day);
               return (
-                <tr key={idx} className={`hover:bg-black/[0.01] ${isToday ? 'bg-emerald-50/50' : ''} ${isMaintenance ? 'bg-orange-50/40' : ''}`}>
+                <tr key={idx} className={`hover:bg-black/[0.01] ${d.isToday ? 'bg-emerald-50/50' : ''} ${d.isMaintenance ? 'bg-orange-50/40' : ''}`}>
                   <td className="px-4 py-2 text-sm font-mono sticky left-0 bg-white z-10 border-r border-black/5">
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2">
                         <span className="font-bold">{format(day, 'dd')}</span>
-                        {isMaintenance && <AlertCircle size={10} className="text-orange-500" />}
+                        {d.isMaintenance && <AlertCircle size={10} className="text-orange-500" />}
                       </div>
                       <span className="text-[10px] text-black/40 capitalize">{format(day, 'EEE', { locale: ptBR })}</span>
                     </div>
                   </td>
                   <td className="px-4 py-2 text-sm font-mono">
                     <div className="flex flex-col">
-                      <span className="text-black/60">{(plannedMina + extraMina).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-                      {extraMina > 0 && <span className="text-[8px] text-blue-500 font-bold">+{extraMina.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>}
+                      <span className="text-black/60">{fmt0(d.plannedMina + d.extraMina)}</span>
+                      {d.extraMina > 0 && <span className="text-[8px] text-blue-500 font-bold">+{fmt0(d.extraMina)}</span>}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-sm font-mono">
                     <div className="flex flex-col">
-                      <span className="text-black/60">{(plannedPlanta + extraPlanta).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-                      {extraPlanta > 0 && <span className="text-[8px] text-blue-500 font-bold">+{extraPlanta.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>}
+                      <span className="text-black/60">{fmt0(d.plannedPlanta + d.extraPlanta)}</span>
+                      {d.extraPlanta > 0 && <span className="text-[8px] text-blue-500 font-bold">+{fmt0(d.extraPlanta)}</span>}
                     </div>
                   </td>
                   {premises.processType === 'umido' && (
                     <td className="px-4 py-2 text-sm font-mono">
                       <div className="flex flex-col">
-                        <span className="text-black/60">{(plannedRejeito + extraRejeito).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
-                        {extraRejeito > 0 && <span className="text-[8px] text-blue-500 font-bold">+{extraRejeito.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>}
+                        <span className="text-black/60">{fmt0(d.plannedRejeito + d.extraRejeito)}</span>
+                        {d.extraRejeito > 0 && <span className="text-[8px] text-blue-500 font-bold">+{fmt0(d.extraRejeito)}</span>}
                       </div>
                     </td>
                   )}
                   <td className="px-4 py-2 text-sm font-mono">
-                    {actual > 0 ? (
+                    {d.actual > 0 ? (
                       <div className="flex flex-col">
-                        <span className="font-bold text-emerald-600">{actual.toLocaleString('pt-BR')}</span>
-                        <span className={`text-[10px] ${actual >= totalPlanned ? 'text-emerald-500' : 'text-red-500'}`}>
-                          {((actual / totalPlanned) * 100).toFixed(1)}%
-                        </span>
+                        <span className="font-bold text-emerald-600">{d.actual.toLocaleString('pt-BR')}</span>
+                        {d.pct !== null && <span className={`text-[10px] ${d.pct >= 100 ? 'text-emerald-500' : 'text-red-500'}`}>{d.pct.toFixed(1)}% do plano</span>}
                       </div>
                     ) : (
                       <span className="text-black/20">-</span>
                     )}
                   </td>
                   <td className="px-4 py-2 text-sm font-mono text-right">
-                    {recalculated > 0 ? (
+                    {d.recalculated > 0 ? (
                       <div className="flex flex-col items-end">
-                        <span className={`font-bold ${isOverLimit ? 'text-red-600' : recalculated > (plannedMina + extraMina) ? 'text-orange-500' : 'text-emerald-600'}`}>
-                          {recalculated.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                        <span className={`font-bold ${d.isOverLimit ? 'text-red-600' : d.recalculated > d.romPlan ? 'text-orange-500' : 'text-emerald-600'}`}>
+                          {fmt0(d.recalculated)}
                         </span>
-                        {isOverLimit && (
-                          <span className="text-[8px] text-red-500 font-bold uppercase">Limite Planta</span>
-                        )}
+                        {d.isOverLimit && <span className="text-[8px] text-red-500 font-bold uppercase">Limite Planta</span>}
                       </div>
                     ) : '-'}
                   </td>
@@ -176,7 +223,7 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
     const rows = days.map(day => {
       const dayData = premises.dailyCalendar.find(d => isSameDay(parseISO(d.date), day));
       const actual = getActualForDay(day);
-      const planned = results.totalDailyROM;
+      const planned = results.plannedDailyROM;
       const deviation = actual - planned;
       const recalculated = (day >= today) ? results.requiredDailyProduction : 0;
       
@@ -212,7 +259,7 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
           </div>
           <div>
             <h3 className="text-xl font-bold">Calendário de Produção</h3>
-            <p className="text-sm text-black/40">Acompanhamento diário e replanejamento automático</p>
+            <p className="text-sm text-black/40">Plano do dia (premissas), realizado (Lançamento Produção) e meta recalculada (Replanejamento)</p>
           </div>
         </div>
 
@@ -241,9 +288,34 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8">
-        {renderCalendarTable("Planejamento vs Realizado", "bg-[#151619]")}
+      {/* resumo do mês */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        {[
+          ['Meta do mês (ROM)', `${fmt0(premises.targetMonthlyROM)} t`],
+          ['Realizado', `${fmt0(results.totalActualProduction)} t`],
+          ['Saldo', `${fmt0(results.remainingTarget)} t`],
+          ['Dias lançados / restantes', `${results.daysPassed} / ${results.remainingDays}`],
+          ['Nova meta diária', `${fmt0(results.requiredDailyProduction)} t/dia`],
+        ].map(([k, v]) => (
+          <div key={k} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+            <p className="text-[10px] font-bold tracking-widest text-black/40 uppercase">{k}</p>
+            <p className="mt-1 font-mono text-lg font-bold text-black/80">{v}</p>
+          </div>
+        ))}
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl border border-black/10 bg-white p-1" role="tablist">
+          {([['mes', 'Calendário do mês'], ['tabela', 'Tabela diária']] as const).map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} className={`rounded-lg px-4 py-1.5 text-sm font-semibold ${view === k ? 'bg-[#151619] text-white' : 'text-black/55 hover:bg-black/[0.03]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {extraToggle}
+      </div>
+
+      {view === 'mes' ? renderMonthGrid() : renderCalendarTable()}
 
       <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
         <h3 className="text-lg font-bold mb-6 text-emerald-400 flex items-center gap-2">

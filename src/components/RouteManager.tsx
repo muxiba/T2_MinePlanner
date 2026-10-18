@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
 import type { DetailedPremises, Route } from '../types';
-import { adjustFleetToTarget, analyzeFleet, optimizeFleet, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
+import { analyzeFleet, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
 import ExtraFleetManager from './ExtraFleetManager';
 
 /**
@@ -31,19 +31,29 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
   const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
   const optFolga = useMemo(() => optimizeFleet(routes, premises, 'folga'), [routes, premises]);
   const optZero = useMemo(() => optimizeFleet(routes, premises, 'zero'), [routes, premises]);
-  const adjust = useMemo(() => adjustFleetToTarget(routes, premises), [routes, premises]);
   const f = analysis.fleet;
   const over = f.allocated + f.extraEquivalent > f.premise + 1e-6;
   const [adjustMsg, setAdjustMsg] = React.useState<string | null>(null);
 
-  /** Ajusta toda a frota: cada rota com o inteiro que atende a meta; a sobra vai para a frota extra. */
-  const applyAdjust = () => {
-    setRoutes(adjust.routes);
-    setPremises((prev) => ({ ...prev, extraAllocations: adjust.extraAllocations }));
-    const parts = adjust.moves.length ? adjust.moves.map((m) => `${m.name}: ${m.from} → ${m.to}`).join(' · ') : 'as rotas já estavam ajustadas';
+  /** Aplica um modo de frota (inteiro acima / exata) às rotas indicadas e já ajusta os números. */
+  const applyMode = (ids: string[] | 'all', mode: 'inteiro' | 'exato') => {
+    const next = routes.map((r) => (r.active && (ids === 'all' || ids.includes(r.id)) ? { ...r, fleetMode: mode } : r));
+    const synced = syncAutoFleet(next, premises) ?? next;
+    setRoutes(synced);
+    const fitted = fitExtraAllocations(synced, premises);
+    if (fitted) setPremises((prev) => ({ ...prev, extraAllocations: fitted }));
+    const a2 = analyzeFleet(synced, { ...premises, extraAllocations: fitted ?? premises.extraAllocations });
+    const moves = synced
+      .filter((r) => r.active)
+      .map((r) => ({ r, from: routes.find((x) => x.id === r.id)?.truckCount ?? 0 }))
+      .filter(({ r, from }) => Math.abs(from - r.truckCount) > 1e-9)
+      .map(({ r, from }) => `${r.name}: ${fmtTrucks(from)} → ${fmtTrucks(r.truckCount)}`);
+    const free = trucksWithoutRoute(synced, premises);
+    const short = a2.routes.reduce((s, x) => s + Math.max(0, (mode === 'inteiro' ? x.trucksNeeded : x.trucksNeededExact) - x.trucksAllocated), 0);
     setAdjustMsg(
-      `${parts}. ${adjust.freeTrucks} caminhão(ões) ficam na frota extra.` +
-        (adjust.shortfall > 0 ? ` Faltam ${adjust.shortfall} caminhão(ões) para todas as rotas baterem a meta.` : ''),
+      `${moves.length ? moves.join(' · ') : 'Nada mudou: as rotas já estavam assim'}. ` +
+        `${free} caminhão(ões) ficam na frota extra. Chega à planta: ${t0(a2.romDeliverableDryT)} t.` +
+        (short > 0.01 ? ` A frota não basta: faltam ${fmtTrucks(short)} caminhão(ões) para todas as rotas baterem a meta.` : ''),
     );
   };
 
@@ -131,23 +141,26 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
       <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
           <Stat label="Frota (premissas)" value={String(f.premise)} />
-          <Stat label="Nas rotas" value={String(f.allocated)} tone={over ? 'bad' : undefined} />
-          <Stat label="Sem rota (folga)" value={n1(f.spare)} tone={f.spare > 0.01 && !analysis.meetsTarget ? 'warn' : undefined} />
+          <Stat label="Nas rotas" value={fmtTrucks(f.allocated)} tone={over ? 'bad' : undefined} />
+          <Stat label="Sem rota (frota extra)" value={fmtTrucks(f.spare)} sub={Math.abs(f.spare - Math.round(f.spare)) > 0.01 ? `${Math.floor(f.spare + 1e-9)} caminhão(ões) inteiro(s) livre(s)` : undefined} tone={f.spare > 0.01 && !analysis.meetsTarget ? 'warn' : undefined} />
           <Stat label="Necessários" value={`${f.needed}`} sub={`${n2(f.neededExact)} sem arredondar`} />
           <Stat
             label="Chega à planta"
             value={`${t0(analysis.romDeliverableDryT)} t`}
-            sub={`${pc(analysis.romTargetDryT ? analysis.romDeliverableDryT / analysis.romTargetDryT : 1)} da meta de ${t0(analysis.romTargetDryT)} t`}
+            sub={`${pc(analysis.romTargetDryT ? analysis.romDeliverableDryT / analysis.romTargetDryT : 1)} da meta de ${t0(analysis.romTargetDryT)} t · possível com esta frota: ${t0(analysis.romPossibleDryT)} t`}
             tone={analysis.meetsTarget ? 'ok' : 'bad'}
           />
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button onClick={applyAdjust} className="inline-flex items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
-            <Scale size={15} /> Ajustar frota à meta
+          <button onClick={() => applyMode('all', 'inteiro')} className="inline-flex items-center gap-2 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+            <Scale size={15} /> Ajustar todas à meta (inteiro acima)
+          </button>
+          <button onClick={() => applyMode('all', 'exato')} className="inline-flex items-center gap-2 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]">
+            Frota exata em todas
           </button>
           <span className="text-xs text-black/50">
-            Cada rota recebe o número inteiro de caminhões que atende a sua meta (arredondado para cima); o que sobrar da frota de {f.premise} vai para a frota extra.
+            Inteiro acima: cada rota recebe o número redondo que bate a meta (3,60 → 4). Exata: a frota quebrada necessária (3,60), produção igual à meta. O que sobra da frota de {f.premise} vai para a frota extra. O ajuste acompanha as premissas (fila, DMT, DF…).
           </span>
         </div>
         {adjustMsg && <p className="mt-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-900">{adjustMsg}</p>}
@@ -155,7 +168,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
         {over && (
           <p className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            As rotas usam {f.allocated} caminhões{f.extraEquivalent > 0 ? ` (+${n1(f.extraEquivalent)} em alocações por horas)` : ''}, mais que a frota de {f.premise} das premissas. Corrija a frota nas premissas ou redistribua.
+            As rotas usam {fmtTrucks(f.allocated)} caminhões{f.extraEquivalent > 0 ? ` (+${n1(f.extraEquivalent)} em alocações por horas)` : ''}, mais que a frota de {f.premise} das premissas. Corrija a frota nas premissas ou redistribua.
           </p>
         )}
 
@@ -241,12 +254,12 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => handleUpdateRoute(route.id, { active: !route.active })} className={`rounded-xl p-2.5 ${route.active ? 'bg-emerald-50 text-emerald-500' : 'bg-black/5 text-black/40'}`} title={route.active ? 'Desativar' : 'Ativar'}>
-                    <Activity size={18} />
-                  </button>
-                  <button onClick={applyAdjust} className="rounded-xl bg-black/5 p-2.5 text-black/50 hover:bg-emerald-50 hover:text-emerald-600" title="Ajustar toda a frota à meta (inteiro acima em cada rota, sobra para a frota extra)">
-                    <Scale size={18} />
-                  </button>
+                  {!route.active && (
+                    <button onClick={() => handleUpdateRoute(route.id, { active: true })} className="inline-flex items-center gap-1.5 rounded-xl bg-black/5 px-3 py-2 text-xs font-semibold text-black/60 hover:bg-emerald-50 hover:text-emerald-700" title="Ativar rota">
+                      <Activity size={14} /> Ativar rota
+                    </button>
+                  )}
+                  {route.active && <FleetToggle mode={route.fleetMode} onChange={(m) => applyMode([route.id], m)} />}
                   <button onClick={() => setEditingId(editing ? null : route.id)} className={`rounded-xl p-2.5 ${editing ? 'bg-emerald-500 text-white' : 'bg-black/5 text-black/40 hover:bg-black/10'}`} title="Editar">
                     {editing ? <Check size={18} /> : <Edit2 size={18} />}
                   </button>
@@ -259,9 +272,14 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
               <div className="grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-6">
                 <Field label="Caminhões na rota" icon={<Truck size={12} />}>
                   {editing ? (
-                    <input type="number" min={0} step={1} value={route.truckCount} onChange={(e) => handleUpdateRoute(route.id, { truckCount: Math.max(0, Math.round(Number(e.target.value) || 0)), isManualOverride: true })} className={inputCls} />
+                    <input type="number" min={0} step={1} value={route.truckCount} onChange={(e) => handleUpdateRoute(route.id, { truckCount: Math.max(0, Math.round(Number(e.target.value) || 0)), isManualOverride: true, fleetMode: 'manual' })} className={inputCls} />
                   ) : (
-                    <p className="font-mono text-lg font-bold">{route.truckCount}</p>
+                    <p className="font-mono text-lg font-bold">
+                      {fmtTrucks(route.truckCount)}
+                      <span className="ml-2 align-middle text-[10px] font-semibold tracking-wide text-black/40 uppercase">
+                        {route.fleetMode === 'inteiro' ? 'ajustada ↑' : route.fleetMode === 'exato' ? 'exata' : 'manual'}
+                      </span>
+                    </p>
                   )}
                 </Field>
                 <Field label="DMT (m)" icon={<MapPin size={12} />}>
@@ -308,6 +326,12 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                   Esta rota usa caminhão, DF ou UF diferentes das premissas
                 </label>
               )}
+              {editing && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-black/60">
+                  <input type="checkbox" checked={route.active} onChange={(e) => handleUpdateRoute(route.id, { active: e.target.checked })} />
+                  Rota ativa (desmarque para tirar a rota do dimensionamento; os caminhões dela voltam para a frota extra)
+                </label>
+              )}
               {!editing && (
                 <p className="mt-2 text-[11px] text-black/40">
                   {rates.own ? 'Valores próprios desta rota.' : `Carga útil, DF e UF das premissas (${area === 'mina' ? 'mina' : 'planta'}).`}
@@ -320,6 +344,27 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
         );
       })}
     </div>
+  );
+};
+
+/** Liga/desliga o ajuste da frota da rota: ligado = inteiro acima; desligado = frota exata (quebrada). */
+const FleetToggle: React.FC<{ mode?: Route['fleetMode']; onChange: (m: 'inteiro' | 'exato') => void }> = ({ mode, onChange }) => {
+  const on = mode === 'inteiro';
+  const label = on ? 'Inteiro acima' : mode === 'exato' ? 'Frota exata' : 'Manual';
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(on ? 'exato' : 'inteiro')}
+      title={on ? 'Ligado: frota arredondada para cima. Clique para usar a frota exata (quebrada).' : 'Clique para ajustar a frota à meta, arredondada para cima.'}
+      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${on ? 'bg-emerald-50 text-emerald-700' : mode === 'exato' ? 'bg-amber-50 text-amber-700' : 'bg-black/5 text-black/50'}`}
+    >
+      <span className={`relative h-4 w-7 rounded-full transition-colors ${on ? 'bg-emerald-500' : 'bg-black/20'}`}>
+        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? 'left-3.5' : 'left-0.5'}`} />
+      </span>
+      {label}
+    </button>
   );
 };
 
@@ -372,7 +417,7 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
     [
       'Capacidade com a alocação',
       `${t0(a.capacityWetT)} t`,
-      `${a.trucksAllocated} caminhões × ${t0(a.truckMonthT)} t${a.extraCapacityWetT > 0 ? ` + ${t0(a.extraCapacityWetT)} t da frota extra` : ''}${a.limitedBy === 'carga' ? ' (limitada pela carga)' : ''}`,
+      `${fmtTrucks(a.trucksAllocated)} caminhões × ${t0(a.truckMonthT)} t${a.extraCapacityWetT > 0 ? ` + ${t0(a.extraCapacityWetT)} t da frota extra` : ''}${a.limitedBy === 'carga' ? ' (limitada pela carga)' : ''}`,
     ],
   ];
   return (
@@ -383,7 +428,7 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
           <b className="font-mono">{a.trucksNeeded}</b>
           <span className="text-black/40"> ({n2(a.trucksNeededExact)})</span>
           <span className="text-black/50"> · tem </span>
-          <b className="font-mono">{a.trucksAllocated}</b>
+          <b className="font-mono">{fmtTrucks(a.trucksAllocated)}</b>
         </p>
         <p className="text-sm">
           <span className="text-black/50">Capacidade </span>
