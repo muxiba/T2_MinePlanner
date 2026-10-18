@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import clsx from 'clsx';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import { AppShell } from '@/components/AppShell';
 import { Alert, Button, Card } from '@/components/ui';
 import { isCompanyUsable, trialDaysLeft, type CompanyOverview, type CompanyStatus } from '@/lib/db-types';
@@ -26,7 +26,7 @@ const OwnerPage: React.FC = () => {
   const [filter, setFilter] = useState<Filter>('all');
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.rpc('owner_company_overview');
+    const { data, error } = await db.rpc('owner_company_overview');
     if (error) setError(translateError(error));
     else setRows((data ?? []) as CompanyOverview[]);
   }, []);
@@ -38,7 +38,7 @@ const OwnerPage: React.FC = () => {
   const act = async (c: CompanyOverview, status: CompanyStatus, trialDays?: number, confirmMsg?: string) => {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     setBusy(c.id);
-    const { error } = await supabase.rpc('owner_set_company_status', {
+    const { error } = await db.rpc('owner_set_company_status', {
       p_company: c.id,
       p_status: status,
       p_trial_days: trialDays ?? null,
@@ -55,7 +55,7 @@ const OwnerPage: React.FC = () => {
   const editNotes = async (c: CompanyOverview) => {
     const notes = window.prompt(`Anotações sobre ${c.name} (contrato, contato, valores):`, c.notes ?? '');
     if (notes === null) return;
-    const { error } = await supabase.rpc('owner_set_company_status', {
+    const { error } = await db.rpc('owner_set_company_status', {
       p_company: c.id,
       p_status: c.status,
       p_trial_days: null,

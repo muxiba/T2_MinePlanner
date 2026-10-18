@@ -19,20 +19,22 @@ Teste vencido ou empresa bloqueada: os usuários veem uma tela de acesso suspens
 ## Stack
 
 - React 19 + Vite 6 + Tailwind CSS 4 + React Router 7
-- Supabase (Auth + Postgres com Row Level Security)
+- Neon: Postgres (região São Paulo), Neon Auth (Better Auth) e Data API com Row Level Security
+- SDK `@neondatabase/neon-js` (login no estilo Supabase + consultas à Data API)
 - Vercel (hospedagem, com preview automático por branch)
 - Vitest (testes dos cálculos)
 
 ## Configuração (uma vez)
 
-1. **Supabase** — crie um projeto (região São Paulo). No **SQL Editor**, rode o arquivo
-   `supabase/migrations/20261017000000_multiempresa.sql` inteiro.
-2. **Auth → URL Configuration** — em *Site URL* coloque a URL do Vercel e em *Redirect URLs* adicione
-   `https://SEU-APP.vercel.app/**`, `https://*-SEU-USUARIO.vercel.app/**` (previews) e `http://localhost:3000/**`.
-3. **Variáveis** — copie `.env.example` para `.env.local` e preencha `VITE_SUPABASE_URL` e
-   `VITE_SUPABASE_ANON_KEY` (*Project Settings → API*). No Vercel, cadastre as mesmas em
-   *Settings → Environment Variables* (Production e Preview) e faça um novo deploy.
-4. **Seu acesso de dono** — cadastre-se no app e depois rode no SQL Editor:
+1. **Neon** — no projeto, ative **Better Auth** e **Data API** (com "Use Neon Auth" e "Grant public schema access").
+2. **Banco** — em **SQL Editor**, rode o arquivo `db/schema.sql` inteiro. Depois, em **Data API**, clique em
+   **Refresh schema cache**.
+3. **Better Auth → Configure Auth** — em *Trusted domains*, adicione `http://localhost:3000`, a URL do app no
+   Vercel e `https://*-muxibas-projects.vercel.app` (previews).
+4. **Variáveis** — copie `.env.example` para `.env.local` e preencha `VITE_NEON_AUTH_URL` e
+   `VITE_NEON_DATA_API_URL`. No Vercel, cadastre as mesmas em *Settings → Environment Variables*
+   (Production e Preview) e faça um novo deploy.
+5. **Seu acesso de dono** — cadastre-se no app e depois rode no SQL Editor:
    ```sql
    update public.profiles set is_platform_owner = true where email = 'seu@email.com';
    ```
@@ -53,14 +55,14 @@ npm run build
 src/
   App.tsx              rotas e guardas (login, empresa liberada, admin, dono)
   auth/                sessão, perfil, empresas do usuário e empresa atual
-  lib/                 cliente Supabase, tipos do banco, formatação
+  lib/                 cliente Neon (login + Data API), tipos do banco, formatação
   pages/               login, cadastro, senha, convite, empresa, dono, telas de status
   planner/             tela de planejamento e salvamento automático no banco
   components/          telas do simulador (dashboard, rotas, premissas, ...) e UI comum
   utils/calculations   motor de cálculo (com testes)
-supabase/
-  migrations/          esquema, funções e políticas RLS
-  tests/               teste de isolamento entre empresas (Postgres puro)
+db/
+  schema.sql           tabelas, funções (RPC) e políticas RLS
+  tests/               teste de isolamento entre empresas (Postgres puro, simulando o Neon)
 ```
 
 ### Dados antigos
@@ -70,8 +72,8 @@ Quem usava a versão sem login tinha os dados só no navegador. Ao entrar pela p
 ### Testar as políticas do banco
 
 ```bash
-psql -d banco_de_teste -f supabase/tests/00_auth_stub.sql \
-  -f supabase/migrations/20261017000000_multiempresa.sql \
-  -f supabase/tests/01_rls_isolamento.sql
+psql -d banco_de_teste -f db/tests/00_neon_stub.sql \
+  -f db/schema.sql \
+  -f db/tests/01_rls_isolamento.sql
 ```
 O script simula duas empresas e verifica isolamento, papéis, bloqueio e teste expirado.

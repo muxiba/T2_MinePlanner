@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import type { PlanRow, ScenarioRow } from '@/lib/db-types';
 import type { DailyLog, DetailedPremises, Route } from '@/types';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '@/constants';
@@ -52,7 +52,7 @@ export function usePlan(companyId: string, canEdit: boolean) {
     let cancelled = false;
     setStatus('loading');
     (async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('plans')
         .select('id, company_id, name, premises, routes, production_logs, updated_at')
         .eq('company_id', companyId)
@@ -69,7 +69,7 @@ export function usePlan(companyId: string, canEdit: boolean) {
         return setStatus('ready');
       }
       if (!canEdit) return setStatus('empty');
-      const { data: created, error: createError } = await supabase
+      const { data: created, error: createError } = await db
         .from('plans')
         .insert({ company_id: companyId, name: 'Plano principal', premises: DEFAULT_PREMISES, routes: INITIAL_ROUTES })
         .select('id, company_id, name, premises, routes, production_logs, updated_at')
@@ -93,7 +93,7 @@ export function usePlan(companyId: string, canEdit: boolean) {
     const json = JSON.stringify(payload);
     if (json === lastSavedJson.current) return setSaveState('saved');
     setSaveState('saving');
-    const { error } = await supabase.from('plans').update(payload).eq('id', planId);
+    const { error } = await db.from('plans').update(payload).eq('id', planId);
     if (error) {
       setSaveError(translateError(error));
       return setSaveState('error');
@@ -191,7 +191,7 @@ export function useScenarios(companyId: string, planId: string | null) {
 
   const reload = useCallback(async () => {
     if (!planId) return;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('scenarios')
       .select('id, name, premises, routes, created_at')
       .eq('plan_id', planId)
@@ -206,7 +206,7 @@ export function useScenarios(companyId: string, planId: string | null) {
 
   const create = useCallback(
     async (name: string, routes: Route[], premises: DetailedPremises) => {
-      const { error } = await supabase
+      const { error } = await db
         .from('scenarios')
         .insert({ company_id: companyId, plan_id: planId, name, routes, premises });
       if (error) {
@@ -222,7 +222,7 @@ export function useScenarios(companyId: string, planId: string | null) {
 
   const remove = useCallback(
     async (id: string) => {
-      const { error } = await supabase.from('scenarios').delete().eq('id', id);
+      const { error } = await db.from('scenarios').delete().eq('id', id);
       if (error) setError(translateError(error));
       else setScenarios((s) => s.filter((x) => x.id !== id));
     },

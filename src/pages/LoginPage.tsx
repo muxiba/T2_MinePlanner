@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { supabase, translateError } from '@/lib/supabase';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { db, translateError } from '@/lib/db';
 import { useAuth } from '@/auth/AuthProvider';
 import { AuthLayout } from '@/components/ui/AuthLayout';
 import { Alert, Button, Field } from '@/components/ui';
@@ -10,6 +10,7 @@ const LoginPage: React.FC = () => {
   const { session } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const passwordReset = Boolean((useLocation().state as { passwordReset?: boolean } | null)?.passwordReset);
   const next = safeNext(params.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +23,7 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = await db.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
     if (error) return setError(translateError(error));
     navigate(next, { replace: true });
@@ -31,6 +32,7 @@ const LoginPage: React.FC = () => {
   return (
     <AuthLayout title="Entrar" subtitle="Acesse os planos de produção da sua empresa.">
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
+        {passwordReset && !error && <Alert tone="success">Senha alterada. Entre com a nova senha.</Alert>}
         {error && <Alert tone="error">{error}</Alert>}
         <Field label="E-mail" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         <Field

@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { MailCheck } from 'lucide-react';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import { useAuth } from '@/auth/AuthProvider';
 import { AuthLayout } from '@/components/ui/AuthLayout';
 import { Alert, Button, Field } from '@/components/ui';
 import { formatCnpj } from '@/lib/format';
+import { savePendingCompany } from '@/lib/pending-company';
 
 const SignUpPage: React.FC = () => {
-  const { session } = useAuth();
+  const { session, refresh } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ fullName: '', email: '', company: '', cnpj: '', password: '', confirm: '' });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
@@ -16,7 +17,7 @@ const SignUpPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
 
-  if (session && !sentTo) return <Navigate to="/" replace />;
+  if (session && !sentTo && !loading) return <Navigate to="/" replace />;
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: k === 'cnpj' ? formatCnpj(e.target.value) : e.target.value }));
@@ -38,18 +39,28 @@ const SignUpPage: React.FC = () => {
     if (!validate()) return;
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase.auth.signUp({
+    const company = { name: form.company.trim(), cnpj: form.cnpj || null };
+    const { data, error } = await db.auth.signUp({
       email: form.email.trim(),
       password: form.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`,
-        data: { full_name: form.fullName.trim(), company_name: form.company.trim(), company_cnpj: form.cnpj || null },
-      },
+      options: { emailRedirectTo: `${window.location.origin}/`, data: { name: form.fullName.trim() } },
     });
+    if (error) {
+      setLoading(false);
+      return setError(translateError(error));
+    }
+    if (!data?.session) {
+      // Confirmação de e-mail ligada: a empresa é criada no primeiro login.
+      savePendingCompany(company);
+      setLoading(false);
+      return setSentTo(form.email.trim());
+    }
+    await db.rpc('sync_profile', { p_full_name: form.fullName.trim() });
+    const { error: companyError } = await db.rpc('create_company', { p_name: company.name, p_cnpj: company.cnpj });
+    if (companyError) savePendingCompany(company); // a tela "sem empresa" oferece criar de novo
+    await refresh();
     setLoading(false);
-    if (error) return setError(translateError(error));
-    if (data.session) navigate('/', { replace: true });
-    else setSentTo(form.email.trim());
+    navigate('/', { replace: true });
   };
 
   if (sentTo) {

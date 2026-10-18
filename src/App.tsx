@@ -1,7 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { isDbConfigured } from '@/lib/db';
 import { isCompanyUsable } from '@/lib/db-types';
 import { FullScreenLoader } from '@/components/ui';
 import LoginPage from '@/pages/LoginPage';
@@ -86,6 +86,6 @@ const router = createBrowserRouter([
   },
 ]);
 
-const App: React.FC = () => (isSupabaseConfigured ? <RouterProvider router={router} /> : <SetupMissingPage />);
+const App: React.FC = () => (isDbConfigured ? <RouterProvider router={router} /> : <SetupMissingPage />);
 
 export default App;

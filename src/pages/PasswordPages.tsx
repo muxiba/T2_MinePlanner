@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { supabase, translateError } from '@/lib/supabase';
-import { useAuth } from '@/auth/AuthProvider';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { db, translateError } from '@/lib/db';
 import { AuthLayout } from '@/components/ui/AuthLayout';
 import { Alert, Button, Field } from '@/components/ui';
 
@@ -15,7 +14,7 @@ export const ForgotPasswordPage: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    const { error } = await db.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: `${window.location.origin}/redefinir-senha`,
     });
     setLoading(false);
@@ -45,10 +44,12 @@ export const ForgotPasswordPage: React.FC = () => {
   );
 };
 
-/** Aberta pelo link do e-mail: o Supabase cria uma sessão temporária de recuperação. */
+/** Aberta pelo link do e-mail: o Neon Auth devolve um token de redefinição na URL (?token=...). */
 export const ResetPasswordPage: React.FC = () => {
-  const { session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const token = params.get('token');
+  const linkError = params.get('error');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -59,15 +60,15 @@ export const ResetPasswordPage: React.FC = () => {
     if (password.length < 8) return setError('Use pelo menos 8 caracteres.');
     if (password !== confirm) return setError('As senhas não conferem.');
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
+    const { error } = await db.auth.getBetterAuthInstance().resetPassword({ newPassword: password, token: token! });
     setLoading(false);
     if (error) return setError(translateError(error));
-    navigate('/', { replace: true });
+    navigate('/entrar', { replace: true, state: { passwordReset: true } });
   };
 
   return (
     <AuthLayout title="Nova senha">
-      {!authLoading && !session ? (
+      {!token || linkError ? (
         <Alert tone="warning">
           Este link expirou ou já foi usado.{' '}
           <Link to="/recuperar-senha" className="font-semibold underline">

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, Trash2, UserPlus } from 'lucide-react';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import { useAuth } from '@/auth/AuthProvider';
 import { AppShell } from '@/components/AppShell';
 import { Alert, Button, Card, Field, Select } from '@/components/ui';
@@ -57,12 +57,12 @@ const CompanyPage: React.FC = () => {
 
   const load = useCallback(async () => {
     const [m, i] = await Promise.all([
-      supabase
+      db
         .from('company_members')
         .select('user_id, role, created_at, profile:profiles(email, full_name)')
         .eq('company_id', companyId)
         .order('created_at'),
-      supabase
+      db
         .from('invitations')
         .select('id, email, role, token, accepted_at, expires_at, created_at')
         .eq('company_id', companyId)
@@ -83,7 +83,7 @@ const CompanyPage: React.FC = () => {
   const saveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingCompany(true);
-    const { error } = await supabase.from('companies').update({ name: name.trim(), cnpj: cnpj || null }).eq('id', companyId);
+    const { error } = await db.from('companies').update({ name: name.trim(), cnpj: cnpj || null }).eq('id', companyId);
     setSavingCompany(false);
     if (error) return setCompanyMsg({ tone: 'error', text: translateError(error) });
     setCompanyMsg({ tone: 'success', text: 'Dados da empresa salvos.' });
@@ -91,7 +91,7 @@ const CompanyPage: React.FC = () => {
   };
 
   const changeRole = async (userId: string, role: Role) => {
-    const { error } = await supabase.rpc('set_member_role', { p_company: companyId, p_user: userId, p_role: role });
+    const { error } = await db.rpc('set_member_role', { p_company: companyId, p_user: userId, p_role: role });
     if (error) setError(translateError(error));
     else {
       setError(null);
@@ -103,7 +103,7 @@ const CompanyPage: React.FC = () => {
   const removeMember = async (m: MemberRow) => {
     const who = m.profile?.full_name || m.profile?.email || 'este usuário';
     if (!window.confirm(`Remover ${who} da ${company.name}? A pessoa perde o acesso imediatamente.`)) return;
-    const { error } = await supabase.rpc('remove_member', { p_company: companyId, p_user: m.user_id });
+    const { error } = await db.rpc('remove_member', { p_company: companyId, p_user: m.user_id });
     if (error) setError(translateError(error));
     else {
       setError(null);
@@ -118,7 +118,7 @@ const CompanyPage: React.FC = () => {
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError('Informe um e-mail válido para o convite.');
     if (members.some((m) => m.profile?.email?.toLowerCase() === email)) return setError('Esta pessoa já faz parte da empresa.');
     setInviting(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('invitations')
       .insert({ company_id: companyId, email, role: inviteRole, invited_by: myId })
       .select('id, email, role, token, accepted_at, expires_at, created_at')
@@ -132,7 +132,7 @@ const CompanyPage: React.FC = () => {
   };
 
   const revokeInvite = async (id: string) => {
-    const { error } = await supabase.from('invitations').delete().eq('id', id);
+    const { error } = await db.from('invitations').delete().eq('id', id);
     if (error) setError(translateError(error));
     else {
       if (newInvite?.id === id) setNewInvite(null);

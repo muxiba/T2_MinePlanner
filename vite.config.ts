@@ -17,7 +17,7 @@ export default defineConfig({
         // Separa bibliotecas grandes para carregamento mais rápido e cache melhor.
         manualChunks: {
           react: ['react', 'react-dom', 'react-router'],
-          supabase: ['@supabase/supabase-js'],
+          neon: ['@neondatabase/neon-js'],
           charts: ['chart.js', 'react-chartjs-2'],
           pdf: ['jspdf', 'jspdf-autotable'],
         },

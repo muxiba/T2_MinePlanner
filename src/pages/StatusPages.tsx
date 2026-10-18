@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Lock, Building2, Settings2 } from 'lucide-react';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import { useAuth } from '@/auth/AuthProvider';
 import { AuthLayout } from '@/components/ui/AuthLayout';
 import { Alert, Button, Field } from '@/components/ui';
 import { formatCnpj } from '@/lib/format';
+import { clearPendingCompany, readPendingCompany } from '@/lib/pending-company';
 
 const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL;
 
@@ -59,8 +60,10 @@ export const BlockedPage: React.FC = () => {
 /** Usuário logado sem nenhuma empresa (ex.: removido de todas): permite criar uma. */
 export const NoCompanyPage: React.FC = () => {
   const { refresh, signOut, switchCompany } = useAuth();
-  const [name, setName] = useState('');
-  const [cnpj, setCnpj] = useState('');
+  // Pré-preenche com a empresa digitada no cadastro, se ela ainda não foi criada.
+  const [pending] = useState(readPendingCompany);
+  const [name, setName] = useState(pending?.name ?? '');
+  const [cnpj, setCnpj] = useState(pending?.cnpj ?? '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -68,17 +71,22 @@ export const NoCompanyPage: React.FC = () => {
     e.preventDefault();
     if (name.trim().length < 2) return setError('Informe o nome da empresa.');
     setLoading(true);
-    const { data, error } = await supabase.rpc('create_company', { p_name: name.trim(), p_cnpj: cnpj || null });
+    const { data, error } = await db.rpc('create_company', { p_name: name.trim(), p_cnpj: cnpj || null });
     setLoading(false);
     if (error) return setError(translateError(error));
+    clearPendingCompany();
     switchCompany(data as string);
     await refresh();
   };
 
   return (
     <AuthLayout
-      title="Você ainda não faz parte de uma empresa"
-      subtitle="Se alguém da sua empresa já usa o sistema, peça um convite ao administrador. Ou cadastre a sua empresa agora."
+      title={pending ? 'Falta só criar a empresa' : 'Você ainda não faz parte de uma empresa'}
+      subtitle={
+        pending
+          ? 'Confira os dados e conclua o cadastro. Você será o administrador, com 30 dias de teste.'
+          : 'Se alguém da sua empresa já usa o sistema, peça um convite ao administrador. Ou cadastre a sua empresa agora.'
+      }
     >
       <form onSubmit={onSubmit} className="space-y-4">
         {error && <Alert tone="error">{error}</Alert>}
@@ -95,14 +103,14 @@ export const NoCompanyPage: React.FC = () => {
   );
 };
 
-/** Exibida quando as variáveis do Supabase não foram configuradas no ambiente. */
+/** Exibida quando as variáveis do Neon não foram configuradas no ambiente. */
 export const SetupMissingPage: React.FC = () => (
   <AuthLayout title="Configuração pendente">
     <div className="space-y-4 text-[15px] leading-relaxed text-black/70">
       <Settings2 className="text-black/40" size={32} aria-hidden />
       <p>
-        Faltam as variáveis <code className="rounded bg-black/5 px-1.5">VITE_SUPABASE_URL</code> e{' '}
-        <code className="rounded bg-black/5 px-1.5">VITE_SUPABASE_ANON_KEY</code>.
+        Faltam as variáveis <code className="rounded bg-black/5 px-1.5">VITE_NEON_AUTH_URL</code> e{' '}
+        <code className="rounded bg-black/5 px-1.5">VITE_NEON_DATA_API_URL</code>.
       </p>
       <p>
         Localmente, crie o arquivo <code className="rounded bg-black/5 px-1.5">.env.local</code> a partir do{' '}

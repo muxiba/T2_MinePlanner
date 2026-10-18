@@ -1,10 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import type { Membership, Profile, Role } from '@/lib/db-types';
 import { isCompanyUsable } from '@/lib/db-types';
 
 const CURRENT_COMPANY_KEY = 't2mp.currentCompany';
+
+/** Parte da sessão do Neon Auth que o app usa. */
+export interface Session {
+  user: { id: string; email?: string | null };
+}
 
 interface AuthContextValue {
   /** true enquanto a sessão inicial e os dados do usuário carregam */
@@ -40,12 +44,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentId, setCurrentId] = useState<string | null>(readStoredCompany);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setSessionReady(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
+    db.auth
+      .getSession()
+      .then(({ data }) => setSession((data?.session as Session | null) ?? null))
+      .catch(() => setSession(null))
+      .finally(() => setSessionReady(true));
+    const { data: sub } = db.auth.onAuthStateChange((_event, s) => {
+      setSession((s as Session | null) ?? null);
       setSessionReady(true);
     });
     return () => sub.subscription.unsubscribe();
@@ -60,9 +65,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setDataReady(true);
       return;
     }
+    // Garante o perfil (e-mail e nome vêm do Neon Auth) antes de ler empresas e convites.
+    await db.rpc('sync_profile', { p_full_name: null });
     const [profileRes, membersRes] = await Promise.all([
-      supabase.from('profiles').select('id, email, full_name, is_platform_owner').eq('id', userId).maybeSingle(),
-      supabase
+      db.from('profiles').select('id, email, full_name, is_platform_owner').eq('id', userId).maybeSingle(),
+      db
         .from('company_members')
         .select('company_id, role, company:companies(id, name, cnpj, status, trial_ends_at, created_at)')
         .eq('user_id', userId)
@@ -97,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    await db.auth.signOut();
   }, []);
 
   const role = current?.role ?? null;

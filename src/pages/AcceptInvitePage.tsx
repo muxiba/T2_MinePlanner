@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { supabase, translateError } from '@/lib/supabase';
+import { db, translateError } from '@/lib/db';
 import { useAuth } from '@/auth/AuthProvider';
 import { ROLE_LABELS, type Role } from '@/lib/db-types';
 import { AuthLayout } from '@/components/ui/AuthLayout';
@@ -26,7 +26,7 @@ const AcceptInvitePage: React.FC = () => {
   const [sent, setSent] = useState(false);
 
   useEffect(() => {
-    supabase.rpc('get_invitation', { p_token: token }).then(({ data, error }) => {
+    db.rpc('get_invitation', { p_token: token }).then(({ data, error }) => {
       setInvite(error ? null : ((data as InviteInfo[] | null)?.[0] ?? null));
     });
   }, [token]);
@@ -55,7 +55,7 @@ const AcceptInvitePage: React.FC = () => {
   const accept = async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase.rpc('accept_invitation', { p_token: token });
+    const { data, error } = await db.rpc('accept_invitation', { p_token: token });
     if (error) {
       setLoading(false);
       return setError(translateError(error));
@@ -71,19 +71,26 @@ const AcceptInvitePage: React.FC = () => {
     if (password.length < 8) return setError('A senha deve ter pelo menos 8 caracteres.');
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await db.auth.signUp({
       email: invite.email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/`, data: { full_name: fullName.trim(), invite_token: token } },
+      options: { emailRedirectTo: `${window.location.origin}/convite/${token}`, data: { name: fullName.trim() } },
     });
-    setLoading(false);
-    if (error) return setError(translateError(error));
-    if (data.session) navigate('/', { replace: true });
-    else setSent(true);
+    if (error) {
+      setLoading(false);
+      return setError(translateError(error));
+    }
+    if (!data?.session) {
+      // Confirmação de e-mail ligada: o link do e-mail traz a pessoa de volta a este convite.
+      setLoading(false);
+      return setSent(true);
+    }
+    await db.rpc('sync_profile', { p_full_name: fullName.trim() });
+    await accept();
   };
 
-  // Já logado
-  if (session) {
+  // Já logado (e não no meio do cadastro feito nesta tela)
+  if (session && !loading) {
     const sameEmail = profile?.email?.toLowerCase() === invite.email.toLowerCase();
     return (
       <AuthLayout title={title} subtitle={subtitle}>
