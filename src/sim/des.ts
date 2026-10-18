@@ -264,6 +264,13 @@ export function payloadFor(cfg: TruckConfig, c: Circuit) {
   return cfg.volumeM3 && cfg.volumeM3 > 0 && c.density > 0 ? Math.min(cfg.payloadT, cfg.volumeM3 * c.density) : cfg.payloadT;
 }
 
+/** Tempo médio de carga (min): por passes da caçamba, se informada, ou pela taxa efetiva do equipamento. */
+export function loadTime(cfg: TruckConfig, c: Circuit) {
+  const payload = payloadFor(cfg, c);
+  if (c.bucketT && c.bucketT > 0 && c.passMin && c.passMin > 0) return Math.max(0.1, c.loadSpotMin + Math.ceil(payload / c.bucketT - 1e-9) * c.passMin);
+  return Math.max(0.1, c.loadSpotMin + (payload / Math.max(c.loaderTph, 1)) * 60);
+}
+
 export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const sc = opt.scenario;
   const cfg = opt.config;
@@ -348,7 +355,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       dump: dumps.get(c.destination)!,
       recv: receivers.get(c.destination)!,
       payload: payloadFor(cfg, c),
-      loadMean: Math.max(0.1, c.loadSpotMin + (payloadFor(cfg, c) / Math.max(c.loaderTph, 1)) * 60),
+      loadMean: loadTime(cfg, c),
     };
   });
 

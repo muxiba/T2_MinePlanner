@@ -8,7 +8,15 @@ export interface TerrainLayer {
   shade: Uint8ClampedArray;
 }
 
+export interface MapOverlays {
+  polygons?: { ring: [number, number][]; fill: string; stroke: string; label?: string; dashed?: boolean }[];
+  paths?: { points: Vec3[]; color: string; label?: string }[];
+}
+
 interface Props {
+  overlays?: MapOverlays;
+  /** desenha as rotas base em cinza claro (malha), sem marcadores */
+  routesAsNetwork?: boolean;
   terrain?: TerrainLayer | null;
   contours?: Contours | null;
   routes: SimRoute[];
@@ -25,7 +33,7 @@ export const DOT_COLORS = { carregado: '#2a78d6', vazio: '#1baf7a', ponto: '#eb6
 
 type View = { cx: number; cy: number; scale: number }; // centro (m) e px por metro
 
-function boundsOf(routes: SimRoute[], terrain?: TerrainLayer | null, contours?: Contours | null) {
+function boundsOf(routes: SimRoute[], terrain?: TerrainLayer | null, contours?: Contours | null, overlays?: MapOverlays) {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -37,6 +45,8 @@ function boundsOf(routes: SimRoute[], terrain?: TerrainLayer | null, contours?: 
     if (y > maxY) maxY = y;
   };
   for (const r of routes) for (const p of r.points) add(p.x, p.y);
+  for (const g of overlays?.polygons ?? []) for (const [x, y] of g.ring) add(x, y);
+  for (const g of overlays?.paths ?? []) for (const p of g.points) add(p.x, p.y);
   if (!Number.isFinite(minX)) {
     if (terrain) {
       add(terrain.meta.x0, terrain.meta.y0);
@@ -95,7 +105,7 @@ function useBaseLayer(terrain?: TerrainLayer | null, contours?: Contours | null)
   }, [terrain, contours]);
 }
 
-const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots, queues, circuitRoutes, height = 460 }) => {
+const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots, queues, circuitRoutes, height = 460, overlays, routesAsNetwork }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View | null>(null);
@@ -104,18 +114,18 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
   const drag = useRef<{ x: number; y: number; v: View } | null>(null);
 
   const fit = React.useCallback(() => {
-    const b = boundsOf(routes, terrain, contours);
+    const b = boundsOf(routes, terrain, contours, overlays);
     if (!b) return setView(null);
     const pad = 1.12;
     const scale = Math.min(size.w / ((b.maxX - b.minX) * pad || 1), size.h / ((b.maxY - b.minY) * pad || 1));
     setView({ cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale: Number.isFinite(scale) && scale > 0 ? scale : 1 });
-  }, [routes, terrain, contours, size.w, size.h]);
+  }, [routes, terrain, contours, overlays, size.w, size.h]);
 
   useEffect(() => {
     fit();
     // reenquadra só quando muda o conjunto de geometrias
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes.length, terrain, contours, size.w]);
+  }, [routes.length, terrain, contours, size.w, Boolean(overlays)]);
 
   useEffect(() => {
     const el = wrap.current;
@@ -142,6 +152,62 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
     ctx.imageSmoothingEnabled = true;
     for (const l of base ?? []) ctx.drawImage(l.img, X(l.x0), Y(l.y1), l.w * view.scale, l.h * view.scale);
 
+    // áreas (frentes do período, sólidos de rejeito)
+    for (const g of overlays?.polygons ?? []) {
+      if (g.ring.length < 3) continue;
+      ctx.beginPath();
+      g.ring.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
+      ctx.closePath();
+      ctx.fillStyle = g.fill;
+      ctx.fill();
+      ctx.setLineDash(g.dashed ? [5, 4] : []);
+      ctx.strokeStyle = g.stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (routesAsNetwork) {
+      for (const r of routes) {
+        ctx.beginPath();
+        r.points.forEach((p, i) => (i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y))));
+        ctx.strokeStyle = 'rgba(61,60,55,0.35)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+    for (const g of overlays?.paths ?? []) {
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      g.points.forEach((p, i) => (i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y))));
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.strokeStyle = g.color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      const a = g.points[0];
+      ctx.beginPath();
+      ctx.arc(X(a.x), Y(a.y), 5, 0, Math.PI * 2);
+      ctx.fillStyle = g.color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+    }
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    for (const g of overlays?.polygons ?? []) {
+      if (!g.label || g.ring.length < 3) continue;
+      const cx = g.ring.reduce((a, p) => a + p[0], 0) / g.ring.length;
+      const cy = g.ring.reduce((a, p) => a + p[1], 0) / g.ring.length;
+      const w = ctx.measureText(g.label).width;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(g.label, X(cx) - w / 2, Y(cy));
+      ctx.fillStyle = '#151619';
+      ctx.fillText(g.label, X(cx) - w / 2, Y(cy));
+    }
+
     // rotas (rótulos agrupados por posição para não sobrepor em pontos compartilhados)
     const labelAt = new Map<string, string[]>();
     const keyOf = (p: Vec3) => `${Math.round(p.x / 15)}:${Math.round(p.y / 15)}`;
@@ -153,7 +219,7 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
       } else labelAt.set(k, [text]);
     };
     const labelPos = new Map<string, Vec3>();
-    routes.forEach((r) => {
+    (routesAsNetwork ? [] : routes).forEach((r) => {
       const hl = highlight === r.id;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
@@ -237,7 +303,7 @@ const MapCanvas: React.FC<Props> = ({ terrain, contours, routes, highlight, dots
     ctx.fillRect(16, size.h - 22, meters * view.scale, 3);
     ctx.font = '11px Inter, system-ui, sans-serif';
     ctx.fillText(`${meters} m`, 16, size.h - 28);
-  }, [view, size, base, routes, highlight, dots, queues, circuitRoutes]);
+  }, [view, size, base, routes, highlight, dots, queues, circuitRoutes, overlays, routesAsNetwork]);
 
   const onWheel = (e: React.WheelEvent) => {
     if (!view) return;

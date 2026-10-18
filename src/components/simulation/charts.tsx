@@ -99,7 +99,7 @@ export const SweepChart: React.FC<{
         >
           <p className="font-semibold">{hp.trucks} caminhões</p>
           <p className="tabular-nums">
-            {t0(hv(p).mean)} t/dia ({t0(hv(p).lo)}–{t0(hv(p).hi)})
+            {t0(v(hp).mean)} t/dia ({t0(v(hp).lo)}–{t0(v(hp).hi)})
           </p>
           <p className="tabular-nums text-white/70">
             fila na carga {n1(hp.stats.queueLoadMin.mean)} min · carga {Math.round(hp.stats.loaderUtil.mean * 100)}% ocupada

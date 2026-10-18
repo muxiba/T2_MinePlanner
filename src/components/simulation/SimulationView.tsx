@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { ArrowLeftRight, Download, FileUp, Loader2, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Download, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
 import type { DetailedPremises } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
@@ -10,84 +10,11 @@ import { makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
 import { runInWorker } from '@/sim/client';
 import { loadLocal, removeLocal, saveLocal } from '@/sim/storage';
-import MapCanvas, { DOT_COLORS, type TerrainLayer } from './MapCanvas';
+import MapCanvas, { DOT_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
+import PlanView from './PlanView';
+import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
 import { CycleBars, SweepChart } from './charts';
-
-/* -------------------------------------------------------------------------- */
-/* Formatação e campos                                                         */
-/* -------------------------------------------------------------------------- */
-
-const t0 = (n: number) => Math.round(n).toLocaleString('pt-BR');
-const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const pc = (n: number) => `${Math.round(n * 100)}%`;
-const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
-
-const inputCls =
-  'w-full rounded-lg border border-black/12 bg-white px-2 py-1.5 text-sm tabular-nums focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25 focus:outline-none';
-
-const Num: React.FC<{ label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; className?: string }> = ({
-  label,
-  value,
-  onChange,
-  suffix,
-  step = 1,
-  className,
-}) => {
-  const id = React.useId();
-  return (
-    <div className={className}>
-      <label htmlFor={id} className="mb-1 block text-xs text-black/55">
-        {label}
-        {suffix && <span className="text-black/35"> ({suffix})</span>}
-      </label>
-      <input id={id} type="number" step={step} className={inputCls} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
-    </div>
-  );
-};
-
-const Card: React.FC<{ title: string; description?: string; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, description, actions, children }) => (
-  <section className="rounded-2xl border border-black/[0.07] bg-white p-5">
-    <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h3 className="font-semibold">{title}</h3>
-        {description && <p className="mt-0.5 text-sm text-black/50">{description}</p>}
-      </div>
-      {actions}
-    </header>
-    {children}
-  </section>
-);
-
-const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'dark' | 'light'; busy?: boolean }> = ({
-  tone = 'dark',
-  busy,
-  className,
-  children,
-  disabled,
-  ...rest
-}) => (
-  <button
-    {...rest}
-    disabled={disabled || busy}
-    className={clsx(
-      'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-      tone === 'dark' ? 'bg-[#151619] text-white hover:bg-black' : 'border border-black/10 bg-white hover:bg-black/[0.03]',
-      className,
-    )}
-  >
-    {busy && <Loader2 size={15} className="animate-spin" />}
-    {children}
-  </button>
-);
-
-const Progress: React.FC<{ value: number; label?: string }> = ({ value, label }) => (
-  <div className="flex items-center gap-3 text-xs text-black/55">
-    <div className="h-1.5 w-40 overflow-hidden rounded-full bg-black/[0.07]">
-      <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${Math.round(value * 100)}%` }} />
-    </div>
-    {label ?? `${Math.round(value * 100)}%`}
-  </div>
-);
+import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
 
 /**
  * Agrupa os circuitos pelo ponto final da rota (até 15 m = mesmo destino), preservando
@@ -117,7 +44,7 @@ function regroupDestinations(m: SimModel): SimModel {
 /* Tela                                                                        */
 /* -------------------------------------------------------------------------- */
 
-type Tab = 'modelo' | 'config' | 'resultados' | 'animacao';
+type Tab = 'modelo' | 'plano' | 'config' | 'resultados' | 'animacao';
 type MatrixCell = { configId: string; scenarioId: string; stats: AggregateStats };
 
 interface Props {
@@ -299,6 +226,10 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   };
 
   /* ------------------------------- animação ------------------------------ */
+  const [periodResults, setPeriodResults] = useState<PeriodResult[] | null>(null);
+  const [animPeriod, setAnimPeriod] = useState(0); // 0 = circuito da aba Circuito
+  const [animRoutes, setAnimRoutes] = useState<SimRoute[] | null>(null);
+  const [animOverlays, setAnimOverlays] = useState<MapOverlays | undefined>(undefined);
   const [anim, setAnim] = useState<RunResult | null>(null);
   const [animBusy, setAnimBusy] = useState(false);
   const [animT, setAnimT] = useState(0);
@@ -334,7 +265,23 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
     setAnimBusy(true);
     setPlaying(false);
     try {
-      const res = await runInWorker<RunResult>({ kind: 'trace', model, configId: sel.configId, scenarioId: sel.scenarioId, hours: 24 });
+      let m = model;
+      let ov: MapOverlays | undefined;
+      if (animPeriod > 0 && model.plan) {
+        const pr = periodResults?.find((r) => r.period === animPeriod && r.configId === sel.configId) ?? null;
+        m = periodModelWithFleet(model, model.plan, animPeriod, pr).model;
+        m = { ...m, scenarios: m.scenarios.map((s) => ({ ...s, hoursPerDay: model.plan!.hoursPerDay || s.hoursPerDay })) };
+        if (!m.circuits.length) throw new Error('Este período não tem movimentações.');
+        ov = {
+          polygons: [
+            ...model.plan.fronts.filter((f) => f.period === animPeriod).map((f) => ({ ring: f.ring, fill: '#2a78d622', stroke: '#2a78d6', label: f.front })),
+            ...model.plan.solids.filter((x) => x.period === animPeriod).map((x) => ({ ring: x.hull, fill: '#eb683422', stroke: '#eb6834', label: x.name, dashed: true })),
+          ],
+        };
+      }
+      const res = await runInWorker<RunResult>({ kind: 'trace', model: m, configId: sel.configId, scenarioId: sel.scenarioId, hours: 24 });
+      setAnimRoutes(animPeriod > 0 ? m.routes : null);
+      setAnimOverlays(ov);
       setAnim(res);
       setAnimT(model.warmupH * 60);
       setPlaying(true);
@@ -351,6 +298,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   /* -------------------------------- render ------------------------------- */
   const tabs: { id: Tab; label: string }[] = [
     { id: 'modelo', label: 'Circuito' },
+    { id: 'plano', label: 'Plano de lavra' },
     { id: 'config', label: 'Configurações e cenários' },
     { id: 'resultados', label: 'Resultados' },
     { id: 'animacao', label: 'Animação' },
@@ -531,6 +479,20 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
             </div>
           </Card>
         </fieldset>
+      )}
+
+      {/* ============================ PLANO DE LAVRA ========================== */}
+      {tab === 'plano' && (
+        <PlanView
+          model={model}
+          setModel={setModel}
+          canEdit={canEdit}
+          terrain={terrain}
+          contours={contours}
+          results={periodResults}
+          setResults={setPeriodResults}
+          onError={setError}
+        />
       )}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
@@ -843,7 +805,18 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
             actions={
               <div className="flex flex-wrap items-end gap-2">
                 {selector}
-                <Btn onClick={() => void runAnim()} busy={animBusy} disabled={!ready}>
+                {model.plan && model.plan.movements.length > 0 && (
+                  <label className="text-xs text-black/55">
+                    Operação
+                    <select className={clsx(inputCls, 'mt-1 w-48')} value={animPeriod} onChange={(e) => setAnimPeriod(Number(e.target.value))}>
+                      <option value={0}>Circuito (aba Circuito)</option>
+                      {model.plan.periods.map((p, i) => (
+                        <option key={i} value={i + 1}>Plano · {p.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <Btn onClick={() => void runAnim()} busy={animBusy} disabled={!ready && !(animPeriod > 0)}>
                   <Play size={15} /> Gerar
                 </Btn>
               </div>
@@ -852,10 +825,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
             <MapCanvas
               terrain={terrain}
               contours={contours}
-              routes={model.routes}
+              routes={animRoutes ?? model.routes}
+              overlays={animOverlays}
               dots={frame?.dots}
               queues={frame?.queues}
-              circuitRoutes={anim ? anim.geometry.map((g) => model.circuits.find((c) => c.id === g.circuitId)?.routeId ?? '') : undefined}
+              circuitRoutes={anim ? anim.geometry.map((g) => (animRoutes ? `r-${g.circuitId}` : model.circuits.find((c) => c.id === g.circuitId)?.routeId ?? '')) : undefined}
               height={520}
             />
             {animator && (
@@ -896,6 +870,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   aria-label="Linha do tempo"
                 />
                 <p className="text-xs text-black/45">
+                  {animPeriod > 0 && (periodResults?.some((r) => r.period === animPeriod && r.configId === sel.configId) ? 'Frota dimensionada para o período. ' : 'Rode “Dimensionar” no Plano de lavra para usar a frota do período; por ora, 1 caminhão por movimentação. ')}
                   Produção nas 24 h desta rodada: {t0(anim!.stats.tonnes)} t em {anim!.stats.trips} viagens. A animação mostra uma repetição; os
                   resultados usam a média de {model.replications}.
                 </p>

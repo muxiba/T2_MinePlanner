@@ -59,6 +59,10 @@ export interface Circuit {
   loadSpotMin: number;
   /** taxa efetiva do equipamento de carga durante a carga (t/h) — define o tempo de carga de cada configuração */
   loaderTph: number;
+  /** caçamba do equipamento de carga (t por passe); se informada, a carga = posicionamento + nº de passes × tempo do passe */
+  bucketT?: number;
+  /** tempo de cada passe (min) */
+  passMin?: number;
   loaderDf: number;
   /** balança no trajeto carregado */
   weighing: boolean;
@@ -119,6 +123,8 @@ export interface SimModel {
   replications: number;
   /** aquecimento descartado das estatísticas (h) */
   warmupH: number;
+  /** plano de lavra por períodos (frentes, destinos e movimentações) */
+  plan?: import('./plan').MinePlan;
 }
 
 /* ------------------------------ Resultados ------------------------------ */
