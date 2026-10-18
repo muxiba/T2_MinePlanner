@@ -17,6 +17,7 @@ import PlanView from './PlanView';
 import FinanceView from './FinanceView';
 import DecisionView from './DecisionView';
 import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
+import { FLOW_LABELS, PERIOD_KINDS, PREMISES_CONFIG_ID, circuitPeriod, circuitTargets, flowWetTonnes, hoursBreakdown, linkOn, premisesLoaderTph, withPremises, type Flow, type PeriodKind } from '@/sim/link';
 import { CycleBars, SweepChart } from './charts';
 import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
 
@@ -59,8 +60,15 @@ interface Props {
 }
 
 const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, storageKey }) => {
-  const model: SimModel = premises.simulation ?? emptyModel();
+  const stored: SimModel = premises.simulation ?? emptyModel();
+  // modelo efetivo: DF, UF, horas, velocidades, tempos e caminhão vêm das Premissas Fundamentais
+  const model: SimModel = useMemo(() => withPremises(stored, premises), [stored, premises]);
   const setModel = (m: SimModel) => setPremises({ ...premises, simulation: m });
+  const linked = linkOn(model);
+  const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
+  const lockIf = (on: boolean) => (linked && on ? LOCK : undefined);
+  const calc = useMemo(() => circuitTargets(model, premises), [model, premises]);
+  const per = circuitPeriod(model, premises);
   const [tab, setTab] = useState<Tab>('modelo');
 
   // terreno (só neste navegador)
@@ -438,35 +446,200 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
             </Card>
           </div>
 
+          {/* ---------------------- período e premissas ---------------------- */}
+          <Card
+            title="Período simulado e premissas"
+            description="A meta de movimentação do período substitui o Consumo Planta. O resto vem das Premissas Fundamentais: DF, UF, horas por dia, velocidades, tempos de carga, basculamento e pesagem, fila e caminhão."
+            actions={
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={linked} onChange={(e) => setModel({ ...model, link: { speedMode: model.link?.speedMode ?? 'rampa', enabled: e.target.checked } })} />
+                Usar as Premissas Fundamentais
+              </label>
+            }
+          >
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs text-black/55">Duração do período</label>
+                  <select className={inputCls} value={per.kind} onChange={(e) => setModel({ ...model, period: { ...model.period, kind: e.target.value as PeriodKind, romT: undefined } })}>
+                    {PERIOD_KINDS.map((k) => (
+                      <option key={k.id} value={k.id}>{k.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {per.kind === 'dias' ? (
+                  <Num label="Dias corridos" value={model.period?.days ?? 30} onChange={(v) => setModel({ ...model, period: { kind: 'dias', ...model.period, days: Math.max(1, Math.round(v)) } })} />
+                ) : (
+                  <div />
+                )}
+                <div className="col-span-2">
+                  <Num
+                    label="Meta de ROM do período"
+                    suffix="t seca"
+                    step={1000}
+                    value={Math.round(per.romT)}
+                    onChange={(v) => setModel({ ...model, period: { kind: per.kind, ...model.period, romT: Math.max(0, v) } })}
+                  />
+                  <p className="mt-1 text-[11px] text-black/45">
+                    {model.period?.romT === undefined ? `Sugerida: consumo de ${t0(premises.targetMonthlyROM)} t/mês × meses do período.` : 'Meta informada. '}
+                    {model.period?.romT !== undefined && (
+                      <button type="button" className="text-emerald-700 hover:underline" onClick={() => setModel({ ...model, period: { kind: per.kind, days: model.period?.days } })}>usar a sugerida</button>
+                    )}
+                  </p>
+                </div>
+                {linked && (
+                  <div className="col-span-2">
+                    <label className="mb-1 block text-xs text-black/55">Velocidade nas rotas</label>
+                    <select className={inputCls} value={model.link?.speedMode ?? 'rampa'} onChange={(e) => setModel({ ...model, link: { enabled: true, speedMode: e.target.value as 'rampa' | 'constante' } })}>
+                      <option value="rampa">Pela rampa de cada trecho, calibrada nas velocidades das premissas</option>
+                      <option value="constante">Velocidade média das premissas em todo o trajeto (igual ao Dimensionamento)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3">
+                {(() => {
+                  const f = flowWetTonnes(premises, per.romT);
+                  const sc = model.scenarios[0];
+                  const h = hoursBreakdown(per.calendarDays, per.workDays, sc?.hoursPerDay ?? 24, sc?.truckDf ?? 0, sc?.efficiency ?? 0);
+                  const rows: [string, string][] = [
+                    ['Dias corridos / trabalhados', `${n1(per.calendarDays)} / ${n1(per.workDays)}`],
+                    ['Horas produtivas por caminhão', `${t0(h.productive)} h de ${t0(h.calendar)} h`],
+                    ['ROM transportado', `${t0(f.rom)} t úmidas`],
+                    ['Produto gerado', `${t0(per.romT * ((premises.processType === 'seco' ? 100 : premises.rmGlobal) / 100))} t seca · ${t0(f.produto)} t úmidas`],
+                    ['Rejeito filtrado', `${t0(per.romT * ((premises.processType === 'seco' ? 0 : premises.rejeitoTotal) / 100))} t seca · ${t0(f.rejeito)} t úmidas`],
+                  ];
+                  if (f.esteril > 0) rows.push(['Estéril', `${t0(f.esteril)} t úmidas`]);
+                  return (
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {rows.map(([k, v]) => (
+                          <tr key={k} className="border-b border-black/5 last:border-b-0">
+                            <td className="py-1 text-black/55">{k}</td>
+                            <td className="py-1 text-right font-medium tabular-nums">{v}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+                {linked && (
+                  <p className="rounded-lg bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900">
+                    Das premissas: DF {n1(premises.dfMina)}% · UF {n1(premises.ufMina)}% · {n1(premises.contractedHoursMina)} h/dia · carregado {n1(premises.velocidadeCheio)} km/h · vazio {n1(premises.velocidadeVazio)} km/h · carga {n1(premises.loadingTime)} min · basculamento {n1(premises.dumpingTime)} min · pesagem {n1((premises.weighingTimeLoaded || 0) + (premises.weighingTimeEmpty || 0))} min · fila {n1(premises.queueMin ?? 0)} min · caminhão {n1(premises.truckCapacity)} t{premises.truckVolumeM3 ? ` / ${n1(premises.truckVolumeM3)} m³` : ''}.
+                  </p>
+                )}
+              </div>
+            </div>
+          </Card>
+
           {model.circuits.length > 0 && (
-            <Card title="Circuitos" description="Carga, balança e descarga de cada rota. Circuitos com o mesmo destino dividem a descarga e o pulmão.">
+            <Card title="Circuitos" description="Carga, balança e descarga de cada rota. Circuitos com o mesmo destino dividem a descarga e o pulmão. A meta de cada circuito sai do fluxo (ROM, produto, rejeito…) e da meta de ROM do período.">
+              <div className="mb-5 overflow-x-auto">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead>
+                    <tr className="border-b border-black/10 text-left text-xs text-black/45">
+                      <th className="py-1.5 pr-2 font-medium">Circuito</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Meta no período</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">t/h necessária</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Carga</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Ida</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Basc.</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Volta</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Pesagem</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Fila</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Ciclo</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">t/h por caminhão</th>
+                      <th className="py-1.5 text-right font-medium">Caminhões</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calc.map((x, i) => {
+                      const c = model.circuits[i];
+                      return (
+                        <tr key={x.circuitId} className="border-b border-black/5">
+                          <td className="py-1.5 pr-2">
+                            <span className="font-medium">{c.name}</span>
+                            <span className="block text-[11px] text-black/45">{FLOW_LABELS[x.flow]}</span>
+                          </td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{t0(x.tonnes)} t</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.needTph)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.loadMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.loadedMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.dumpMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.emptyMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.weighMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.queueMin)}</td>
+                          <td className="py-1.5 pr-2 text-right font-semibold tabular-nums">{n1(x.cycleMin)} min</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.perTruckTph)}</td>
+                          <td className="py-1.5 text-right tabular-nums">
+                            <b>{x.trucks}</b> <span className="text-black/45">({x.trucksExact.toLocaleString('pt-BR', { maximumFractionDigits: 2 })})</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="mt-1.5 text-[11px] text-black/45">
+                  Tempos em min. Caminhões = t/h necessária ÷ t/h por caminhão, arredondado para cima; horas produtivas = dias trabalhados × horas/dia × DF × UF. A simulação depois mede filas e esperas reais com esses caminhões.
+                </p>
+              </div>
               <div className="space-y-5">
-                {model.circuits.map((c) => (
-                  <div key={c.id} className="rounded-xl border border-black/[0.06] p-4">
-                    <p className="mb-3 font-medium">{c.name}</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-                      <Num label="Caminhões" value={c.trucks} onChange={(v) => setCircuit(c.id, { trucks: Math.max(0, Math.round(v)) })} />
-                      <Num label="Postos de carga" value={c.loaders} onChange={(v) => setCircuit(c.id, { loaders: Math.max(1, Math.round(v)) })} />
-                      <Num label="Taxa da carga" suffix="t/h" value={c.loaderTph} onChange={(v) => setCircuit(c.id, { loaderTph: v })} step={10} />
-                      <Num label="Posicionamento" suffix="min" step={0.1} value={c.loadSpotMin} onChange={(v) => setCircuit(c.id, { loadSpotMin: v })} />
-                      <Num label="DF da carga" suffix="%" value={c.loaderDf} onChange={(v) => setCircuit(c.id, { loaderDf: v })} />
-                      <Num label="Densidade solta" suffix="t/m³" step={0.05} value={c.density} onChange={(v) => setCircuit(c.id, { density: v })} />
-                      <div>
-                        <label className="mb-1 block text-xs text-black/55">Balança</label>
-                        <select className={inputCls} value={c.weighing ? 'sim' : 'nao'} onChange={(e) => setCircuit(c.id, { weighing: e.target.value === 'sim' })}>
-                          <option value="sim">Sim</option>
-                          <option value="nao">Não</option>
-                        </select>
-                      </div>
-                      {c.weighing && <Num label="Pesagem" suffix="min" step={0.1} value={c.weighMin} onChange={(v) => setCircuit(c.id, { weighMin: v })} />}
-                      <Num label="Pontos de descarga" value={c.dumpStations} onChange={(v) => setCircuit(c.id, { dumpStations: Math.max(1, Math.round(v)) })} />
-                      <div className="col-span-2">
-                        <label className="mb-1 block text-xs text-black/55">Destino</label>
-                        <input className={inputCls} value={c.destination} onChange={(e) => setCircuit(c.id, { destination: e.target.value })} />
+                {model.circuits.map((c, i) => {
+                  const x = calc[i];
+                  const flow: Flow = c.flow ?? x?.flow ?? 'rom';
+                  const sameFlow = model.circuits.filter((o) => (o.flow ?? calc[model.circuits.indexOf(o)]?.flow) === flow).length;
+                  return (
+                    <div key={c.id} className="rounded-xl border border-black/[0.06] p-4">
+                      <p className="mb-3 font-medium">{c.name}</p>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                        <div>
+                          <label className="mb-1 block text-xs text-black/55">Fluxo</label>
+                          <select className={inputCls} value={flow} onChange={(e) => setCircuit(c.id, { flow: e.target.value as Flow })}>
+                            {(Object.keys(FLOW_LABELS) as Flow[]).map((k) => (
+                              <option key={k} value={k}>{FLOW_LABELS[k]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {flow === 'outro' && <Num label="t no período" step={1000} value={c.tonnesManual ?? 0} onChange={(v) => setCircuit(c.id, { tonnesManual: Math.max(0, v) })} />}
+                        {sameFlow > 1 && flow !== 'outro' && <Num label="Peso na divisão do fluxo" step={0.1} value={c.share ?? 1} onChange={(v) => setCircuit(c.id, { share: Math.max(0, v) })} />}
+                        <div>
+                          <Num label="Caminhões" value={c.trucks} onChange={(v) => setCircuit(c.id, { trucks: Math.max(0, Math.round(v)), autoTrucks: false })} />
+                          <p className="mt-0.5 text-[11px] text-black/45">
+                            {c.autoTrucks === false ? (
+                              <button type="button" className="text-emerald-700 hover:underline" onClick={() => setCircuit(c.id, { autoTrucks: true })}>usar o calculado ({x?.trucks ?? '—'})</button>
+                            ) : (
+                              'calculado pela meta'
+                            )}
+                          </p>
+                        </div>
+                        <Num label="Postos de carga" value={c.loaders} onChange={(v) => setCircuit(c.id, { loaders: Math.max(1, Math.round(v)) })} />
+                        <Num label="Taxa horária da carga" suffix="t/h" value={Math.round(c.loaderTph)} onChange={(v) => setCircuit(c.id, { loaderTph: v })} step={10} locked={linked ? `Capacidade do caminhão (${premises.truckCapacity} t) ÷ tempo de carga (${premises.loadingTime} min) × 60 = ${t0(premisesLoaderTph(premises))} t/h` : undefined} />
+                        <Num label="Posicionamento" suffix="min" step={0.1} value={c.loadSpotMin} onChange={(v) => setCircuit(c.id, { loadSpotMin: v })} locked={linked ? 'Incluído no tempo de carga das premissas' : undefined} />
+                        <Num label="DF da carga" suffix="%" value={c.loaderDf} onChange={(v) => setCircuit(c.id, { loaderDf: v })} locked={lockIf(true)} />
+                        <Num label="Densidade solta" suffix="t/m³" step={0.05} value={c.density} onChange={(v) => setCircuit(c.id, { density: v })} locked={lockIf(true)} />
+                        {linked ? (
+                          <Num label="Pesagem (balança)" suffix="min" value={c.weighing ? c.weighMin : 0} onChange={() => {}} locked={LOCK} />
+                        ) : (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-xs text-black/55">Balança</label>
+                              <select className={inputCls} value={c.weighing ? 'sim' : 'nao'} onChange={(e) => setCircuit(c.id, { weighing: e.target.value === 'sim' })}>
+                                <option value="sim">Sim</option>
+                                <option value="nao">Não</option>
+                              </select>
+                            </div>
+                            {c.weighing && <Num label="Pesagem" suffix="min" step={0.1} value={c.weighMin} onChange={(v) => setCircuit(c.id, { weighMin: v })} />}
+                          </>
+                        )}
+                        <Num label="Pontos de descarga" value={c.dumpStations} onChange={(v) => setCircuit(c.id, { dumpStations: Math.max(1, Math.round(v)) })} />
+                        <div className="col-span-2">
+                          <label className="mb-1 block text-xs text-black/55">Destino</label>
+                          <input className={inputCls} value={c.destination} onChange={(e) => setCircuit(c.id, { destination: e.target.value })} />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
           )}
@@ -493,7 +666,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
 
           <Card title="Parâmetros gerais">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Num label="Meta de transporte" suffix="t/dia" value={model.targetTpd} onChange={(v) => setModel({ ...model, targetTpd: v })} step={100} />
+              <Num label="Meta de transporte" suffix="t/dia" value={model.targetTpd} onChange={(v) => setModel({ ...model, targetTpd: v })} step={100} locked={linked ? 'Soma das metas dos circuitos no período ÷ dias trabalhados' : undefined} />
               <Num label="Limite de velocidade" suffix="km/h" value={model.speedLimitKmh} onChange={(v) => setModel({ ...model, speedLimitKmh: v })} />
               <Num label="Resistência ao rolamento" suffix="%" step={0.5} value={model.rollingResistance} onChange={(v) => setModel({ ...model, rollingResistance: v })} />
               <Num label="Reparo médio do caminhão" suffix="h" step={0.5} value={model.truckMttrH} onChange={(v) => setModel({ ...model, truckMttrH: v })} />
@@ -516,6 +689,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
           results={periodResults}
           setResults={setPeriodResults}
           onError={setError}
+          premises={premises}
         />
       )}
 
@@ -545,18 +719,19 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
               {model.configs.map((c) => (
                 <div key={c.id} className="rounded-xl border border-black/[0.06] p-4">
                   <div className="mb-3 flex items-center gap-3">
-                    <input className={clsx(inputCls, 'max-w-md font-medium')} value={c.name} onChange={(e) => setConfig(c.id, { name: e.target.value })} aria-label="Nome da configuração" />
-                    {model.configs.length > 1 && (
+                    <input className={clsx(inputCls, 'max-w-md font-medium')} value={c.name} onChange={(e) => setConfig(c.id, { name: e.target.value })} aria-label="Nome da configuração" disabled={linked && c.id === PREMISES_CONFIG_ID} />
+                    {linked && c.id === PREMISES_CONFIG_ID && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">das Premissas Fundamentais · velocidade {model.link?.speedMode === 'constante' ? 'média constante' : 'por rampa, calibrada nas premissas'}</span>}
+                    {model.configs.length > 1 && !(linked && c.id === PREMISES_CONFIG_ID) && (
                       <button type="button" className="rounded-lg p-2 text-black/40 hover:bg-red-50 hover:text-red-600" onClick={() => setModel({ ...model, configs: model.configs.filter((x) => x.id !== c.id) })} aria-label={`Remover ${c.name}`}>
                         <Trash2 size={16} />
                       </button>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                    <Num label="Carga útil" suffix="t" step={0.5} value={c.payloadT} onChange={(v) => setConfig(c.id, { payloadT: v })} />
-                    <Num label="Volume" suffix="m³" step={0.5} value={c.volumeM3 ?? 0} onChange={(v) => setConfig(c.id, { volumeM3: v || undefined })} />
-                    <Num label="Manobra" suffix="min" step={0.1} value={c.maneuverMin} onChange={(v) => setConfig(c.id, { maneuverMin: v })} />
-                    <Num label="Descarga" suffix="min" step={0.1} value={c.dumpMin} onChange={(v) => setConfig(c.id, { dumpMin: v })} />
+                    <Num label="Carga útil" suffix="t" step={0.5} value={c.payloadT} onChange={(v) => setConfig(c.id, { payloadT: v })} locked={lockIf(c.id === PREMISES_CONFIG_ID)} />
+                    <Num label="Volume" suffix="m³" step={0.5} value={c.volumeM3 ?? 0} onChange={(v) => setConfig(c.id, { volumeM3: v || undefined })} locked={lockIf(c.id === PREMISES_CONFIG_ID)} />
+                    <Num label="Manobra" suffix="min" step={0.1} value={c.maneuverMin} onChange={(v) => setConfig(c.id, { maneuverMin: v })} locked={lockIf(c.id === PREMISES_CONFIG_ID)} />
+                    <Num label="Basculamento" suffix="min" step={0.1} value={c.dumpMin} onChange={(v) => setConfig(c.id, { dumpMin: v })} locked={lockIf(c.id === PREMISES_CONFIG_ID)} />
                     <Num label="Custo fixo" suffix="R$/h" step={5} value={c.costFixedPerH} onChange={(v) => setConfig(c.id, { costFixedPerH: v })} />
                     <Num label="Custo operacional" suffix="R$/h" step={5} value={c.costVarPerH} onChange={(v) => setConfig(c.id, { costVarPerH: v })} />
                   </div>
@@ -639,24 +814,31 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     <th className="py-1 pr-2 font-medium">Horas/dia</th>
                     <th className="py-1 pr-2 font-medium">Dias simulados</th>
                     <th className="py-1 pr-2 font-medium">DF caminhões (%)</th>
-                    <th className="py-1 pr-2 font-medium">Eficiência (%)</th>
+                    <th className="py-1 pr-2 font-medium">UF / eficiência (%)</th>
                     <th className="py-1 pr-2 font-medium">Fator de viagem</th>
                     <th className="py-1 pr-2 font-medium">Fator recebimento</th>
                     <th className="py-1 font-medium">Variabilidade (CV)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {model.scenarios.map((s) => (
+                  {model.scenarios.map((s, si) => (
                     <tr key={s.id}>
                       <td className="py-1 pr-2">
                         <input className={inputCls} value={s.name} onChange={(e) => setScenario(s.id, { name: e.target.value })} aria-label="Nome do cenário" />
                       </td>
-                      {(['hoursPerDay', 'days', 'truckDf', 'efficiency', 'travelFactor', 'receivingFactor', 'cv'] as const).map((k) => (
-                        <td key={k} className="py-1 pr-2">
-                          <input type="number" step={k === 'travelFactor' || k === 'receivingFactor' || k === 'cv' ? 0.05 : 1} className={inputCls} value={s[k]} aria-label={k}
-                            onChange={(e) => setScenario(s.id, { [k]: Number(e.target.value) } as Partial<Scenario>)} />
-                        </td>
-                      ))}
+                      {(['hoursPerDay', 'days', 'truckDf', 'efficiency', 'travelFactor', 'receivingFactor', 'cv'] as const).map((k) => {
+                        const locked = linked && (k === 'hoursPerDay' || (si === 0 && (k === 'truckDf' || k === 'efficiency')));
+                        return (
+                          <td key={k} className="py-1 pr-2">
+                            {locked ? (
+                              <p className="rounded-lg border border-dashed border-black/10 bg-black/[0.03] px-2 py-1.5 text-sm tabular-nums" title={LOCK}>{n1(s[k])}</p>
+                            ) : (
+                              <input type="number" step={k === 'travelFactor' || k === 'receivingFactor' || k === 'cv' ? 0.05 : 1} className={inputCls} value={s[k]} aria-label={k}
+                                onChange={(e) => setScenario(s.id, { [k]: Number(e.target.value) } as Partial<Scenario>)} />
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>

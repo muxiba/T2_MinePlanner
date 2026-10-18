@@ -93,8 +93,18 @@ export interface Movement {
 
 export interface Period {
   label: string;
-  /** dias trabalháveis no período */
+  /** dias trabalháveis no período (derivado do tipo e do calendário quando `kind` existe) */
   workDays: number;
+  /** duração: mês, ano, quinquênio ou n dias */
+  kind?: import('./link').PeriodKind;
+  /** dias corridos, quando kind = 'dias' */
+  days?: number;
+  /** mês do calendário (1–12), quando kind = 'mes'; vazio = mês médio */
+  month?: number;
+  /** dias corridos do período (derivado) */
+  calendarDays?: number;
+  /** meta de ROM do período (t seca); vazio = consumo mensal das premissas × meses do período */
+  romT?: number;
 }
 
 export interface MonthCal {
@@ -126,25 +136,28 @@ export interface MinePlan {
 /* Padrões                                                                    */
 /* ------------------------------------------------------------------------- */
 
-/** Calendário padrão: 12 meses, 26 dias trabalháveis por mês (312 por ano). Editável. */
+const MONTHS_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const MONTH_LEN = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** Calendário uniforme: 12 meses, 26 dias trabalháveis por mês (312 por ano). Editável. */
 export function defaultCalendar(): MonthCal[] {
-  const days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return days.map((d, i) => ({ month: `Mês ${i + 1}`, days: d, workDays: Math.min(26, d), season: 'seco' as const }));
+  return MONTH_LEN.map((d, i) => ({ month: MONTHS_PT[i], days: d, workDays: Math.min(26, d), season: 'seco' as const }));
 }
 
-/** Exemplo com estação chuvosa: 4 meses com ~11 dias e 8 secos com 27–28 (264 dias). */
+/** Calendário com estação chuvosa: janeiro a março e outubro a dezembro com 20 dias, demais com 26. Editável. */
 export function rainySeasonCalendar(): MonthCal[] {
-  const wd = [11, 11, 12, 12, 28, 28, 28, 27, 27, 27, 27, 27];
-  const days = [31, 31, 30, 30, 31, 31, 31, 30, 30, 30, 30, 30];
-  return wd.map((w, i) => ({ month: `Mês ${i + 1}`, days: days[i], workDays: w, season: i < 4 ? ('chuvoso' as const) : ('seco' as const) }));
+  return MONTH_LEN.map((d, i) => {
+    const rainy = [1, 2, 3, 10, 11, 12].includes(i + 1);
+    return { month: MONTHS_PT[i], days: d, workDays: rainy ? 20 : 26, season: rainy ? ('chuvoso' as const) : ('seco' as const) };
+  });
 }
 
 export const calendarWorkDays = (c: MonthCal[]) => c.reduce((a, m) => a + (m.workDays || 0), 0);
 
 export function emptyPlan(): MinePlan {
-  const calendar = defaultCalendar();
+  const calendar = rainySeasonCalendar();
   return {
-    periods: Array.from({ length: 5 }, (_, i) => ({ label: `Ano ${i + 1}`, workDays: calendarWorkDays(calendar) })),
+    periods: Array.from({ length: 5 }, (_, i) => ({ label: `Ano ${i + 1}`, workDays: calendarWorkDays(calendar), kind: 'ano' as const, calendarDays: 365 })),
     calendar,
     hoursPerDay: 20,
     peakFactor: 1,

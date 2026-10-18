@@ -14,13 +14,14 @@ export const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency',
 export const inputCls =
   'w-full rounded-lg border border-black/12 bg-white px-2 py-1.5 text-sm tabular-nums focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25 focus:outline-none';
 
-export const Num: React.FC<{ label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; className?: string }> = ({
+export const Num: React.FC<{ label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; className?: string; locked?: string }> = ({
   label,
   value,
   onChange,
   suffix,
   step = 1,
   className,
+  locked,
 }) => {
   const id = React.useId();
   return (
@@ -29,7 +30,14 @@ export const Num: React.FC<{ label: string; value: number; onChange: (v: number)
         {label}
         {suffix && <span className="text-black/35"> ({suffix})</span>}
       </label>
-      <input id={id} type="number" step={step} className={inputCls} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
+      {locked ? (
+        <p id={id} className="rounded-lg border border-dashed border-black/10 bg-black/[0.03] px-3 py-2 text-sm tabular-nums" title={locked}>
+          {Number.isFinite(value) ? value.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : '—'}
+          <span className="ml-1 text-[10px] font-medium tracking-wide text-emerald-700 uppercase">premissas</span>
+        </p>
+      ) : (
+        <input id={id} type="number" step={step} className={inputCls} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
+      )}
     </div>
   );
 };

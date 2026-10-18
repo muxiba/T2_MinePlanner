@@ -71,6 +71,14 @@ export interface Circuit {
   dumpStations: number;
   /** nome do destino; circuitos com o mesmo destino compartilham descarga e pulmão */
   destination: string;
+  /** fluxo do circuito (define a meta a partir da meta de ROM do período) */
+  flow?: import('./link').Flow;
+  /** peso na divisão do fluxo entre circuitos do mesmo fluxo (padrão 1) */
+  share?: number;
+  /** t no período quando o fluxo é 'outro' */
+  tonnesManual?: number;
+  /** false = caminhões digitados; padrão = calculados pela meta do período */
+  autoTrucks?: boolean;
 }
 
 /** Recebimento no destino: pulmão (moega/pilha) com saída pela empilhadeira. */
@@ -123,6 +131,10 @@ export interface SimModel {
   replications: number;
   /** aquecimento descartado das estatísticas (h) */
   warmupH: number;
+  /** ligação com as Premissas Fundamentais (padrão: ligada) */
+  link?: { enabled: boolean; speedMode?: 'rampa' | 'constante' };
+  /** período simulado na aba Circuito */
+  period?: { kind: import('./link').PeriodKind; days?: number; romT?: number };
   /** plano de lavra por períodos (frentes, destinos e movimentações) */
   plan?: import('./plan').MinePlan;
   /** dados financeiros (custos, vida útil, receita) */

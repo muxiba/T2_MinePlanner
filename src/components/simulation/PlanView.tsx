@@ -2,10 +2,10 @@ import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { AlertTriangle, Download, FileUp, Layers, MapPin, Play, Plus, Trash2, Upload } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
+import type { DetailedPremises } from '@/types';
+import { PERIOD_KINDS, MONTH_NAMES, flatCalendar, flowWetTonnes, generateMovements, hoursBreakdown, linkOn, rainyCalendar, suggestedRomT, syncPeriods, type PeriodKind } from '@/sim/link';
 import {
   PLACE_KINDS,
-  defaultCalendar,
-  rainySeasonCalendar,
   assignFronts,
   buildNetwork,
   buildPeriodModel,
@@ -64,11 +64,20 @@ interface Props {
   results: PeriodResult[] | null;
   setResults: (r: PeriodResult[] | null) => void;
   onError: (msg: string | null) => void;
+  premises?: DetailedPremises;
 }
 
-const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, contours, results, setResults, onError }) => {
+const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, contours, results, setResults, onError, premises }) => {
   const plan: MinePlan = model.plan ?? emptyPlan();
-  const setPlan = (p: MinePlan) => setModel({ ...model, plan: p });
+  // dias trabalhados de cada período acompanham o tipo do período e o calendário
+  const setPlan = (p: MinePlan) => setModel({ ...model, plan: syncPeriods(p) });
+  const linked = !!premises && linkOn(model);
+  /** troca o calendário: períodos sem tipo seguem o ano do calendário; os demais, o próprio tipo */
+  const applyCalendar = (calendar: MinePlan['calendar']) => {
+    const wd = calendarWorkDays(calendar);
+    setPlan({ ...plan, calendar, periods: plan.periods.map((p) => (p.kind ? p : { ...p, workDays: wd })) });
+  };
+  const setPeriodRow = (i: number, patch: Partial<MinePlan['periods'][number]>) => setPlan({ ...plan, periods: plan.periods.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
   const [period, setPeriod] = useState(1);
   const [show3d, setShow3d] = useState(false);
   const dem3d = useMemo(() => (show3d && dem ? periodDem(dem, model.plan, period) : null), [show3d, dem, model.plan, period]);
@@ -202,7 +211,10 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
   /* ------------------------------ períodos ------------------------------ */
   function withPeriods(p: MinePlan, n: number): MinePlan {
     const wd = calendarWorkDays(p.calendar);
-    const periods = Array.from({ length: n }, (_, i) => p.periods[i] ?? { label: `Ano ${i + 1}`, workDays: wd });
+    const last = p.periods[p.periods.length - 1];
+    const kind: PeriodKind = last?.kind ?? 'ano';
+    const name = kind === 'mes' ? 'Mês' : kind === 'quinquenio' ? 'Quinquênio' : kind === 'dias' ? 'Período' : 'Ano';
+    const periods = Array.from({ length: n }, (_, i) => p.periods[i] ?? { label: `${name} ${i + 1}`, workDays: wd, kind, days: last?.days });
     const movements = p.movements.map((m) => ({ ...m, tonnes: Array.from({ length: n }, (_, i) => m.tonnes[i] ?? 0) }));
     return { ...p, periods, movements };
   }
@@ -548,12 +560,12 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
         <Card title="Calendário e períodos" description="Dias trabalháveis por mês (clique em seco/chuva para marcar a estação). A meta diária de cada período = toneladas ÷ dias trabalháveis.">
           <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full min-w-[780px] text-sm">
                 <thead>
                   <tr className="text-left text-xs text-black/45">
                     <th className="py-1 pr-2 font-medium">Mês</th>
                     {plan.calendar.map((m, i) => (
-                      <th key={i} className="py-1 pr-1 text-center font-medium">{i + 1}</th>
+                      <th key={i} className="py-1 pr-1 text-center font-medium" title={m.month}>{(MONTH_NAMES[i] ?? m.month).slice(0, 3)}</th>
                     ))}
                     <th className="py-1 text-right font-medium">Total</th>
                   </tr>
@@ -580,13 +592,11 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                       <td key={i} className="py-1 pr-1">
                         <input
                           type="number"
-                          className={clsx(inputCls, 'px-1 text-center')}
+                          className={clsx(inputCls, 'min-w-[46px] px-1 text-center')}
                           value={m.workDays}
                           aria-label={`Dias trabalháveis do mês ${i + 1}`}
                           onChange={(e) => {
-                            const calendar = plan.calendar.map((x, j) => (j === i ? { ...x, workDays: Math.max(0, Math.min(x.days, Number(e.target.value))) } : x));
-                            const wd = calendarWorkDays(calendar);
-                            setPlan({ ...plan, calendar, periods: plan.periods.map((p) => ({ ...p, workDays: wd })) });
+                            applyCalendar(plan.calendar.map((x, j) => (j === i ? { ...x, workDays: Math.max(0, Math.min(x.days, Number(e.target.value))) } : x)));
                           }}
                         />
                       </td>
@@ -598,32 +608,52 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Num label="Períodos" value={nPer} onChange={(v) => setPlan(withPeriods(plan, Math.max(1, Math.min(60, Math.round(v)))))} />
-              <Num label="Horas de operação/dia" value={plan.hoursPerDay} onChange={(v) => setPlan({ ...plan, hoursPerDay: Math.max(1, Math.min(24, v)) })} />
+              {linked ? (
+                <div>
+                  <label className="mb-1 block text-xs text-black/55">Horas de operação/dia</label>
+                  <p className="rounded-lg bg-black/[0.04] px-3 py-2 text-sm tabular-nums" title="Horas contratadas da mina, nas Premissas Fundamentais">{n1(premises!.contractedHoursMina)} h <span className="text-xs text-black/45">das premissas</span></p>
+                </div>
+              ) : (
+                <Num label="Horas de operação/dia" value={plan.hoursPerDay} onChange={(v) => setPlan({ ...plan, hoursPerDay: Math.max(1, Math.min(24, v)) })} />
+              )}
               <Num label="Fator de pico da meta" step={0.05} value={plan.peakFactor} onChange={(v) => setPlan({ ...plan, peakFactor: Math.max(0.5, v) })} />
               <Num label="Rampa máx. dos acessos" suffix="%" step={0.5} value={plan.rampMaxGrade} onChange={(v) => setPlan({ ...plan, rampMaxGrade: Math.max(2, v) })} />
               <Num label="Sinuosidade dos acessos" step={0.05} value={plan.accessTortuosity} onChange={(v) => setPlan({ ...plan, accessTortuosity: Math.max(1, v) })} />
             </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Btn tone="light" onClick={() => { const c = defaultCalendar(); setPlan({ ...plan, calendar: c, periods: plan.periods.map((p) => ({ ...p, workDays: calendarWorkDays(c) })) }); }}>Calendário uniforme (26 dias/mês)</Btn>
-            <Btn tone="light" onClick={() => { const c = rainySeasonCalendar(); setPlan({ ...plan, calendar: c, periods: plan.periods.map((p) => ({ ...p, workDays: calendarWorkDays(c) })) }); }}>Com estação chuvosa (exemplo)</Btn>
+            <Btn tone="light" onClick={() => applyCalendar(flatCalendar())}>Sem estação chuvosa (26 dias/mês)</Btn>
+            <Btn tone="light" onClick={() => applyCalendar(rainyCalendar())}>Com estação chuvosa (jan–mar e out–dez com 20 dias)</Btn>
           </div>
           <p className="mt-2 text-xs text-black/45">
-            Fator de pico 1 = média do período. Para dimensionar pelo mês chuvoso (menos dias, mesma geração de rejeito), use o fator correspondente (ex.: 1,5).
+            Os dias trabalhados de cada mês são editáveis; ao mudar o calendário, todos os períodos e a simulação são recalculados. Fator de pico 1 = média do período (use, por exemplo, 1,3 para dimensionar pelo mês chuvoso).
           </p>
+          <PeriodsTable plan={plan} premises={premises} linked={linked} setPeriodRow={setPeriodRow} setAll={(kind) => setPlan({ ...plan, periods: plan.periods.map((p, i) => ({ ...p, kind, label: kindName(kind) + ' ' + (i + 1) })) })} />
         </Card>
 
         {/* --------------------------- movimentações --------------------------- */}
         <Card
           title="Movimentações por período"
-          description="Toneladas de cada origem para cada destino em cada período. Valores em t (a planilha aceita colar do Excel)."
+          description="Toneladas úmidas de cada origem para cada destino em cada período. “Calcular pelas premissas” preenche pela meta de ROM de cada período; depois edite aqui, cole do Excel ou exporte o CSV, trabalhe e importe de volta."
           actions={
             <div className="flex flex-wrap gap-2">
+              {premises && (
+                <Btn
+                  onClick={() => {
+                    const r = generateMovements(plan, premises, () => `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+                    setWarnings(r.warnings);
+                    if (r.plan !== plan) setPlan(reassign(r.plan));
+                  }}
+                  title="ROM das frentes para a usina, produto para o terminal e rejeito filtrado para a disposição, pela meta de ROM de cada período e pelas premissas"
+                >
+                  <Play size={15} /> Calcular pelas premissas
+                </Btn>
+              )}
               <Btn tone="light" onClick={exportCsv} disabled={!plan.movements.length}>
-                <Download size={15} /> Planilha
+                <Download size={15} /> Exportar modelo CSV
               </Btn>
               <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold hover:bg-black/[0.03]">
-                <FileUp size={15} /> Importar planilha
+                <FileUp size={15} /> Importar CSV
                 <input type="file" accept=".csv,.txt" className="sr-only" onChange={(e) => e.target.files?.[0] && void importCsv(e.target.files[0])} />
               </label>
               <Btn tone="light" onClick={addMovement}>
@@ -1030,6 +1060,148 @@ const FleetByPeriod: React.FC<{ results: PeriodResult[]; model: SimModel; plan: 
           Cada movimentação ativa recebe ao menos 1 caminhão, e não existe fração de caminhão: por isso o simulado fica acima da meta. “Sem arredondar” mostra a necessidade real e serve para comparar configurações (caminhões podem ser compartilhados entre movimentações pequenas). h/caminhão = horas trabalhadas por caminhão no período (base para vida útil e desgaste).
         </p>
       </div>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Períodos: duração, meta de ROM e horas                                     */
+/* -------------------------------------------------------------------------- */
+
+const kindName = (k: PeriodKind) => (k === 'mes' ? 'Mês' : k === 'quinquenio' ? 'Quinquênio' : k === 'dias' ? 'Período' : 'Ano');
+
+const HOUR_PARTS: { key: 'productive' | 'stops' | 'maintenance' | 'offShift' | 'notWorked'; label: string; color: string }[] = [
+  { key: 'productive', label: 'Produtivas', color: '#059669' },
+  { key: 'stops', label: 'Paradas operacionais (UF)', color: '#eda100' },
+  { key: 'maintenance', label: 'Manutenção (DF)', color: '#dc2626' },
+  { key: 'offShift', label: 'Fora do turno', color: '#94a3b8' },
+  { key: 'notWorked', label: 'Dias não trabalhados (chuva, folgas)', color: '#bae6fd' },
+];
+
+const PeriodsTable: React.FC<{
+  plan: MinePlan;
+  premises?: DetailedPremises;
+  linked: boolean;
+  setPeriodRow: (i: number, patch: Partial<MinePlan['periods'][number]>) => void;
+  setAll: (k: PeriodKind) => void;
+}> = ({ plan, premises, linked, setPeriodRow, setAll }) => {
+  const [sel, setSel] = useState(0);
+  const df = premises?.dfMina ?? 85;
+  const uf = premises?.ufMina ?? 85;
+  const hpd = linked && premises ? premises.contractedHoursMina || plan.hoursPerDay : plan.hoursPerDay;
+  const rows = plan.periods.map((p) => {
+    const kind = p.kind ?? 'ano';
+    const calDays = p.calendarDays ?? (kind === 'ano' ? 365 : p.workDays);
+    const romT = p.romT ?? (premises ? suggestedRomT(premises, kind, p.days) : 0);
+    const h = hoursBreakdown(calDays, p.workDays, hpd, df, uf);
+    const f = premises ? flowWetTonnes(premises, romT) : null;
+    return { p, kind, calDays, romT, h, f };
+  });
+  const s = rows[Math.min(sel, rows.length - 1)];
+  const rm = premises ? (premises.processType === 'seco' ? 100 : premises.rmGlobal) / 100 : 0;
+  const rej = premises ? (premises.processType === 'seco' ? 0 : premises.rejeitoTotal) / 100 : 0;
+  return (
+    <div className="mt-5 border-t border-black/5 pt-4">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">Períodos simulados</p>
+          <p className="text-xs text-black/50">Cada período tem uma duração e uma meta de ROM. Sem meta informada, usa o consumo mensal das premissas × meses do período.</p>
+        </div>
+        <label className="text-xs text-black/55">
+          Duração de todos
+          <select className={clsx(inputCls, 'mt-1 w-44')} value="" onChange={(e) => e.target.value && setAll(e.target.value as PeriodKind)}>
+            <option value="">escolher…</option>
+            {PERIOD_KINDS.map((k) => (
+              <option key={k.id} value={k.id}>{k.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="max-h-96 overflow-auto">
+        <table className="w-full min-w-[980px] text-sm">
+          <thead className="sticky top-0 bg-white">
+            <tr className="text-left text-xs text-black/45">
+              <th className="py-1 pr-2 font-medium">Período</th>
+              <th className="py-1 pr-2 font-medium">Duração</th>
+              <th className="py-1 pr-2 text-right font-medium">Dias corridos</th>
+              <th className="py-1 pr-2 text-right font-medium">Dias trabalhados</th>
+              <th className="py-1 pr-2 text-right font-medium">Meta de ROM (t seca)</th>
+              <th className="py-1 pr-2 text-right font-medium">Produto (t seca)</th>
+              <th className="py-1 pr-2 text-right font-medium">Rejeito (t seca)</th>
+              <th className="py-1 text-right font-medium">Horas produtivas / caminhão</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ p, kind, calDays, romT, h }, i) => (
+              <tr key={i} className={clsx('border-t border-black/5', i === sel && 'bg-emerald-50/60')} onClick={() => setSel(i)}>
+                <td className="py-1 pr-2">
+                  <input className={clsx(inputCls, 'w-32')} value={p.label} onChange={(e) => setPeriodRow(i, { label: e.target.value })} aria-label="Nome do período" />
+                </td>
+                <td className="py-1 pr-2">
+                  <div className="flex gap-1">
+                    <select className={clsx(inputCls, 'w-32')} value={kind} onChange={(e) => setPeriodRow(i, { kind: e.target.value as PeriodKind })} aria-label="Duração do período">
+                      {PERIOD_KINDS.map((k) => (
+                        <option key={k.id} value={k.id}>{k.label}</option>
+                      ))}
+                    </select>
+                    {kind === 'dias' && (
+                      <input type="number" className={clsx(inputCls, 'w-20 text-right')} value={p.days ?? 30} onChange={(e) => setPeriodRow(i, { days: Math.max(1, Number(e.target.value)) })} aria-label="Dias corridos" />
+                    )}
+                    {kind === 'mes' && (
+                      <select className={clsx(inputCls, 'w-28')} value={p.month ?? 0} onChange={(e) => setPeriodRow(i, { month: Number(e.target.value) || undefined })} aria-label="Mês do calendário">
+                        <option value={0}>mês médio</option>
+                        {MONTH_NAMES.map((m, j) => (
+                          <option key={m} value={j + 1}>{m}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{n1(calDays)}</td>
+                <td className="py-1 pr-2 text-right font-semibold tabular-nums">{n1(p.workDays)}</td>
+                <td className="py-1 pr-2 text-right">
+                  <input
+                    type="number"
+                    step={1000}
+                    className={clsx(inputCls, 'w-32 text-right', p.romT === undefined && 'text-black/45')}
+                    value={Math.round(romT)}
+                    onChange={(e) => setPeriodRow(i, { romT: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })}
+                    aria-label={`Meta de ROM de ${p.label}`}
+                    title={p.romT === undefined ? 'Sugerido pelas premissas (consumo mensal × meses do período)' : 'Meta informada'}
+                  />
+                  {p.romT !== undefined && (
+                    <button type="button" className="ml-1 text-[11px] text-emerald-700 hover:underline" onClick={() => setPeriodRow(i, { romT: undefined })}>sugerida</button>
+                  )}
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{t0(romT * rm)}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">{t0(romT * rej)}</td>
+                <td className="py-1 text-right tabular-nums">{t0(h.productive)} h</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {s && (
+        <div className="mt-4 rounded-xl bg-[#F8F9FA] p-4">
+          <p className="mb-2 text-sm font-semibold">
+            Horas de cada caminhão em {s.p.label}: {t0(s.h.calendar)} h de calendário → <span className="text-emerald-700">{t0(s.h.productive)} h produtivas</span>
+          </p>
+          <div className="flex h-5 overflow-hidden rounded-md">
+            {HOUR_PARTS.map((part) => (s.h[part.key] > 0 ? <div key={part.key} style={{ width: `${(s.h[part.key] / s.h.calendar) * 100}%`, background: part.color }} title={`${part.label}: ${t0(s.h[part.key])} h`} /> : null))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-black/60">
+            {HOUR_PARTS.map((part) => (
+              <span key={part.key} className="flex items-center gap-1.5">
+                <i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: part.color }} /> {part.label}: <b className="tabular-nums">{t0(s.h[part.key])} h</b>
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-black/45">
+            {n1(hpd)} h/dia{linked ? ', DF e UF das premissas' : ''} (DF {n1(df)}%, UF {n1(uf)}%). Fila e espera são medidas pela simulação, dentro das horas produtivas.
+            {s.f ? ` Transporte do período: ROM ${t0(s.f.rom)} t, produto ${t0(s.f.produto)} t, rejeito ${t0(s.f.rejeito)} t (úmidas).` : ''}
+          </p>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,0 +1,71 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_PREMISES } from '../constants';
+import { emptyModel, defaultCircuit } from './defaults';
+import { emptyPlan, type MinePlan } from './plan';
+import { circuitTargets, generateMovements, hoursBreakdown, periodDays, rainyCalendar, syncPeriods, withPremises, PREMISES_CONFIG_ID } from './link';
+import type { SimModel } from './types';
+
+const P: any = { ...DEFAULT_PREMISES, truckCapacity: 40, truckVolumeM3: 22, dfMina: 85, ufMina: 85, contractedHoursMina: 24, velocidadeCheio: 15, velocidadeVazio: 20, loadingTime: 2, dumpingTime: 2, weighingTimeLoaded: 1, weighingTimeEmpty: 0, queueMin: 2, targetMonthlyROM: 184407, rmGlobal: 45.11, rejeitoTotal: 54.89, umidadeNatural: 9, perdaMaterial: 1, processType: 'umido' };
+
+const route = (id: string, name: string, len: number) => ({ id, name, points: [{ x: 0, y: 0, z: 0 }, { x: len, y: 0, z: 0 }] });
+
+describe('ligação com as premissas', () => {
+  it('calendário chuvoso: jan, fev, mar, out, nov e dez', () => {
+    const c = rainyCalendar();
+    expect(c.filter((m) => m.season === 'chuvoso').map((m) => m.month)).toEqual(['Janeiro', 'Fevereiro', 'Março', 'Outubro', 'Novembro', 'Dezembro']);
+    expect(periodDays('ano', c).work).toBe(6 * 20 + 6 * 26);
+    expect(periodDays('quinquenio', c).work).toBe(5 * 276);
+    expect(periodDays('mes', c, undefined, 1).work).toBe(20);
+  });
+
+  it('períodos acompanham o calendário', () => {
+    const plan: MinePlan = { ...emptyPlan(), periods: [{ label: 'Ano 1', workDays: 0, kind: 'ano' }, { label: 'Q1', workDays: 0, kind: 'quinquenio' }] };
+    const s = syncPeriods(plan);
+    expect(s.periods[0].workDays).toBe(276);
+    expect(s.periods[1].workDays).toBe(1380);
+    const h = hoursBreakdown(365, 276, 24, 85, 85);
+    expect(h.productive).toBeCloseTo(276 * 24 * 0.85 * 0.85, 6);
+  });
+
+  it('modelo efetivo usa a frota, DF/UF e tempos das premissas e calcula os caminhões', () => {
+    const m0: SimModel = emptyModel();
+    const routes = [route('r1', 'Mina -> Planta', 2085), route('r2', 'Planta -> Terminal', 790)];
+    const m: SimModel = { ...m0, routes, circuits: routes.map((r, i) => ({ ...defaultCircuit(r, i), destination: `D${i}` })), link: { enabled: true, speedMode: 'constante' } };
+    const e = withPremises(m, P);
+    expect(e.configs[0].id).toBe(PREMISES_CONFIG_ID);
+    expect(e.configs[0].payloadT).toBe(40);
+    expect(e.scenarios[0].truckDf).toBe(85);
+    expect(e.scenarios[0].efficiency).toBe(85);
+    const calc = circuitTargets(e, P);
+    expect(calc[0].flow).toBe('rom');
+    expect(calc[1].flow).toBe('produto');
+    // ciclo igual ao do Dimensionamento com velocidade constante: carga 2 + ida + basculamento 2 + volta + pesagem 1 + fila 2
+    const ida = (2.085 / 15) * 60;
+    const volta = (2.085 / 20) * 60;
+    expect(calc[0].cycleMin).toBeCloseTo(2 + ida + 2 + volta + 1 + 2, 1);
+    expect(e.circuits[0].trucks).toBe(calc[0].trucks);
+    // idempotente
+    expect(JSON.stringify(withPremises(e, P).circuits)).toBe(JSON.stringify(e.circuits));
+  });
+
+  it('movimentações pelas premissas: ROM, produto e rejeito por período', () => {
+    const plan: MinePlan = {
+      ...emptyPlan(),
+      periods: [{ label: 'Ano 1', workDays: 276, kind: 'ano', romT: 1_000_000 }],
+      places: [
+        { id: 'f', name: 'Frente', kind: 'frente', x: 0, y: 0, z: 0 },
+        { id: 'u', name: 'Usina', kind: 'usina', x: 1, y: 0, z: 0 },
+        { id: 't', name: 'Terminal', kind: 'terminal', x: 2, y: 0, z: 0 },
+        { id: 'd', name: 'Disposição', kind: 'rejeito', x: 3, y: 0, z: 0 },
+      ],
+      movements: [],
+    };
+    let k = 0;
+    const r = generateMovements(plan, P, () => `m${k++}`);
+    expect(r.warnings).toEqual([]);
+    const t = (o: string, d: string) => r.plan.movements.find((m) => m.origin === o && m.destination === d)!.tonnes[0];
+    expect(t('f', 'u')).toBe(1_100_000); // seca × (1 + 9% + 1%)
+    expect(t('u', 't')).toBe(Math.round(1_000_000 * 0.4511 * 1.1));
+    expect(t('u', 'd')).toBe(Math.round(1_000_000 * 0.5489 * 1.1));
+  });
+});
