@@ -18,6 +18,7 @@ import {
   Eye,
   History,
   ClipboardCheck,
+  Waypoints,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/auth/AuthProvider';
@@ -27,6 +28,7 @@ import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
 import { analyzeFleet } from '@/engine/fleet';
 import SummaryView from '@/components/summary/SummaryView';
+const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
 import { dismissLegacyData, readLegacyData, usePlan, useScenarios, type SaveState } from './usePlan';
 
@@ -40,6 +42,7 @@ import ReplanningView from '@/components/ReplanningView';
 
 const NAV_ITEMS = [
   { id: 'resumo', label: 'Resumo', icon: ClipboardCheck },
+  { id: 'simulacao', label: 'Simulação', icon: Waypoints },
   { id: 'routes', label: 'Rotas de Transporte', icon: Truck },
   { id: 'premises', label: 'Premissas Operacionais', icon: Settings },
   { id: 'logging', label: 'Lançamento Produção', icon: ClipboardList },
@@ -365,6 +368,11 @@ const PlannerPage: React.FC = () => {
                   setPremises={setPremises}
                   canEdit={canEdit}
                 />
+              )}
+              {activeTab === 'simulacao' && (
+                <React.Suspense fallback={<p className="text-sm text-black/50">Carregando o simulador…</p>}>
+                  <SimulationView premises={premises} setPremises={setPremises} canEdit={canEdit} storageKey={`plan:${plan.planId ?? companyId}`} />
+                </React.Suspense>
               )}
               {activeTab === 'dashboard' && (
                 <Dashboard

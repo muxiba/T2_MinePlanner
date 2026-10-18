@@ -135,6 +135,8 @@ export interface DetailedPremises {
   looseDensity?: number;
   /** Catálogo de classes de equipamentos para comparação (editável pela empresa). */
   equipmentCatalog?: EquipmentCatalog;
+  /** Modelo do simulador de eventos discretos (aba Simulação). */
+  simulation?: import('./sim/types').SimModel;
 }
 
 export interface DailyLog {
