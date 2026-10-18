@@ -7,7 +7,7 @@ import { Alert, Button, Field } from '@/components/ui';
 import { safeNext } from '@/lib/format';
 
 const LoginPage: React.FC = () => {
-  const { session } = useAuth();
+  const { session, reloadSession } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const passwordReset = Boolean((useLocation().state as { passwordReset?: boolean } | null)?.passwordReset);
@@ -24,8 +24,13 @@ const LoginPage: React.FC = () => {
     setLoading(true);
     setError(null);
     const { error } = await db.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      setLoading(false);
+      return setError(translateError(error));
+    }
+    const ok = await reloadSession();
     setLoading(false);
-    if (error) return setError(translateError(error));
+    if (!ok) return setError('O login foi aceito, mas a sessão não foi criada neste navegador. Tente de novo ou use outro navegador.');
     navigate(next, { replace: true });
   };
 

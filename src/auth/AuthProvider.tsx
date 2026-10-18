@@ -22,6 +22,8 @@ interface AuthContextValue {
   isOwner: boolean;
   switchCompany: (companyId: string) => void;
   refresh: () => Promise<void>;
+  /** Relê a sessão do Neon Auth (usar logo após login/cadastro). Retorna true se há usuário logado. */
+  reloadSession: () => Promise<boolean>;
   signOut: () => Promise<void>;
 }
 
@@ -56,7 +58,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const userId = session?.user.id ?? null;
+  const reloadSession = useCallback(async () => {
+    try {
+      const { data } = await db.auth.getSession();
+      const s = (data?.session as Session | null) ?? null;
+      setSession(s);
+      return Boolean(s?.user?.id);
+    } catch {
+      return false;
+    } finally {
+      setSessionReady(true);
+    }
+  }, []);
+
+  const userId = session?.user?.id ?? null;
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -66,7 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     // Garante o perfil (e-mail e nome vêm do Neon Auth) antes de ler empresas e convites.
-    await db.rpc('sync_profile', { p_full_name: null });
+    const sync = await db.rpc('sync_profile', { p_full_name: null });
+    if (sync.error) console.error('[T2] sync_profile falhou:', sync.error);
     const [profileRes, membersRes] = await Promise.all([
       db.from('profiles').select('id, email, full_name, is_platform_owner').eq('id', userId).maybeSingle(),
       db
@@ -75,6 +91,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('user_id', userId)
         .order('created_at'),
     ]);
+    if (profileRes.error) console.error('[T2] leitura do perfil falhou:', profileRes.error);
+    if (membersRes.error) console.error('[T2] leitura das empresas falhou:', membersRes.error);
     setProfile((profileRes.data as Profile | null) ?? null);
     setMemberships(((membersRes.data ?? []) as unknown as Membership[]).filter((m) => m.company));
     setDataReady(true);
@@ -119,6 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isOwner: Boolean(profile?.is_platform_owner),
     switchCompany,
     refresh: load,
+    reloadSession,
     signOut,
   };
 

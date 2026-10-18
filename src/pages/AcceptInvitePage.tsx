@@ -17,7 +17,7 @@ interface InviteInfo {
 const AcceptInvitePage: React.FC = () => {
   const { token = '' } = useParams();
   const navigate = useNavigate();
-  const { session, profile, refresh, switchCompany, signOut } = useAuth();
+  const { session, profile, refresh, reloadSession, switchCompany, signOut } = useAuth();
   const [invite, setInvite] = useState<InviteInfo | null | undefined>(undefined);
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
@@ -80,7 +80,8 @@ const AcceptInvitePage: React.FC = () => {
       setLoading(false);
       return setError(translateError(error));
     }
-    if (!data?.session) {
+    const hasSession = Boolean(data?.session) || (await reloadSession());
+    if (!hasSession) {
       // Confirmação de e-mail ligada: o link do e-mail traz a pessoa de volta a este convite.
       setLoading(false);
       return setSent(true);

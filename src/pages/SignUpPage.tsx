@@ -9,7 +9,7 @@ import { formatCnpj } from '@/lib/format';
 import { savePendingCompany } from '@/lib/pending-company';
 
 const SignUpPage: React.FC = () => {
-  const { session, refresh } = useAuth();
+  const { session, refresh, reloadSession } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ fullName: '', email: '', company: '', cnpj: '', password: '', confirm: '' });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
@@ -49,7 +49,8 @@ const SignUpPage: React.FC = () => {
       setLoading(false);
       return setError(translateError(error));
     }
-    if (!data?.session) {
+    const hasSession = Boolean(data?.session) || (await reloadSession());
+    if (!hasSession) {
       // Confirmação de e-mail ligada: a empresa é criada no primeiro login.
       savePendingCompany(company);
       setLoading(false);
