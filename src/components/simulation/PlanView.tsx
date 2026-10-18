@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { AlertTriangle, Download, FileUp, Layers, MapPin, Play, Plus, Trash2, Upload } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
 import type { DetailedPremises } from '@/types';
-import { PERIOD_KINDS, MONTH_NAMES, flatCalendar, flowWetTonnes, generateMovements, hoursBreakdown, linkOn, rainyCalendar, suggestedRomT, syncPeriods, type PeriodKind } from '@/sim/link';
+import { PERIOD_KINDS, MONTH_NAMES, flatCalendar, flowWetTonnes, generateMovements, hoursBreakdown, placesFromRouteEnds, linkOn, rainyCalendar, suggestedRomT, syncPeriods, type PeriodKind } from '@/sim/link';
 import {
   PLACE_KINDS,
   assignFronts,
@@ -15,7 +15,6 @@ import {
   movementsFromCsv,
   movementsToCsv,
   newMovement,
-  placesFromRoutes,
   type FrontArea,
   type MinePlan,
   type Movement,
@@ -86,6 +85,8 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
   const nPer = plan.periods.length;
 
   const frontNames = plan.places.filter((p) => p.kind === 'frente').map((p) => p.name);
+  // sem lugar do tipo Frente, a lista mostra todos os lugares
+  const frontChoices = frontNames.length ? frontNames : plan.places.map((p) => p.name);
   const colorOfFront = (name: string) => FRONT_COLORS[Math.max(0, frontNames.indexOf(name)) % FRONT_COLORS.length];
   const placeName = (id: string) => plan.places.find((p) => p.id === id)?.name ?? '—';
 
@@ -98,6 +99,22 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
     setPlan(reassign({ ...plan, places, fronts }));
   };
   const reassign = (p: MinePlan) => ({ ...p, fronts: assignFronts(p) });
+  const [placesMsg, setPlacesMsg] = useState<string | null>(null);
+  const genPlaces = (redo: boolean) => {
+    const r = placesFromRouteEnds(model.routes, plan.places, redo);
+    const keep = new Set(r.places.map((p) => p.id));
+    const movements = redo ? [] : plan.movements.filter((m) => keep.has(m.origin) && keep.has(m.destination));
+    setPlan(reassign({ ...plan, places: r.places, movements }));
+    setPlacesMsg(
+      r.added
+        ? `${r.added} lugar(es) criado(s) nas pontas das rotas, com o tipo sugerido pelo nome da rota. Confira nomes e tipos.`
+        : 'Nenhuma ponta nova: todas as pontas das rotas já têm um lugar (a menos de 15 m). Use “Refazer” para gerar todos de novo.',
+    );
+  };
+  const removeFronts = (which: 'periodo' | 'todas' | string) => {
+    const fronts = which === 'todas' ? [] : which === 'periodo' ? plan.fronts.filter((f) => f.period !== period) : plan.fronts.filter((f) => f.id !== which);
+    setPlan({ ...plan, fronts });
+  };
 
   /* ------------------------------ importação ------------------------------ */
   const [setup, setSetup] = useState<ImportSetup | null>(null);
@@ -385,11 +402,19 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
           title="Lugares de carga e descarga"
           description="Frentes mudam de posição a cada período (área do DXF); a disposição de rejeito vai para o sólido do período. Os demais são fixos."
           actions={
-            <Btn tone="light" onClick={() => setPlan(reassign({ ...plan, places: placesFromRoutes(model.routes, plan.places) }))} disabled={!model.routes.length}>
-              <MapPin size={15} /> Gerar das pontas das rotas
-            </Btn>
+            <div className="flex flex-wrap gap-2">
+              <Btn tone="light" onClick={() => genPlaces(false)} disabled={!model.routes.length}>
+                <MapPin size={15} /> Gerar das pontas das rotas
+              </Btn>
+              {plan.places.length > 0 && (
+                <Btn tone="light" onClick={() => window.confirm('Apagar os lugares atuais e gerar de novo a partir das pontas das rotas?') && genPlaces(true)} disabled={!model.routes.length}>
+                  Refazer
+                </Btn>
+              )}
+            </div>
           }
         >
+          {placesMsg && <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">{placesMsg}</p>}
           {plan.places.length === 0 ? (
             <p className="text-sm text-black/50">Clique em “Gerar das pontas das rotas” e dê nome e tipo a cada ponto (ex.: BAV → Frente; ponto comum → Usina).</p>
           ) : (
@@ -464,6 +489,7 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                       <th className="py-1 pr-2 text-right font-medium">Área</th>
                       <th className="py-1 pr-2 text-right font-medium">Cota média</th>
                       <th className="py-1 font-medium">Frente</th>
+                      <th className="py-1" />
                     </tr>
                   </thead>
                   <tbody>
@@ -483,11 +509,16 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                             aria-label="Frente da área"
                             onChange={(e) => setPlan({ ...plan, fronts: plan.fronts.map((x) => (x.id === f.id ? { ...x, front: e.target.value, manual: true } : x)) })}
                           >
-                            {!frontNames.includes(f.front) && <option value={f.front}>{f.front || '—'}</option>}
-                            {frontNames.map((n) => (
+                            {!frontChoices.includes(f.front) && <option value={f.front}>{f.front || '—'}</option>}
+                            {frontChoices.map((n) => (
                               <option key={n} value={n}>{n}</option>
                             ))}
                           </select>
+                        </td>
+                        <td className="py-1 pl-1">
+                          <button type="button" className="rounded-lg p-1.5 text-black/40 hover:bg-red-50 hover:text-red-600" aria-label="Apagar esta área" onClick={() => removeFronts(f.id)}>
+                            <Trash2 size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -498,8 +529,22 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
             {plan.fronts.length > 0 && (
               <p className="mt-2 text-xs text-black/45">
                 As áreas são distribuídas entre as frentes com movimentação no período (a que mais produz fica com a maior área, as demais pela proximidade). Trocar à mão fixa a escolha.
-                {frontNames.length === 0 && ' Marque ao menos um lugar como Frente.'}
               </p>
+            )}
+            {plan.fronts.length > 0 && frontNames.length === 0 && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Nenhum lugar está marcado como “Frente de lavra” em Lugares de carga e descarga. Por enquanto a lista mostra todos os lugares; marque as frentes para a distribuição automática das áreas.
+              </p>
+            )}
+            {plan.fronts.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Btn tone="light" onClick={() => removeFronts('periodo')} disabled={!plan.fronts.some((f) => f.period === period)}>
+                  <Trash2 size={14} /> Apagar as de {plan.periods[period - 1]?.label ?? `período ${period}`}
+                </Btn>
+                <Btn tone="light" onClick={() => window.confirm('Apagar todas as frentes importadas?') && removeFronts('todas')}>
+                  <Trash2 size={14} /> Apagar todas
+                </Btn>
+              </div>
             )}
           </Card>
 

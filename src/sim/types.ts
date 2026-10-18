@@ -81,14 +81,18 @@ export interface Circuit {
   autoTrucks?: boolean;
 }
 
-/** Recebimento no destino: pulmão (moega/pilha) com saída pela empilhadeira. */
+/** Recebimento no destino: pulmão (moega/pilha) retomado pela carregadeira. */
 export interface Receiving {
   destination: string;
-  /** capacidade do pulmão (t); 0 = descarga direta limitada pela empilhadeira */
+  /** capacidade do pulmão (t); 0 = descarga direta limitada pela carregadeira */
   bufferT: number;
-  /** taxa da empilhadeira/saída (t/h); 0 = sem restrição */
+  /** taxa da carregadeira/saída (t/h); 0 = sem restrição */
   stackerTph: number;
   stackerDf: number;
+  /** classe da carregadeira no catálogo (calcula a taxa) */
+  loaderId?: string;
+  /** true = taxa digitada; padrão = calculada pela classe da carregadeira */
+  manualTph?: boolean;
   /** consumo da fábrica a partir do estoque (t/h); 0 = não modelar estoque da fábrica */
   plantTph: number;
   plantStockInitialT: number;
@@ -108,7 +112,7 @@ export interface Scenario {
   efficiency: number;
   /** multiplicador dos tempos de viagem (ex.: 1,1 = vias 10% mais lentas) */
   travelFactor: number;
-  /** multiplicador da taxa da empilhadeira (ex.: 0,8 = restrição de recebimento) */
+  /** multiplicador da taxa da carregadeira (ex.: 0,8 = restrição de recebimento) */
   receivingFactor: number;
   /** coeficiente de variação dos tempos (0,15 = ±15%) */
   cv: number;

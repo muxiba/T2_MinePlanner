@@ -95,7 +95,7 @@ export function defaultCircuit(route: SimRoute, i: number): Circuit {
 }
 
 export function defaultReceiving(destination: string): Receiving {
-  return { destination, bufferT: 200, stackerTph: 850, stackerDf: 90, plantTph: 0, plantStockInitialT: 0, plantStockMaxT: 0 };
+  return { destination, bufferT: 200, stackerTph: 650, stackerDf: 85, loaderId: 'pa-35', plantTph: 0, plantStockInitialT: 0, plantStockMaxT: 0 };
 }
 
 export function emptyModel(): SimModel {

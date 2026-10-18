@@ -7,8 +7,8 @@
  * (mês, ano, quinquênio ou n dias), que substitui o "Consumo Planta (t/mês)".
  */
 import type { DetailedPremises } from '@/types';
-import { wetFromDry } from '@/engine/fleet';
-import { ROAD_TRUCK_SPEED } from './defaults';
+import { catalogOf, wetFromDry } from '@/engine/fleet';
+import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
 import { loadTime, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
 import type { Circuit, Scenario, SimModel, SpeedTable, TruckConfig } from './types';
@@ -226,7 +226,14 @@ export function withPremises(model: SimModel, premises: DetailedPremises): SimMo
     weighing: weigh > 0,
     weighMin: weigh,
   }));
-  let out: SimModel = { ...base, circuits };
+  const dests = [...new Set(model.circuits.map((c) => c.destination))];
+  const recList = [...model.receiving, ...dests.filter((d) => !model.receiving.some((r) => r.destination === d)).map((d) => defaultReceiving(d))];
+  const receiving = recList.map((r) => {
+    if (r.manualTph) return r;
+    const tph = receivingLoaderTph(premises, r.loaderId, density);
+    return tph ? { ...r, stackerTph: tph, stackerDf: premises.dfPlanta || r.stackerDf } : r;
+  });
+  let out: SimModel = { ...base, circuits, receiving };
   // trucks automáticos e meta do período (aba Circuito)
   const calc = circuitTargets(out, premises);
   out = {
@@ -410,4 +417,71 @@ function newMovementLike(m?: Movement): Movement {
     weighMin: m?.weighMin ?? 1,
     tonnes: [],
   };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Lugares a partir das pontas das rotas                                       */
+/* ------------------------------------------------------------------------- */
+
+const ENDS: Record<Flow, [PlaceKindLite, PlaceKindLite]> = {
+  rom: ['frente', 'usina'],
+  produto: ['usina', 'terminal'],
+  rejeito: ['usina', 'rejeito'],
+  esteril: ['frente', 'pilha'],
+  outro: ['outro', 'outro'],
+};
+type PlaceKindLite = import('./plan').PlaceKind;
+const KIND_NAME: Record<PlaceKindLite, string> = { frente: 'Frente', usina: 'Usina', terminal: 'Terminal', rejeito: 'Disposição de rejeito', pilha: 'Pilha', outro: 'Ponto' };
+
+/**
+ * Cria um lugar em cada ponta das rotas (pontas a menos de 15 m viram um só lugar) e já sugere
+ * o tipo pelo nome da rota: ROM = frente → usina; produto = usina → terminal; rejeito = usina → disposição.
+ * Com `redo`, descarta os lugares atuais e gera de novo.
+ */
+export function placesFromRouteEnds(routes: { id: string; name: string; points: { x: number; y: number; z: number }[] }[], existing: import('./plan').Place[], redo = false) {
+  const out = redo ? [] : existing.map((p) => ({ ...p }));
+  let added = 0;
+  const used = new Map<string, number>();
+  const nameFor = (k: PlaceKindLite, route: string) => {
+    if (k === 'frente') return `Frente ${route.replace(/^\d+[-_ ]*/, '').replace(/_/g, ' ')}`;
+    const n = (used.get(k) ?? 0) + 1;
+    used.set(k, n);
+    return n === 1 ? KIND_NAME[k] : `${KIND_NAME[k]} ${n}`;
+  };
+  for (const r of routes) {
+    if (r.points.length < 2) continue;
+    const flow = guessFlow(r.name);
+    const ends = [r.points[0], r.points[r.points.length - 1]];
+    ends.forEach((p, j) => {
+      const near = out.find((q) => Math.hypot(q.x - p.x, q.y - p.y) < 15);
+      if (near) {
+        // ponta compartilhada: um ponto de descarga de ROM que também é início de produto continua usina
+        if (near.kind === 'outro' && ENDS[flow][j] !== 'outro') near.kind = ENDS[flow][j];
+        return;
+      }
+      const kind = ENDS[flow][j];
+      out.push({ id: `p${Date.now().toString(36)}${out.length}`, name: nameFor(kind, r.name), kind, x: p.x, y: p.y, z: p.z });
+      added++;
+    });
+  }
+  return { places: out, added };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Recebimento: carregadeira                                                    */
+/* ------------------------------------------------------------------------- */
+
+export const LOADER_FILL = 0.9;
+
+/** Carregadeiras do catálogo (pás carregadeiras primeiro). */
+export function receivingLoaders(premises: DetailedPremises) {
+  const ls = catalogOf(premises).loaders;
+  return [...ls.filter((l) => /^pa-|carregadeira/i.test(l.id + l.name)), ...ls.filter((l) => !/^pa-|carregadeira/i.test(l.id + l.name))];
+}
+
+/** Taxa da carregadeira (t/h) = caçamba (m³) × enchimento × densidade solta × ciclos por hora. */
+export function receivingLoaderTph(premises: DetailedPremises, loaderId: string | undefined, density: number) {
+  const l = receivingLoaders(premises).find((x) => x.id === (loaderId ?? 'pa-35'));
+  if (!l || !(l.cycleSec > 0)) return 0;
+  return Math.round(l.bucketM3 * LOADER_FILL * density * (3600 / l.cycleSec));
 }

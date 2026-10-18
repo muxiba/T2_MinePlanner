@@ -17,7 +17,7 @@ import PlanView from './PlanView';
 import FinanceView from './FinanceView';
 import DecisionView from './DecisionView';
 import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
-import { FLOW_LABELS, PERIOD_KINDS, PREMISES_CONFIG_ID, circuitPeriod, circuitTargets, flowWetTonnes, hoursBreakdown, linkOn, premisesLoaderTph, withPremises, type Flow, type PeriodKind } from '@/sim/link';
+import { FLOW_LABELS, PERIOD_KINDS, PREMISES_CONFIG_ID, circuitPeriod, circuitTargets, flowWetTonnes, hoursBreakdown, linkOn, premisesLoaderTph, receivingLoaders, withPremises, type Flow, type PeriodKind } from '@/sim/link';
 import { CycleBars, SweepChart } from './charts';
 import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
 
@@ -213,7 +213,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
 
   const exportCsv = () => {
     if (!matrix) return;
-    const head = ['Configuração', 'Cenário', 't/dia (média)', 't/dia (mín. IC95)', 't/dia (máx. IC95)', '% da meta', 'Ciclo (min)', 'Fila carga (min)', 'Fila descarga (min)', 'Ocupação carga', 'Ocupação descarga', 'Ocupação empilhadeira', 'Falta na fábrica (h)', 'R$/t'];
+    const head = ['Configuração', 'Cenário', 't/dia (média)', 't/dia (mín. IC95)', 't/dia (máx. IC95)', '% da meta', 'Ciclo (min)', 'Fila carga (min)', 'Fila descarga (min)', 'Ocupação carga', 'Ocupação descarga', 'Ocupação carregadeira', 'Falta na fábrica (h)', 'R$/t'];
     const dec = (n: number, d = 1) => n.toFixed(d).replace('.', ',');
     const rows = matrix.map((c) => {
       const s = c.stats;
@@ -645,15 +645,30 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
           )}
 
           {destinations.length > 0 && (
-            <Card title="Recebimento" description="Pulmão esvaziado pela empilhadeira. Pulmão 0 = descarga direta, limitada pela empilhadeira. Consumo da fábrica opcional.">
+            <Card title="Recebimento" description="Pulmão (moega ou pilha) retomado pela carregadeira. Pulmão 0 = descarga direta, limitada pela carregadeira. A taxa vem da classe da carregadeira (caçamba × enchimento 90% × densidade × ciclos por hora). Consumo da fábrica opcional.">
               <div className="space-y-4">
                 {receivingView.map((r) => (
                     <div key={r.destination}>
                       <p className="mb-2 text-sm font-medium">{r.destination}</p>
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                         <Num label="Pulmão" suffix="t" value={r.bufferT} onChange={(v) => setReceiving(r.destination, { bufferT: v })} step={10} />
-                        <Num label="Empilhadeira" suffix="t/h" value={r.stackerTph} onChange={(v) => setReceiving(r.destination, { stackerTph: v })} step={10} />
-                        <Num label="DF empilhadeira" suffix="%" value={r.stackerDf} onChange={(v) => setReceiving(r.destination, { stackerDf: v })} />
+                        <div>
+                          <label className="mb-1 block text-xs text-black/55">Carregadeira</label>
+                          <select className={inputCls} value={r.loaderId ?? 'pa-35'} onChange={(e) => setReceiving(r.destination, { loaderId: e.target.value, manualTph: false })}>
+                            {receivingLoaders(premises).map((l) => (
+                              <option key={l.id} value={l.id}>{l.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Num label="Carregadeira" suffix="t/h" value={r.stackerTph} onChange={(v) => setReceiving(r.destination, { stackerTph: v, manualTph: true })} step={10} locked={linked && !r.manualTph ? 'Calculada pela classe da carregadeira' : undefined} />
+                          {linked && (
+                            <button type="button" className="mt-0.5 text-[11px] text-emerald-700 hover:underline" onClick={() => setReceiving(r.destination, { manualTph: !r.manualTph })}>
+                              {r.manualTph ? 'usar a calculada' : 'informar outra taxa'}
+                            </button>
+                          )}
+                        </div>
+                        <Num label="DF carregadeira" suffix="%" value={r.stackerDf} onChange={(v) => setReceiving(r.destination, { stackerDf: v })} locked={linked && !r.manualTph ? 'DF da planta, nas Premissas Fundamentais' : undefined} />
                         <Num label="Consumo da fábrica" suffix="t/h" value={r.plantTph} onChange={(v) => setReceiving(r.destination, { plantTph: v })} step={10} />
                         <Num label="Estoque inicial" suffix="t" value={r.plantStockInitialT} onChange={(v) => setReceiving(r.destination, { plantStockInitialT: v })} step={100} />
                         <Num label="Estoque máximo" suffix="t" value={r.plantStockMaxT} onChange={(v) => setReceiving(r.destination, { plantStockMaxT: v })} step={100} />
@@ -940,7 +955,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                       ['Fila na descarga', `${n1(s.queueDumpMin.mean)} min por viagem`],
                       ['Ocupação da carga', pc(s.loaderUtil.mean)],
                       ['Ocupação da descarga', pc(s.dumpUtil.mean)],
-                      ['Ocupação da empilhadeira', s.stackerUtil.mean > 0 ? pc(s.stackerUtil.mean) : '—'],
+                      ['Ocupação da carregadeira', s.stackerUtil.mean > 0 ? pc(s.stackerUtil.mean) : '—'],
                       ['Pulmão (máximo)', s.bufferMaxT > 0 ? `${t0(s.bufferMaxT)} t` : '—'],
                       ['Falta de material na fábrica', s.plantStockoutH.mean > 0 ? `${n1(s.plantStockoutH.mean)} h no período` : 'Nenhuma'],
                       ['Custo do transporte', s.costPerT.mean > 0 ? `${brl(s.costPerT.mean)}/t` : 'Informe os custos na configuração'],
@@ -948,7 +963,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     const util = [
                       ['carga', s.loaderUtil.mean],
                       ['descarga', s.dumpUtil.mean],
-                      ['empilhadeira', s.stackerUtil.mean],
+                      ['carregadeira', s.stackerUtil.mean],
                     ] as const;
                     const bottleneck = [...util].sort((a, b) => b[1] - a[1])[0];
                     return (
