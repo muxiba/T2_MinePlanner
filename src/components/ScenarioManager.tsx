@@ -6,34 +6,34 @@ interface ScenarioManagerProps {
   routes: Route[];
   premises: DetailedPremises;
   scenarios: Scenario[];
-  setScenarios: React.Dispatch<React.SetStateAction<Scenario[]>>;
+  /** Salva um cenário no banco; retorna true em caso de sucesso. */
+  onCreate: (name: string, routes: Route[], premises: DetailedPremises) => Promise<boolean>;
+  onDelete: (id: string) => void | Promise<void>;
   setRoutes: (routes: Route[]) => void;
   setPremises: (premises: DetailedPremises) => void;
+  error?: string | null;
 }
 
-const ScenarioManager: React.FC<ScenarioManagerProps> = ({ 
-  routes, 
-  premises, 
-  scenarios, 
-  setScenarios, 
-  setRoutes, 
-  setPremises 
+const ScenarioManager: React.FC<ScenarioManagerProps> = ({
+  routes,
+  premises,
+  scenarios,
+  onCreate,
+  onDelete,
+  setRoutes,
+  setPremises,
+  error,
 }) => {
   const [scenarioName, setScenarioName] = useState('');
 
-  const handleSave = () => {
-    if (!scenarioName.trim()) return;
-    
-    const newScenario: Scenario = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: scenarioName,
-      routes: JSON.parse(JSON.stringify(routes)),
-      premises: JSON.parse(JSON.stringify(premises)),
-      timestamp: Date.now(),
-    };
-    
-    setScenarios([...scenarios, newScenario]);
-    setScenarioName('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!scenarioName.trim() || saving) return;
+    setSaving(true);
+    const ok = await onCreate(scenarioName.trim(), structuredClone(routes), structuredClone(premises));
+    setSaving(false);
+    if (ok) setScenarioName('');
   };
 
   const handleLoad = (scenario: Scenario) => {
@@ -41,8 +41,8 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
     setPremises(scenario.premises);
   };
 
-  const handleDelete = (id: string) => {
-    setScenarios(scenarios.filter(s => s.id !== id));
+  const handleDelete = (scenario: Scenario) => {
+    if (window.confirm(`Excluir o cenário "${scenario.name}"?`)) void onDelete(scenario.id);
   };
 
   const exportToJSON = (scenario: Scenario) => {
@@ -69,11 +69,8 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         const importedScenario = JSON.parse(content);
         
         // Basic validation
-        if (importedScenario.name && importedScenario.routes && importedScenario.premises) {
-          // Generate new ID to avoid conflicts
-          importedScenario.id = Math.random().toString(36).substr(2, 9);
-          importedScenario.timestamp = Date.now();
-          setScenarios([...scenarios, importedScenario]);
+        if (importedScenario.name && Array.isArray(importedScenario.routes) && importedScenario.premises) {
+          void onCreate(String(importedScenario.name), importedScenario.routes, importedScenario.premises);
         } else {
           alert("Arquivo JSON inválido para cenários.");
         }
@@ -94,6 +91,11 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
           <Save size={24} className="text-emerald-500" />
           Salvar Cenário Atual
         </h3>
+        {error && (
+          <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </p>
+        )}
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 flex gap-2">
             <input
@@ -104,11 +106,12 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
               className="flex-1 bg-[#F8F9FA] border border-black/5 rounded-xl px-6 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
             />
             <button
-              onClick={handleSave}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+              onClick={() => void handleSave()}
+              disabled={saving || !scenarioName.trim()}
+              className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-8 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
             >
               <Plus size={18} />
-              Salvar
+              {saving ? 'Salvando…' : 'Salvar'}
             </button>
           </div>
           
@@ -138,7 +141,8 @@ const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                 </p>
               </div>
               <button
-                onClick={() => handleDelete(scenario.id)}
+                onClick={() => handleDelete(scenario)}
+                aria-label={`Excluir cenário ${scenario.name}`}
                 className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-all"
               >
                 <Trash2 size={16} />
