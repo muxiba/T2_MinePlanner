@@ -4,7 +4,7 @@ import { ArrowLeftRight, Download, FileUp, Mountain, Pause, Play, Plus, Route as
 import type { DetailedPremises } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
-import { defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
+import { CONFIG_PRESETS, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
 import { limitsOf, payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
 import { DOT_KINDS, makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
@@ -691,6 +691,16 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                             ))}
                           </select>
                         </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-black/55">Caminhão deste circuito</label>
+                          <select className={inputCls} value={c.configId ?? ''} aria-label={`Caminhão do circuito ${c.name}`} onChange={(e) => setCircuit(c.id, { configId: e.target.value || undefined })}>
+                            <option value="">A configuração comparada</option>
+                            {model.configs.map((o) => (
+                              <option key={o.id} value={o.id}>Sempre: {o.name}{o.vehicle === 'rodoviario' ? ' (rodoviário)' : ''}</option>
+                            ))}
+                          </select>
+                          <p className="mt-0.5 text-[11px] text-black/45">Trecho fora da mina? Fixe aqui um rodoviário.</p>
+                        </div>
                         {flow === 'outro' && <Num label="t seca no período" step={1000} value={c.tonnesManual ?? 0} onChange={(v) => setCircuit(c.id, { tonnesManual: Math.max(0, v) })} />}
                         {sameFlow > 1 && flow !== 'outro' && (
                           <Num
@@ -818,18 +828,46 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
             title="Configurações de transporte"
             description="Os caminhões ou implementos comparados. Tempos de ciclo de cada rota calculados pela tabela de velocidade × rampa."
             actions={
-              <Btn
-                tone="light"
-                onClick={() => {
-                  const base = model.configs[model.configs.length - 1];
-                  const id = String.fromCharCode(65 + model.configs.length);
-                  setModel({ ...model, configs: [...model.configs, { ...structuredClone(base), id, name: `${id} – Nova configuração` }] });
+              <select
+                className={clsx(inputCls, 'w-auto min-w-56 font-medium')}
+                value=""
+                aria-label="Adicionar configuração"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  const used = new Set(model.configs.map((x) => x.id));
+                  let k = 0;
+                  while (used.has(String.fromCharCode(65 + k))) k++;
+                  const id = String.fromCharCode(65 + k);
+                  const hpd = model.scenarios[0]?.hoursPerDay ?? 24;
+                  let cfg: TruckConfig;
+                  if (v === 'copiar') {
+                    const base = model.configs[model.configs.length - 1];
+                    cfg = { ...structuredClone(base), id, name: `${id} – Cópia de ${base.name.replace(/^[A-Z] – /, '')}` };
+                  } else {
+                    const pr = CONFIG_PRESETS.find((x) => x.id === v)!;
+                    const made = pr.make();
+                    cfg = { ...made, id, name: `${id} – ${made.name}`, ...sicroTruckCosts(hpd, made.vehicle) };
+                  }
+                  setModel({ ...model, configs: [...model.configs, cfg] });
                 }}
               >
-                <Plus size={15} /> Adicionar
-              </Btn>
+                <option value="">+ Adicionar configuração…</option>
+                <option value="copiar">Cópia da última configuração</option>
+                {(['Mina / fora de estrada', 'Rodoviário (estrada, ponta a ponta)'] as const).map((g) => (
+                  <optgroup key={g} label={g}>
+                    {CONFIG_PRESETS.filter((x) => x.group === g).map((x) => (
+                      <option key={x.id} value={x.id}>{x.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             }
           >
+            <p className="mb-4 text-xs text-black/55">
+              <b>Rodoviários</b> servem para transporte de ponta a ponta fora da mina (pátio → terminal ferroviário, fábrica, porto, cliente): desenhe ou importe a rota pela estrada, escolha um modelo rodoviário e associe o circuito a ele.
+              Eles têm limite de velocidade próprio (carregado e vazio), resistência ao rolamento de estrada pavimentada (≈ 1,5%) e custo de referência SICRO do basculante para rocha (E9672). Os modelos são valores de partida — ajuste com os dados do transportador.
+            </p>
             <div className="space-y-5">
               {model.configs.map((c) => (
                 <div key={c.id} className="rounded-xl border border-black/[0.06] p-4">
@@ -850,12 +888,32 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     <Num label="Custo fixo" suffix="R$/h" step={5} value={c.costFixedPerH} onChange={(v) => setConfig(c.id, { costFixedPerH: v })} />
                     <Num label="Custo operacional" suffix="R$/h" step={5} value={c.costVarPerH} onChange={(v) => setConfig(c.id, { costVarPerH: v })} />
                   </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                    <label className="block text-xs">
+                      <span className="mb-1 block font-medium text-black/60">Tipo de veículo</span>
+                      <select className={inputCls} value={c.vehicle ?? 'mina'} disabled={linked && c.id === PREMISES_CONFIG_ID}
+                        onChange={(e) => {
+                          const v = e.target.value as 'mina' | 'rodoviario';
+                          setConfig(c.id, v === 'rodoviario' ? { vehicle: v, speedLimitLoadedKmh: c.speedLimitLoadedKmh || 60, speedLimitEmptyKmh: c.speedLimitEmptyKmh || 80, rollingResistance: c.rollingResistance ?? 1.5 } : { vehicle: v });
+                        }}>
+                        <option value="mina">Mina / fora de estrada</option>
+                        <option value="rodoviario">Rodoviário (estrada)</option>
+                      </select>
+                    </label>
+                    <Num label="Limite carregado" suffix="km/h" step={5} value={c.speedLimitLoadedKmh ?? 0} onChange={(v) => setConfig(c.id, { speedLimitLoadedKmh: v || undefined })}
+                      help={`0 = geral (${limitsOf(model).loaded} km/h)`} />
+                    <Num label="Limite vazio" suffix="km/h" step={5} value={c.speedLimitEmptyKmh ?? 0} onChange={(v) => setConfig(c.id, { speedLimitEmptyKmh: v || undefined })}
+                      help={`0 = geral (${limitsOf(model).empty} km/h)`} />
+                    <Num label="Resist. ao rolamento" suffix="%" step={0.5} value={c.rollingResistance ?? model.rollingResistance} onChange={(v) => setConfig(c.id, { rollingResistance: v })}
+                      help="Asfalto ≈ 1,5 · mina 2–3 · via ruim 4–6" />
+                  </div>
                   {(() => {
-                    const ref = sicroTruckCosts(model.scenarios[0]?.hoursPerDay ?? 24);
+                    const ref = sicroTruckCosts(model.scenarios[0]?.hoursPerDay ?? 24, c.vehicle);
+                    const it = c.vehicle === 'rodoviario' ? SICRO_REF.roadTruck : SICRO_REF.truck;
                     const isRef = Math.abs(c.costFixedPerH - ref.costFixedPerH) < 0.01 && Math.abs(c.costVarPerH - ref.costVarPerH) < 0.01;
                     return (
                       <p className="mt-2 text-[11px] text-black/50">
-                        Referência {SICRO_REF.label}: {SICRO_REF.truck.code} {SICRO_REF.truck.description}, produtivo R$ {n1(SICRO_REF.truck.productive)}/h e improdutivo ≈ R$ {n1(SICRO_REF.truck.unproductive)}/h → custo fixo R$ {n1(ref.costFixedPerH)}/h de calendário e operacional R$ {n1(ref.costVarPerH)}/h trabalhada. É a classe mais próxima publicada; ajuste para o caminhão de vocês.{' '}
+                        Referência {SICRO_REF.label}: {it.code} {it.description}, produtivo R$ {n1(it.productive)}/h e improdutivo ≈ R$ {n1(it.unproductive)}/h → custo fixo R$ {n1(ref.costFixedPerH)}/h de calendário e operacional R$ {n1(ref.costVarPerH)}/h trabalhada. É a classe mais próxima publicada; ajuste para o caminhão de vocês.{' '}
                         {isRef ? (
                           <span className="font-medium text-emerald-700">Usando a referência.</span>
                         ) : (
@@ -914,7 +972,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                             {model.circuits.map((ci) => {
                               const r = model.routes.find((x) => x.id === ci.routeId);
                               if (!r) return null;
-                              const tt = travelTimes(r.points, c.speed, limitsOf(model, c), model.rollingResistance);
+                              const tt = travelTimes(r.points, c.speed, limitsOf(model, c), c.rollingResistance ?? model.rollingResistance);
                               return (
                                 <tr key={ci.id} className="border-t border-black/5">
                                   <td className="py-1.5">{ci.name}</td>

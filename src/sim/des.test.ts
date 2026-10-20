@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { payloadFor, replicate, simulate, speedFor, summarize, travelTimes } from './des';
-import { emptyModel, defaultCircuit } from './defaults';
+import { limitsOf, payloadFor, replicate, simulate, speedFor, summarize, travelTimes } from './des';
+import { CONFIG_PRESETS, emptyModel, defaultCircuit } from './defaults';
 import { parseDxfText, routeProfile, simplify } from './dxf';
 import type { SimModel, Vec3 } from './types';
 
@@ -58,6 +58,27 @@ describe('velocidade e tempo de viagem', () => {
     expect(tt.loaded).toBeGreaterThan(tt.empty);
     expect(speedFor(m.configs[0].speed.loaded, 12, 40)).toBeLessThan(speedFor(m.configs[0].speed.loaded, 0, 40));
     expect(speedFor(m.configs[0].speed.loaded, 0, 20)).toBe(20); // limite da via
+  });
+  it('rodoviário usa o próprio limite de velocidade e é mais rápido em estrada plana', () => {
+    const m = model(1);
+    const road: Vec3[] = [{ x: 0, y: 0, z: 0 }, { x: 20000, y: 0, z: 0 }];
+    const mina = { ...CONFIG_PRESETS.find((x) => x.id === 'mina-8x4')!.make(), id: 'M', costFixedPerH: 0, costVarPerH: 0 };
+    const rod = { ...CONFIG_PRESETS.find((x) => x.id === 'rod-carreta')!.make(), id: 'R', costFixedPerH: 0, costVarPerH: 0 };
+    expect(limitsOf(m, rod).loaded).toBe(60);
+    expect(limitsOf(m, rod).empty).toBe(80);
+    const a = travelTimes(road, mina.speed, limitsOf(m, mina), m.rollingResistance);
+    const b = travelTimes(road, rod.speed, limitsOf(m, rod), rod.rollingResistance ?? m.rollingResistance);
+    expect(b.loaded).toBeLessThan(a.loaded);
+    expect(b.loaded).toBeCloseTo(20, 0); // 20 km a 60 km/h ≈ 20 min
+    expect(b.empty).toBeCloseTo(15, 0); // 20 km a 80 km/h ≈ 15 min
+  });
+  it('circuito com caminhão fixo usa a própria configuração, qualquer que seja a comparada', () => {
+    const m = model(2);
+    const rod = { ...CONFIG_PRESETS.find((x) => x.id === 'rod-rodotrem')!.make(), id: 'R', costFixedPerH: 100, costVarPerH: 200 };
+    m.configs = [...m.configs, rod];
+    m.circuits = [{ ...m.circuits[0], configId: 'R', density: 0 }];
+    const out = simulate(m, { config: m.configs[0], scenario: { ...m.scenarios[0], days: 2 }, trucks: { [m.circuits[0].id]: 2 } });
+    expect(out.geometry[0].payloadT).toBe(50);
   });
 });
 

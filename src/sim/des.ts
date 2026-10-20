@@ -286,9 +286,13 @@ export function loadTime(cfg: TruckConfig, c: Circuit) {
   return Math.max(0.1, c.loadSpotMin + (payload / Math.max(c.loaderTph, 1)) * 60);
 }
 
+/** Configuração usada pelo circuito: a fixa do circuito (ex.: rodoviário) ou a comparada. */
+export function configFor(model: Pick<SimModel, 'configs'>, c: Pick<Circuit, 'configId'>, compared: TruckConfig) {
+  return (c.configId && model.configs.find((x) => x.id === c.configId)) || compared;
+}
+
 export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const sc = opt.scenario;
-  const cfg = opt.config;
   const r = rng(opt.seed ?? 1);
   const cv = Math.max(0, sc.cv);
   const T = Math.max(1, sc.days) * 1440;
@@ -364,9 +368,12 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   let workedMin = 0;
   let truckCount = 0;
 
+  const workedByC = circuits.map(() => 0);
+  const trucksByC = circuits.map(() => 0);
   const ctx = circuits.map((c, ci) => {
+    const cfg = configFor(model, c, opt.config);
     const route = routes.get(c.routeId)!;
-    const tt = travelTimes(route.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance);
+    const tt = travelTimes(route.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance);
     geometry.push({
       circuitId: c.id,
       points: route.points,
@@ -397,6 +404,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       recv: receivers.get(c.destination)!,
       payload: payloadFor(cfg, c),
       loadMean: loadTime(cfg, c),
+      cfg,
     };
   });
 
@@ -407,7 +415,10 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     if (traceEnd > 0 && k.since < traceEnd && t > k.since) {
       trace.push({ truck: k.id, circuit: k.ci, state: k.state, t0: k.since, t1: Math.min(t, traceEnd) });
     }
-    if (k.state !== 'manutencao' && k.state !== 'fora_turno' && k.state !== 'troca_turno' && k.state !== 'refeicao' && b > a) workedMin += b - a;
+    if (k.state !== 'manutencao' && k.state !== 'fora_turno' && k.state !== 'troca_turno' && k.state !== 'refeicao' && b > a) {
+      workedMin += b - a;
+      workedByC[k.ci] += b - a;
+    }
     k.state = s;
     k.since = t;
   };
@@ -527,7 +538,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       x.recv.add(x.payload);
     }
     setState(k, 'descarregando', t);
-    const d = lognormal(r, cfg.maneuverMin + cfg.dumpMin, cv);
+    const d = lognormal(r, x.cfg.maneuverMin + x.cfg.dumpMin, cv);
     const t1 = t + d;
     heap.push(t1, () => {
       x.dump.release(t1);
@@ -567,6 +578,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     for (let i = 0; i < n; i++) {
       const k: Truck = { id: id++, ci: x.ci, state: 'fora_turno', since: 0, opMin: 0, nextFail: exp(r, truckMtbf), cycleStart: 0 };
       truckCount++;
+      trucksByC[x.ci]++;
       const t0 = i * (x.loadMean / Math.max(1, x.c.loaders));
       heap.push(t0, () => startCycle(k, t0));
       trucks.push(k);
@@ -597,7 +609,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const dumpCap = [...dumps.values()].reduce((a, d) => a + d.cap, 0) * T;
   const recvs = [...receivers.values()];
   const limitedRecv = recvs.filter((x) => x.limited);
-  const costTotal = truckCount * cfg.costFixedPerH * (measured / 60) + (workedMin / 60) * cfg.costVarPerH;
+  const costTotal = ctx.reduce((a, x) => a + trucksByC[x.ci] * x.cfg.costFixedPerH * (measured / 60) + (workedByC[x.ci] / 60) * x.cfg.costVarPerH, 0);
 
   const stats: RunStats = {
     tonnes,

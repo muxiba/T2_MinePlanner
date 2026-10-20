@@ -6,7 +6,7 @@
  * do ponto de carga daquele período ao ponto de descarga, pelo caminho mais curto na malha,
  * com acessos internos (rampa limitada) nas pontas.
  */
-import { limitsOf, loadTime, payloadFor, replicate, travelTimes } from './des';
+import { configFor, limitsOf, loadTime, payloadFor, replicate, travelTimes } from './des';
 import { simplify } from './dxf';
 import type { AggregateStats, Circuit, Scenario, SimModel, SimRoute, TruckConfig, Vec3 } from './types';
 
@@ -666,9 +666,10 @@ export interface PeriodResult {
 }
 
 /** Estimativa inicial: caminhões = produção horária × ciclo ÷ (carga útil × eficiência × disponibilidade). */
-function initialTrucks(model: SimModel, c: Circuit, cfg: TruckConfig, sc: Scenario, targetTpd: number) {
+function initialTrucks(model: SimModel, c: Circuit, compared: TruckConfig, sc: Scenario, targetTpd: number) {
+  const cfg = configFor(model, c, compared);
   const r = model.routes.find((x) => x.id === c.routeId)!;
-  const tt = travelTimes(r.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance);
+  const tt = travelTimes(r.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance);
   const cycle = loadTime(cfg, c) + (tt.loaded + tt.empty) * (sc.travelFactor || 1) + cfg.dumpMin + cfg.maneuverMin + (c.weighing ? c.weighMin : 0);
   const tph = targetTpd / Math.max(1, sc.hoursPerDay);
   const perTruck = (payloadFor(cfg, c) * 60) / cycle * (sc.efficiency / 100) * (sc.truckDf / 100);
@@ -751,7 +752,7 @@ export function sizePeriod(
       cycleMin: 0,
       loadedMin: extra[c.id].tt.loaded * (sc.travelFactor || 1),
       emptyMin: extra[c.id].tt.empty * (sc.travelFactor || 1),
-      payloadT: payloadFor(cfg, c),
+      payloadT: payloadFor(configFor(model, c, cfg), c),
       saturated: saturated.has(c.id) && got < info[i].targetTpd * 0.995,
     };
   });

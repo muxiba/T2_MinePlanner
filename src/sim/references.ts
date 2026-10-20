@@ -22,6 +22,7 @@ export interface SicroItem {
 export const SICRO_REF = {
   label: 'SICRO/DNIT, Minas Gerais, abril/2026',
   url: 'https://www.gov.br/dnit/pt-br/assuntos/planejamento-e-pesquisa/custos-referenciais/sistemas-de-custos/sicro',
+  roadTruck: { code: 'E9672', description: 'Caminhão basculante para rocha 12 m³ – 210 kW (referência para rodoviário)', productive: 382.87, unproductive: 122.03 } as SicroItem,
   truck: { code: 'E9667', description: 'Caminhão basculante 14 m³ – 210 kW', productive: 360.0, unproductive: 110.0 } as SicroItem,
   excavator: { code: 'E9515', description: 'Escavadeira hidráulica sobre esteiras 1,56 m³ – 118 kW', productive: 355.41, unproductive: 162.3, acquisition: 1_168_800.76 } as SicroItem,
   wheelLoader: { code: 'E9511', description: 'Carregadeira de pneus 3,40 m³ – 195 kW', productive: 550.32, unproductive: 269.3, acquisition: 2_141_837.62 } as SicroItem,
@@ -37,8 +38,8 @@ export const REVENUE_REF_PER_T = 400;
  * custo operacional (R$/h trabalhada) = produtivo − improdutivo (diesel, manutenção e pneus a mais quando trabalha).
  * Assim, uma hora trabalhada custa o produtivo e uma hora parada no turno, o improdutivo.
  */
-export function sicroTruckCosts(hoursPerDay = 24) {
-  const t = SICRO_REF.truck;
+export function sicroTruckCosts(hoursPerDay = 24, vehicle: 'mina' | 'rodoviario' = 'mina') {
+  const t = vehicle === 'rodoviario' ? SICRO_REF.roadTruck : SICRO_REF.truck;
   return {
     costFixedPerH: Math.round(t.unproductive * (Math.min(24, Math.max(1, hoursPerDay)) / 24) * 100) / 100,
     costVarPerH: Math.round((t.productive - t.unproductive) * 100) / 100,
@@ -52,7 +53,7 @@ export function withReferenceCosts(model: SimModel): SimModel {
   const configs: TruckConfig[] = model.configs.map((c) => {
     if (c.costFixedPerH || c.costVarPerH) return c;
     changed = true;
-    return { ...c, ...sicroTruckCosts(hpd) };
+    return { ...c, ...sicroTruckCosts(hpd, c.vehicle) };
   });
   return changed ? { ...model, configs } : model;
 }

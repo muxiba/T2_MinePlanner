@@ -44,6 +44,8 @@ export interface TruckConfig {
   speedLimitEmptyKmh?: number;
   /** tipo de veículo: fora de estrada/mina ou rodoviário */
   vehicle?: 'mina' | 'rodoviario';
+  /** resistência ao rolamento própria (%), ex.: estrada pavimentada ≈ 1,5; vazio = a geral do modelo */
+  rollingResistance?: number;
   /** custo de propriedade/locação (R$/h calendário) */
   costFixedPerH: number;
   /** custo operacional (R$/h trabalhada): combustível, operador, pneus, manutenção */
@@ -86,6 +88,8 @@ export interface Circuit {
   tonnesDryOverride?: number;
   /** false = caminhões digitados; padrão = calculados pela meta do período */
   autoTrucks?: boolean;
+  /** configuração fixa deste circuito (ex.: rodoviário no trecho fora da mina); vazio = a configuração comparada */
+  configId?: string;
 }
 
 /** Recebimento no destino: pulmão (moega/pilha) retomado pela carregadeira. */

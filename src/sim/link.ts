@@ -10,7 +10,7 @@ import type { DetailedPremises } from '@/types';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { interferenceMin, lossesOf } from '@/engine/losses';
 import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
-import { limitsOf, loadTime, payloadFor, travelTimes } from './des';
+import { configFor, limitsOf, loadTime, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
 import type { Circuit, Scenario, SimModel, SpeedTable, TruckConfig } from './types';
 
@@ -355,8 +355,8 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
   const flows = flowDryTonnes(premises, per.romT);
   const k = wetFactor(premises);
   const sc = model.scenarios[0];
-  const cfg = model.configs[0];
-  if (!sc || !cfg) return [];
+  const cfg0 = model.configs[0];
+  if (!sc || !cfg0) return [];
   // UF: com as perdas detalhadas a simulação usa eventos (eficiência 100%), mas a conta analítica usa a UF calculada
   const ufPct = linkOn(model) ? premises.ufMina : sc.efficiency;
   const prodH = per.workDays * (sc.hoursPerDay || 24) * ((sc.truckDf || 0) / 100) * ((ufPct || 0) / 100);
@@ -378,8 +378,9 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
     const overridden = c.tonnesDryOverride !== undefined && flow !== 'outro';
     const tonnesDry = overridden ? c.tonnesDryOverride! : fromFlow;
     const tonnes = tonnesDry * k;
+    const cfg = configFor(model, c, cfg0);
     const r = model.routes.find((x) => x.id === c.routeId);
-    const tt = r ? travelTimes(r.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance) : { loaded: 0, empty: 0 };
+    const tt = r ? travelTimes(r.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance) : { loaded: 0, empty: 0 };
     const loadMin = loadTime(cfg, c);
     const dumpMin = cfg.dumpMin + cfg.maneuverMin;
     const weighMin = c.weighing ? c.weighMin : 0;
