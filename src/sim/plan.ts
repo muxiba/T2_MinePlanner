@@ -89,8 +89,8 @@ export interface Movement {
   weighMin: number;
   /** toneladas por período (índice = período − 1), na base do plano (seca ou úmida) */
   tonnes: number[];
-  /** movimentação calculada a partir do ROM (não editável): produto e rejeito do ROM que entra na usina, estéril do ROM da frente */
-  derived?: { kind: 'produto' | 'rejeito' | 'esteril'; source: string };
+  /** movimentação calculada (não editável): ROM pela meta do período e área da frente; produto e rejeito do ROM que entra na usina; estéril do ROM da frente */
+  derived?: { kind: 'rom' | 'produto' | 'rejeito' | 'esteril'; source: string };
 }
 
 export interface Period {

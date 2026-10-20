@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { AlertTriangle, Download, FileUp, Layers, MapPin, Play, Plus, Trash2, Upload } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
 import type { DetailedPremises } from '@/types';
-import { PERIOD_KINDS, MONTH_NAMES, flatCalendar, flowWetTonnes, generateMovements, hoursBreakdown, placesFromRouteEnds, linkOn, rainyCalendar, suggestedRomT, syncPeriods, type PeriodKind } from '@/sim/link';
+import { PERIOD_KINDS, MONTH_NAMES, flowDryTonnes, flatCalendar, flowWetTonnes, generateMovements, hoursBreakdown, placesFromRouteEnds, linkOn, rainyCalendar, suggestedRomT, syncPeriods, type PeriodKind } from '@/sim/link';
 import {
   PLACE_KINDS,
   assignFronts,
@@ -605,7 +605,7 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
         <Card title="Calendário e períodos" description="Dias trabalháveis por mês (clique em seco/chuva para marcar a estação). A meta diária de cada período = toneladas ÷ dias trabalháveis.">
           <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[780px] text-sm">
+              <table className="w-full min-w-[880px] text-sm">
                 <thead>
                   <tr className="text-left text-xs text-black/45">
                     <th className="py-1 pr-2 font-medium">Mês</th>
@@ -648,6 +648,39 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                     ))}
                     <td className="py-1 text-right font-semibold tabular-nums">{calendarWorkDays(plan.calendar)}</td>
                   </tr>
+                  {premises &&
+                    (() => {
+                      const per = plan.periods[period - 1];
+                      if (!per) return null;
+                      const romT = per.romT ?? suggestedRomT(premises, per.kind ?? 'ano', per.days, per.qty);
+                      const perDay = per.workDays > 0 ? romT / per.workDays : 0;
+                      const d = flowDryTonnes(premises, 1);
+                      const rows: [string, number, string][] = [['ROM', 1, 'text-black/80']];
+                      if (premises.processType !== 'seco') {
+                        rows.push(['Produto', d.produto, 'text-blue-700'], ['Rejeito', d.rejeito, 'text-amber-700']);
+                      } else rows.push(['Produto', d.produto, 'text-blue-700']);
+                      if (d.esteril > 0) rows.push(['Estéril', d.esteril, 'text-violet-700']);
+                      return (
+                        <>
+                          <tr>
+                            <td colSpan={plan.calendar.length + 2} className="pt-3 pb-1 text-[11px] text-black/45">
+                              Produção mensal em mil t secas, no ritmo de {per.label} ({t0(perDay)} t de ROM por dia trabalhado): meses de chuva produzem menos.
+                            </td>
+                          </tr>
+                          {rows.map(([name, f, cls]) => (
+                            <tr key={name}>
+                              <td className={clsx('py-0.5 pr-2 text-xs font-medium', cls)}>{name}</td>
+                              {plan.calendar.map((m, i) => (
+                                <td key={i} className={clsx('py-0.5 pr-1 text-center text-[11px] tabular-nums', cls, m.season === 'chuvoso' && 'bg-sky-50/60')}>
+                                  {((perDay * f * m.workDays) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}
+                                </td>
+                              ))}
+                              <td className={clsx('py-0.5 text-right text-[11px] font-semibold tabular-nums', cls)}>{((perDay * f * calendarWorkDays(plan.calendar)) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</td>
+                            </tr>
+                          ))}
+                        </>
+                      );
+                    })()}
                 </tbody>
               </table>
             </div>
@@ -673,7 +706,7 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
           <p className="mt-2 text-xs text-black/45">
             Os dias trabalhados de cada mês são editáveis; ao mudar o calendário, todos os períodos e a simulação são recalculados. Fator de pico 1 = média do período (use, por exemplo, 1,3 para dimensionar pelo mês chuvoso).
           </p>
-          <PeriodsTable plan={plan} premises={premises} linked={linked} setPeriodRow={setPeriodRow} setAll={(kind) => setPlan({ ...plan, periods: plan.periods.map((p, i) => ({ ...p, kind, label: kindName(kind) + ' ' + (i + 1) })) })} />
+          <PeriodsTable plan={plan} premises={premises} linked={linked} setPeriodRow={setPeriodRow} setRoms={(v) => setPlan({ ...plan, periods: plan.periods.map((p, i) => ({ ...p, romT: v[i] ?? p.romT })) })} setAll={(kind) => setPlan({ ...plan, periods: plan.periods.map((p, i) => ({ ...p, kind, label: kindName(kind) + ' ' + (i + 1) })) })} />
         </Card>
 
         {/* --------------------------- movimentações --------------------------- */}
@@ -742,13 +775,19 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                           <span className="font-medium">{placeName(m.origin)} → {placeName(m.destination)}</span>
                           <span className="block text-black/45">
                             {m.material}
-                            {m.derived && <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-semibold text-emerald-700">= ROM × {m.derived.kind === 'produto' ? 'RM' : m.derived.kind === 'rejeito' ? 'rejeito %' : 'REM'}</span>}
+                            {m.derived && m.derived.kind !== 'rom' && <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-semibold text-emerald-700">= ROM × {m.derived.kind === 'produto' ? 'RM' : m.derived.kind === 'rejeito' ? 'rejeito %' : 'REM'}</span>}
+                            {m.derived?.kind === 'rom' && (
+                              <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-semibold text-emerald-700">
+                                = meta do período{' '}
+                                <button type="button" className="underline" onClick={() => setMovement(m.id, { derived: undefined })} title="Digitar o ROM desta frente à mão">editar à mão</button>
+                              </span>
+                            )}
                           </span>
                         </td>
                         {plan.periods.map((_, i) => (
                           <td key={i} className="py-1 pr-1">
                             {m.derived ? (
-                              <p className="w-20 rounded-md bg-black/[0.04] px-1 py-1 text-right text-sm tabular-nums text-black/60" title="Calculado do ROM pelas premissas (RM global, rejeito total ou REM). Mude o ROM para alterar.">
+                              <p className="w-20 rounded-md bg-black/[0.04] px-1 py-1 text-right text-sm tabular-nums text-black/60" title={m.derived.kind === 'rom' ? 'Meta de ROM do período (tabela de períodos ou gráfico), dividida pela área de cada frente.' : 'Calculado do ROM pelas premissas (RM global, rejeito total ou REM). Mude o ROM para alterar.'}>
                                 {t0(m.tonnes[i] ?? 0)}
                               </p>
                             ) : (
@@ -1150,7 +1189,8 @@ const PeriodsTable: React.FC<{
   linked: boolean;
   setPeriodRow: (i: number, patch: Partial<MinePlan['periods'][number]>) => void;
   setAll: (k: PeriodKind) => void;
-}> = ({ plan, premises, linked, setPeriodRow, setAll }) => {
+  setRoms: (v: number[]) => void;
+}> = ({ plan, premises, linked, setPeriodRow, setAll, setRoms }) => {
   const [sel, setSel] = useState(0);
   const df = premises?.dfMina ?? 85;
   const uf = premises?.ufMina ?? 85;
@@ -1183,6 +1223,7 @@ const PeriodsTable: React.FC<{
           </select>
         </label>
       </div>
+      <ProductionCurve values={rows.map((r) => r.romT)} labels={plan.periods.map((p) => p.label)} premises={premises} onChange={setRoms} />
       <div className="max-h-96 overflow-auto">
         <table className="w-full min-w-[980px] text-sm">
           <thead className="sticky top-0 bg-white">
@@ -1239,7 +1280,7 @@ const PeriodsTable: React.FC<{
                     title={p.romT === undefined ? 'Sugerido pelas premissas (consumo mensal × meses do período)' : 'Meta informada'}
                   />
                   {p.romT !== undefined && (
-                    <button type="button" className="ml-1 text-[11px] text-emerald-700 hover:underline" onClick={() => setPeriodRow(i, { romT: undefined })}>sugerida</button>
+                    <button type="button" className="ml-1 text-[11px] text-emerald-700 hover:underline" onClick={() => setPeriodRow(i, { romT: undefined })}>usar a sugerida</button>
                   )}
                 </td>
                 <td className="py-1 pr-2 text-right tabular-nums">{t0(romT * rm)}</td>
@@ -1271,6 +1312,126 @@ const PeriodsTable: React.FC<{
           </p>
         </div>
       )}
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Curva de produção por período (arrastável)                                 */
+/* -------------------------------------------------------------------------- */
+
+const ProductionCurve: React.FC<{ values: number[]; labels: string[]; premises?: DetailedPremises; onChange: (v: number[]) => void }> = ({ values, labels, premises, onChange }) => {
+  const total = values.reduce((a, b) => a + b, 0);
+  const [peak, setPeak] = useState(Math.ceil(values.length / 2));
+  const [width, setWidth] = useState(Math.max(1, values.length / 4));
+  const [sum, setSum] = useState<number | null>(null);
+  const svgRef = React.useRef<SVGSVGElement>(null);
+  const drag = React.useRef<number | null>(null);
+  const n = values.length;
+  const W = 760;
+  const H = 190;
+  const L = 56;
+  const B = 34;
+  const T = 12;
+  const max = Math.max(1, ...values) * 1.25;
+  const bw = (W - L - 8) / Math.max(1, n);
+  const y = (v: number) => T + (1 - v / max) * (H - T - B);
+  const valueAt = (clientY: number) => {
+    const r = svgRef.current!.getBoundingClientRect();
+    const py = ((clientY - r.top) / r.height) * H;
+    return Math.max(0, Math.round(((1 - (py - T) / (H - T - B)) * max) / 1000) * 1000);
+  };
+  const gauss = () => {
+    const tot = sum ?? total;
+    const w = Array.from({ length: n }, (_, i) => Math.exp(-0.5 * ((i + 1 - peak) / Math.max(0.3, width)) ** 2));
+    const sw = w.reduce((a, b) => a + b, 0) || 1;
+    onChange(w.map((x) => Math.round((tot * x) / sw / 1000) * 1000));
+  };
+  const uniform = () => {
+    const tot = sum ?? total;
+    onChange(Array.from({ length: n }, () => Math.round(tot / n / 1000) * 1000));
+  };
+  const rm = premises ? (premises.processType === 'seco' ? 100 : premises.rmGlobal) / 100 : 0;
+  return (
+    <div className="mb-4 rounded-xl border border-black/[0.06] bg-[#FAFBFB] p-3">
+      <div className="mb-2 flex flex-wrap items-end gap-3">
+        <p className="mr-auto text-sm font-semibold">
+          Produção de ROM por período <span className="font-normal text-black/50">— arraste o topo de uma barra para mudar; a tabela abaixo acompanha (e vice-versa)</span>
+        </p>
+        <label className="text-xs text-black/55">
+          Total (t seca)
+          <input type="number" step={10000} className={clsx(inputCls, 'mt-1 w-36 text-right')} value={Math.round(sum ?? total)} onChange={(e) => setSum(Math.max(0, Number(e.target.value) || 0))} />
+        </label>
+        <label className="text-xs text-black/55">
+          Pico no período
+          <input type="number" min={1} max={n} className={clsx(inputCls, 'mt-1 w-20 text-right')} value={peak} onChange={(e) => setPeak(Math.max(1, Math.min(n, Number(e.target.value) || 1)))} />
+        </label>
+        <label className="text-xs text-black/55">
+          Abertura (períodos)
+          <input type="number" step={0.5} min={0.5} className={clsx(inputCls, 'mt-1 w-20 text-right')} value={width} onChange={(e) => setWidth(Math.max(0.5, Number(e.target.value) || 1))} />
+        </label>
+        <Btn tone="light" onClick={gauss}>Curva normal (gaussiana)</Btn>
+        <Btn tone="light" onClick={uniform}>Uniforme</Btn>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-auto w-full touch-none select-none"
+        onPointerMove={(e) => {
+          if (drag.current === null) return;
+          const v = valueAt(e.clientY);
+          onChange(values.map((x, i) => (i === drag.current ? v : x)));
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onPointerLeave={() => (drag.current = null)}
+        role="img"
+        aria-label="Produção de ROM por período"
+      >
+        {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+          <g key={f}>
+            <line x1={L} x2={W - 4} y1={y(max * f)} y2={y(max * f)} stroke="#e5e7eb" />
+            <text x={L - 6} y={y(max * f) + 3} textAnchor="end" fontSize={10} fill="#6b7280">
+              {(max * f >= 1e6 ? `${((max * f) / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} Mt` : `${Math.round((max * f) / 1000)} mil`)}
+            </text>
+          </g>
+        ))}
+        {values.map((v, i) => {
+          const x = L + i * bw + bw * 0.15;
+          const w = bw * 0.7;
+          return (
+            <g key={i}>
+              <rect x={x} y={y(v)} width={w} height={Math.max(0, H - B - y(v))} rx={3} fill="#059669" opacity={0.85} />
+              {rm > 0 && <rect x={x + w * 0.25} y={y(v * rm)} width={w * 0.5} height={Math.max(0, H - B - y(v * rm))} rx={2} fill="#2563eb" opacity={0.9} />}
+              <rect
+                x={x - 2}
+                y={y(v) - 7}
+                width={w + 4}
+                height={14}
+                fill="transparent"
+                style={{ cursor: 'ns-resize' }}
+                onPointerDown={(e) => {
+                  (e.target as Element).setPointerCapture?.(e.pointerId);
+                  drag.current = i;
+                }}
+              />
+              <rect x={x} y={y(v) - 2} width={w} height={4} rx={2} fill="#065f46" pointerEvents="none" />
+              {n <= 16 && (
+                <text x={x + w / 2} y={y(v) - 9} textAnchor="middle" fontSize={9} fill="#374151">
+                  {v >= 1e6 ? `${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} Mt` : `${Math.round(v / 1000)} mil`}
+                </text>
+              )}
+              {(n <= 20 || i % Math.ceil(n / 20) === 0) && (
+                <text x={x + w / 2} y={H - B + 14} textAnchor="middle" fontSize={9} fill="#6b7280">{labels[i]}</text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="mt-1 flex flex-wrap gap-4 text-[11px] text-black/55">
+        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-3 rounded-sm bg-emerald-600" /> ROM (t seca)</span>
+        {rm > 0 && <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-3 rounded-sm bg-blue-600" /> Produto = ROM × RM</span>}
+        <span>Total: {t0(total)} t de ROM</span>
+      </p>
     </div>
   );
 };

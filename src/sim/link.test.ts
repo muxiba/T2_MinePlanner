@@ -78,10 +78,14 @@ describe('ligação com as premissas', () => {
     expect(t('f', 'u')).toBe(1_000_000);
     expect(t('u', 't')).toBe(Math.round(1_000_000 * 0.4511));
     expect(t('u', 'd')).toBe(Math.round(1_000_000 * 0.5489));
-    // ROM editado: produto e rejeito acompanham
-    const edited = { ...r.plan, movements: r.plan.movements.map((m) => (m.origin === 'f' ? { ...m, tonnes: [2_000_000] } : m)) };
+    // meta de ROM do período alterada: ROM, produto e rejeito acompanham
+    const edited = { ...r.plan, periods: [{ ...r.plan.periods[0], romT: 2_000_000 }] };
     const s2 = syncDerived(edited, P);
+    expect(s2.movements.find((m) => m.origin === 'f')!.tonnes[0]).toBe(2_000_000);
     expect(s2.movements.find((m) => m.destination === 't')!.tonnes[0]).toBe(Math.round(2_000_000 * 0.4511));
+    // ROM digitado à mão (desvinculado): produto acompanha o ROM digitado
+    const manual = { ...s2, movements: s2.movements.map((m) => (m.origin === 'f' ? { ...m, derived: undefined, tonnes: [1_500_000] } : m)) };
+    expect(syncDerived(manual, P).movements.find((m) => m.destination === 't')!.tonnes[0]).toBe(Math.round(1_500_000 * 0.4511));
     expect(s2.wetFactor).toBeCloseTo(1.1, 6);
   });
 });

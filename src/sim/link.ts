@@ -457,7 +457,7 @@ export function generateMovements(plan: MinePlan, premises: DetailedPremises, ne
     const totalA = areas.reduce((a, b) => a + b, 0);
     fronts.forEach((fr, k) => {
       const share = totalA > 0 ? areas[k] / totalA : 1 / fronts.length;
-      put(fr.id, plant.id, 'Minério (ROM)', i + 1, f.rom * share);
+      put(fr.id, plant.id, 'Minério (ROM)', i + 1, f.rom * share, { kind: 'rom', source: fr.id });
       if (pile && f.esteril > 0) put(fr.id, pile.id, 'Estéril', i + 1, f.esteril * share, { kind: 'esteril', source: fr.id });
     });
     if (terminal) put(plant.id, terminal.id, 'Produto', i + 1, f.produto, { kind: 'produto', source: plant.id });
@@ -476,16 +476,42 @@ export function syncDerived(plan: MinePlan, premises: DetailedPremises): MinePla
   if (!plan.movements.some((m) => m.derived)) return plan;
   const s = flowShares(premises);
   const n = plan.periods.length;
-  const isRomInto = (m: Movement, place: string) => !m.derived && m.destination === place && plan.places.find((p) => p.id === m.origin)?.kind === 'frente';
-  const isRomFrom = (m: Movement, place: string) => !m.derived && m.origin === place && plan.places.find((p) => p.id === m.destination)?.kind === 'usina';
   let changed = false;
+  // 1) ROM das frentes vinculadas = meta de ROM do período × participação da frente (área no período)
+  const romLinked = plan.movements.filter((m) => m.derived?.kind === 'rom');
+  const romTonnes = new Map<string, number[]>();
+  if (romLinked.length) {
+    plan.periods.forEach((per, i) => {
+      const meta = per.romT ?? suggestedRomT(premises, per.kind ?? 'ano', per.days, per.qty);
+      const areas = romLinked.map((m) => {
+        const name = plan.places.find((p) => p.id === m.origin)?.name;
+        return plan.fronts.filter((a) => a.period === i + 1 && a.front === name).reduce((acc, a) => acc + a.areaM2, 0);
+      });
+      const tot = areas.reduce((a, b) => a + b, 0);
+      romLinked.forEach((m, k) => {
+        const arr = romTonnes.get(m.id) ?? [];
+        arr[i] = Math.round(meta * (tot > 0 ? areas[k] / tot : 1 / romLinked.length));
+        romTonnes.set(m.id, arr);
+      });
+    });
+  }
+  const romOf = (m: Movement, i: number) => (m.derived?.kind === 'rom' ? romTonnes.get(m.id)?.[i] ?? 0 : m.tonnes[i] ?? 0);
+  const isRom = (m: Movement) => !m.derived || m.derived.kind === 'rom';
+  const isRomInto = (m: Movement, place: string) => isRom(m) && m.destination === place && plan.places.find((p) => p.id === m.origin)?.kind === 'frente';
+  const isRomFrom = (m: Movement, place: string) => isRom(m) && m.origin === place && plan.places.find((p) => p.id === m.destination)?.kind === 'usina';
   const movements = plan.movements.map((m) => {
     if (!m.derived) return m;
+    if (m.derived.kind === 'rom') {
+      const tonnes = Array.from({ length: n }, (_, i) => romOf(m, i));
+      if (tonnes.every((t, i) => t === (m.tonnes[i] ?? 0)) && m.tonnes.length === n) return m;
+      changed = true;
+      return { ...m, tonnes };
+    }
     const tonnes = Array.from({ length: n }, (_, i) => {
       const rom =
         m.derived!.kind === 'esteril'
-          ? plan.movements.filter((x) => isRomFrom(x, m.derived!.source)).reduce((a, x) => a + (x.tonnes[i] ?? 0), 0)
-          : plan.movements.filter((x) => isRomInto(x, m.derived!.source)).reduce((a, x) => a + (x.tonnes[i] ?? 0), 0);
+          ? plan.movements.filter((x) => isRomFrom(x, m.derived!.source)).reduce((a, x) => a + romOf(x, i), 0)
+          : plan.movements.filter((x) => isRomInto(x, m.derived!.source)).reduce((a, x) => a + romOf(x, i), 0);
       const f = m.derived!.kind === 'produto' ? s.rm : m.derived!.kind === 'rejeito' ? s.rej : s.rem;
       return Math.round(rom * f);
     });
