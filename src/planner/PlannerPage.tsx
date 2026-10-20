@@ -26,7 +26,7 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
-import { analyzeFleet, fitExtraAllocations, fmtTrucks, syncAutoFleet } from '@/engine/fleet';
+import { analyzeFleet, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, syncAutoFleet } from '@/engine/fleet';
 import SummaryView from '@/components/summary/SummaryView';
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
@@ -122,6 +122,14 @@ const PlannerPage: React.FC = () => {
   // as alocações por horas são reajustadas para caberem nos caminhões sem rota.
   useEffect(() => {
     if (plan.status !== 'ready' || !canEdit) return;
+    // cada fluxo das premissas (ROM, produto, rejeito, estéril) ganha sua rota; apagada, não volta
+    const withFlows = ensureFlowRoutes(routes, premises);
+    if (withFlows) return setRoutes(withFlows);
+    // fluxo que deixou de existir (ex.: desmarcou “possui estéril”) volta a ser criado se reaparecer
+    const req = requiredFlows(premises);
+    if (premises.dismissedFlows?.some((k) => !req.includes(k))) {
+      return setPremises((prev) => ({ ...prev, dismissedFlows: (prev.dismissedFlows ?? []).filter((k) => req.includes(k)) }));
+    }
     // rotas em modo automático (inteiro acima / exato) acompanham as premissas
     const synced = syncAutoFleet(routes, premises);
     if (synced) return setRoutes(synced);

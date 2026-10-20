@@ -140,9 +140,9 @@ export const FLOW_LABELS: Record<Flow, string> = {
 
 export function guessFlow(name: string): Flow {
   const n = name.toLowerCase();
-  if (/terminal|produto|concentrado|product/.test(n)) return 'produto';
-  if (/baia|rejeito|pru|tailing/.test(n)) return 'rejeito';
-  if (/est[ée]ril|pde|waste/.test(n)) return 'esteril';
+  if (/terminal|produto|concentrado|product|expedi/.test(n)) return 'produto';
+  if (/baia|rejeit|rejeir|pru|tailing|filtrad|barragem/.test(n)) return 'rejeito';
+  if (/est[ée]ril|pde|waste|bota.?fora/.test(n)) return 'esteril';
   return 'rom';
 }
 

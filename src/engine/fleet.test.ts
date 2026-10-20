@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, syncAutoFleet, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
+import { checkFlows, ensureFlowRoutes, routeKind, adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, syncAutoFleet, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
 import type { Route } from '../types';
 
@@ -190,5 +190,37 @@ describe('perdas operacionais detalhadas', () => {
     const a = analyzeRoute(mine, p, 100000);
     const b = analyzeRoute(mine, { ...p, losses: { ...p.losses, enabled: false } }, 100000);
     expect(a.cycle.totalMin - b.cycle.totalMin).toBeCloseTo(1.5, 6);
+  });
+});
+
+describe('fluxos de massa', () => {
+  const base = { ...P, targetMonthlyROM: 184407, rmGlobal: 45.11, rejeitoTotal: 54.89, processType: 'umido' as const, hasWasteRock: false, targetMonthlyWasteRock: 0 };
+  const mk = (id: string, name: string, extra: Partial<Route> = {}): Route => ({ ...mine, id, name, kind: undefined, targetMass: undefined, ...extra });
+
+  it('rota de rejeito com nome “Pilha de Rejeiro” é rejeito e o ROM não é dividido', () => {
+    const rs = [mk('a', 'Mina -> Planta'), mk('b', 'Planta -> Pilha de Rejeiro'), mk('c', 'Planta -> Terminal')];
+    expect(routeKind(rs[1])).toBe('tailings');
+    const t = routeTargets(rs, base);
+    expect(Math.round(t.get('a')!)).toBe(184407);
+    expect(t.get('b')!).toBeCloseTo(101221.0, 0);
+    expect(t.get('c')!).toBeCloseTo(83186.0, 0);
+    expect(checkFlows(rs, base).every((c) => c.status === 'ok')).toBe(true);
+  });
+
+  it('fluxo escolhido vale mais que o nome; dois basculamentos de rejeito dividem pelo peso', () => {
+    const rs = [mk('a', 'Mina -> Planta'), mk('b', 'Ponto X', { kind: 'tailings', share: 3 }), mk('d', 'Ponto Y', { kind: 'tailings' }), mk('c', 'Planta -> Terminal')];
+    const t = routeTargets(rs, base);
+    expect(t.get('b')! + t.get('d')!).toBeCloseTo(101221.0, 0);
+    expect(t.get('b')! / t.get('d')!).toBeCloseTo(3, 6);
+  });
+
+  it('estéril marcado cria a rota; apagada, não volta', () => {
+    const P2 = { ...base, hasWasteRock: true, targetMonthlyWasteRock: 50000 };
+    const rs = [mk('a', 'Mina -> Planta'), mk('b', 'Planta -> Baia'), mk('c', 'Planta -> Terminal')];
+    const out = ensureFlowRoutes(rs, P2)!;
+    expect(out.length).toBe(4);
+    expect(routeKind(out[3])).toBe('waste');
+    expect(ensureFlowRoutes(rs, { ...P2, dismissedFlows: ['waste'] })).toBe(null);
+    expect(checkFlows(rs, P2).find((c) => c.kind === 'waste')!.status).toBe('sem_rota');
   });
 });

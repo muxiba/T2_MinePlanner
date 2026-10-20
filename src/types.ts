@@ -37,6 +37,8 @@ export interface Route {
   fleetMode?: 'manual' | 'inteiro' | 'exato';
   /** UF própria da rota (%), quando ownRates = true. */
   utilization?: number;
+  /** Peso na divisão da massa do fluxo entre rotas do mesmo fluxo (padrão 1). */
+  share?: number;
 }
 
 export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';
@@ -139,6 +141,8 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** Fluxos cuja rota automática o usuário apagou (não são recriados enquanto o fluxo existir). */
+  dismissedFlows?: RouteKind[];
 
   // Estéril
   hasWasteRock: boolean;

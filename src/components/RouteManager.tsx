@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
-import type { DetailedPremises, Route } from '../types';
-import { analyzeFleet, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
+import type { DetailedPremises, Route, RouteKind } from '../types';
+import { FLOW_ORDER, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
 import ExtraFleetManager from './ExtraFleetManager';
 
 /**
@@ -61,7 +61,26 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
     setAdjustMsg(null);
     setRoutes(routes.map((r) => (r.id === id ? { ...r, ...updates } : r)));
   };
-  const handleDeleteRoute = (id: string) => setRoutes(routes.filter((r) => r.id !== id));
+  const handleDeleteRoute = (id: string) => {
+    const r = routes.find((x) => x.id === id);
+    const next = routes.filter((x) => x.id !== id);
+    setRoutes(next);
+    // apagou a última rota de um fluxo das premissas: não recriar automaticamente
+    if (r) {
+      const k = routeKind(r);
+      if (requiredFlows(premises).includes(k) && !next.some((x) => routeKind(x) === k)) {
+        setPremises((prev) => ({ ...prev, dismissedFlows: [...new Set([...(prev.dismissedFlows ?? []), k])] }));
+      }
+    }
+  };
+  const addFlowRoute = (kind: RouteKind) => {
+    const nr = newFlowRoute(kind, premises);
+    setRoutes([...routes, nr]);
+    setPremises((prev) => ({ ...prev, dismissedFlows: (prev.dismissedFlows ?? []).filter((k) => k !== kind) }));
+    setEditingId(nr.id);
+  };
+  const flows = useMemo(() => checkFlows(routes, premises), [routes, premises]);
+  const sameKindCount = (k: RouteKind) => routes.filter((r) => r.active && routeKind(r) === k).length;
 
   const handleAddRoute = () => {
     const name = prompt('Nome da nova frente/rota:', `Frente ${routes.length + 1}`);
@@ -84,12 +103,12 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
 
   const handleMassChange = (route: Route, value: number) => {
     const kind = routeKind(route);
-    if (kind === 'rom' || kind === 'waste') {
-      const limit = kind === 'rom' ? premises.targetMonthlyROM : premises.targetMonthlyWasteRock;
+    {
+      const limit = flows.find((c) => c.kind === kind)?.targetDryT ?? flowTargets(premises)[kind];
       const others = routes.filter((r) => r.id !== route.id && r.active && routeKind(r) === kind).reduce((a, r) => a + (r.targetMass || 0), 0);
       if (others + value > limit) {
         const v = Math.max(0, limit - others);
-        alert(`A soma das frentes não pode passar de ${limit.toLocaleString('pt-BR')} t. Valor ajustado para o saldo: ${v.toLocaleString('pt-BR')} t.`);
+        alert(`A soma das rotas de ${KIND_LABELS[kind]} não pode passar da massa do fluxo, ${Math.round(limit).toLocaleString('pt-BR')} t. Valor ajustado para o saldo: ${Math.round(v).toLocaleString('pt-BR')} t.`);
         value = v;
       }
     }
@@ -213,6 +232,61 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
 
       <ExtraFleetManager routes={routes} premises={premises} setPremises={setPremises} analysis={analysis} />
 
+      {/* ------------------------------ fluxos ------------------------------ */}
+      <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        <div className="mb-3">
+          <h4 className="font-bold text-black/80">Fluxos de massa</h4>
+          <p className="text-xs text-black/50">
+            As massas vêm do fluxo principal das premissas: ROM; produto = ROM × RM global; rejeito filtrado = ROM × rejeito total (só no processo úmido); estéril = meta de estéril.
+            Várias rotas do mesmo fluxo (ex.: dois pontos de basculamento com distâncias diferentes) dividem a massa do fluxo pelo peso de cada uma ou pela massa digitada, e a soma fecha no fluxo.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-black/10 text-left text-xs text-black/45">
+                <th className="py-1.5 pr-2 font-medium">Fluxo</th>
+                <th className="py-1.5 pr-2 text-right font-medium">Massa do fluxo (t seca)</th>
+                <th className="py-1.5 pr-2 text-right font-medium">Nas rotas (t seca)</th>
+                <th className="py-1.5 pr-2 text-right font-medium">Rotas</th>
+                <th className="py-1.5 font-medium">Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flows.map((c) => (
+                <tr key={c.kind} className="border-b border-black/5">
+                  <td className="py-1.5 pr-2 font-medium">{KIND_LABELS[c.kind]}</td>
+                  <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(c.targetDryT)}</td>
+                  <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(c.assignedDryT)}</td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums">{c.routes}</td>
+                  <td className="py-1.5 text-xs">
+                    {c.status === 'ok' && <span className="text-emerald-700">fecha com o fluxo</span>}
+                    {c.status === 'sem_rota' && (
+                      <span className="text-red-700">
+                        sem rota: {t0(c.targetDryT)} t sem transporte.{' '}
+                        <button type="button" className="font-semibold text-emerald-700 hover:underline" onClick={() => addFlowRoute(c.kind)}>Criar rota</button>
+                      </span>
+                    )}
+                    {c.status === 'abaixo' && <span className="text-amber-700">faltam {t0(c.targetDryT - c.assignedDryT)} t: as massas digitadas somam menos que o fluxo; deixe uma rota sem massa para receber o saldo</span>}
+                    {c.status === 'acima' && <span className="text-red-700">passa {t0(c.assignedDryT - c.targetDryT)} t do fluxo: reduza as massas digitadas</span>}
+                    {c.status === 'sem_meta' && <span className="text-black/50">o fluxo não existe nas premissas (massa 0)</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-black/55">
+          Adicionar rota de:
+          {FLOW_ORDER.filter((k) => flowTargets(premises)[k] > 0).map((k) => (
+            <button key={k} type="button" onClick={() => addFlowRoute(k)} className="rounded-lg border border-black/10 bg-white px-2.5 py-1 font-semibold text-black/70 hover:bg-black/[0.03]">
+              + {KIND_LABELS[k]}
+            </button>
+          ))}
+          <span className="text-black/40">Cada fluxo das premissas ganha uma rota automaticamente; se você apagar, ela não volta (crie de novo aqui).</span>
+        </div>
+      </section>
+
       {/* ------------------------------ rotas ------------------------------ */}
       {visibleRoutes.map((route) => {
         const a = analysis.routes.find((x) => x.id === route.id);
@@ -241,6 +315,33 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                           placeholder="vazio = calculada pelas premissas"
                         />
                       </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1 text-[10px] font-black tracking-widest text-black/45 uppercase">
+                          Fluxo
+                          <select
+                            value={kind}
+                            onChange={(e) => handleUpdateRoute(route.id, { kind: e.target.value as RouteKind, targetMass: undefined })}
+                            className="rounded-lg border border-black/10 bg-white px-2 py-2 text-sm font-semibold normal-case tracking-normal text-black/80"
+                          >
+                            {FLOW_ORDER.map((k) => (
+                              <option key={k} value={k}>{KIND_LABELS[k]}{!route.kind && guessRouteKind(route.name) === k ? ' (pelo nome)' : ''}</option>
+                            ))}
+                          </select>
+                        </label>
+                        {sameKindCount(kind) > 1 && !route.targetMass && (
+                          <label className="flex flex-col gap-1 text-[10px] font-black tracking-widest text-black/45 uppercase" title="Divide o saldo do fluxo entre as rotas sem massa digitada: 1 e 1 = metade para cada; 3 e 1 = 75% e 25%.">
+                            Peso na divisão
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              value={route.share ?? 1}
+                              onChange={(e) => handleUpdateRoute(route.id, { share: Math.max(0, Number(e.target.value) || 0) })}
+                              className="rounded-lg border border-black/10 bg-white px-2 py-2 font-mono text-sm normal-case"
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div>

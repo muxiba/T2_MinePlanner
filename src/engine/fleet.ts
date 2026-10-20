@@ -60,9 +60,9 @@ export function catalogOf(premises: DetailedPremises): EquipmentCatalog {
 
 export const KIND_LABELS: Record<RouteKind, string> = {
   rom: 'ROM (mina → planta)',
-  product: 'Produto (expedição)',
-  tailings: 'Rejeito',
-  waste: 'Estéril',
+  product: 'Produto (planta → expedição)',
+  tailings: 'Rejeito (planta → pilha/baia)',
+  waste: 'Estéril (mina → pilha)',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -217,11 +217,108 @@ const pct = (v: number | undefined, fallback: number) => (Number.isFinite(v) && 
 
 export function routeKind(route: Route): RouteKind {
   if (route.kind) return route.kind;
-  const n = route.name.toLowerCase();
-  if (n.includes('terminal') || n.includes('produto') || n.includes('product')) return 'product';
-  if (n.includes('baia') || n.includes('rejeito') || n.includes('tailing')) return 'tailings';
-  if (n.includes('estéril') || n.includes('esteril') || n.includes('waste')) return 'waste';
+  return guessRouteKind(route.name);
+}
+
+/** Fluxo deduzido do nome (só quando a rota não tem fluxo escolhido). */
+export function guessRouteKind(name: string): RouteKind {
+  const n = name.toLowerCase();
+  if (/terminal|produto|product|expedi|concentrado|pellet|sinter/.test(n)) return 'product';
+  if (/baia|rejeit|rejeir|tailing|filtrad|\bpdr\b|\bpru\b|barragem/.test(n)) return 'tailings';
+  if (/estéril|esteril|waste|\bpde\b|bota.?fora/.test(n)) return 'waste';
   return 'rom';
+}
+
+export const FLOW_ORDER: RouteKind[] = ['rom', 'product', 'tailings', 'waste'];
+
+/** Massas secas de cada fluxo pelas premissas (t/mês). */
+export function flowTargets(premises: DetailedPremises): Record<RouteKind, number> {
+  const seco = premises.processType === 'seco';
+  const rom = premises.targetMonthlyROM || 0;
+  return {
+    rom,
+    product: (rom * (seco ? 100 : premises.rmGlobal || 0)) / 100,
+    tailings: seco ? 0 : (rom * (premises.rejeitoTotal || 0)) / 100,
+    waste: premises.hasWasteRock ? premises.targetMonthlyWasteRock || 0 : 0,
+  };
+}
+
+/** Fluxos que existem nas premissas (e por isso precisam de ao menos uma rota). */
+export function requiredFlows(premises: DetailedPremises): RouteKind[] {
+  const t = flowTargets(premises);
+  return FLOW_ORDER.filter((k) => t[k] > 0);
+}
+
+export const FLOW_DEFAULT_NAMES: Record<RouteKind, string> = {
+  rom: 'Mina → Planta',
+  product: 'Planta → Terminal (produto)',
+  tailings: 'Planta → Pilha de rejeito filtrado',
+  waste: 'Mina → Pilha de estéril',
+};
+
+export function newFlowRoute(kind: RouteKind, premises: DetailedPremises): Route {
+  return {
+    id: `auto-${kind}-${Math.random().toString(36).slice(2, 8)}`,
+    name: FLOW_DEFAULT_NAMES[kind],
+    kind,
+    active: true,
+    truckCount: 0,
+    truckCapacity: premises.truckCapacity,
+    distance: 1000,
+    cycleTime: 20,
+    mechanicalAvailability: premises.dfMina,
+    operationalEfficiency: 100,
+    processType: premises.processType,
+  };
+}
+
+/**
+ * Cria a rota de cada fluxo das premissas que ainda não tem rota (ex.: marcou “possui estéril”).
+ * Fluxos cuja rota o usuário apagou ficam de fora. Retorna null se nada mudou.
+ */
+export function ensureFlowRoutes(routes: Route[], premises: DetailedPremises): Route[] | null {
+  const dismissed = new Set(premises.dismissedFlows ?? []);
+  const missing = requiredFlows(premises).filter((k) => !dismissed.has(k) && !routes.some((r) => routeKind(r) === k));
+  if (!missing.length) return null;
+  return [...routes, ...missing.map((k) => newFlowRoute(k, premises))];
+}
+
+export interface FlowCheck {
+  kind: RouteKind;
+  /** meta seca do fluxo pelas premissas */
+  targetDryT: number;
+  /** soma das metas das rotas ativas do fluxo */
+  assignedDryT: number;
+  routes: number;
+  status: 'ok' | 'sem_rota' | 'acima' | 'abaixo' | 'sem_meta';
+}
+
+/** Confere se as rotas de cada fluxo somam a massa do fluxo principal. */
+export function checkFlows(routes: Route[], premises: DetailedPremises): FlowCheck[] {
+  const targets = routeTargets(routes, premises);
+  const t = flowTargets(premises);
+  const active = routes.filter((r) => r.active);
+  // produto e rejeito seguem o ROM que de fato vai para a planta
+  const romAssigned = active.filter((r) => routeKind(r) === 'rom').reduce((a, r) => a + (targets.get(r.id) || 0), 0);
+  const romBase = romAssigned || t.rom;
+  const seco = premises.processType === 'seco';
+  const expected: Record<RouteKind, number> = {
+    rom: t.rom,
+    product: (romBase * (seco ? 100 : premises.rmGlobal || 0)) / 100,
+    tailings: seco ? 0 : (romBase * (premises.rejeitoTotal || 0)) / 100,
+    waste: t.waste,
+  };
+  return FLOW_ORDER.map((kind) => {
+    const rs = active.filter((r) => routeKind(r) === kind);
+    const assigned = rs.reduce((a, r) => a + (targets.get(r.id) || 0), 0);
+    const target = expected[kind];
+    let status: FlowCheck['status'] = 'ok';
+    if (target <= 0) status = rs.length ? 'sem_meta' : 'ok';
+    else if (!rs.length) status = 'sem_rota';
+    else if (assigned > target * 1.001 + 1) status = 'acima';
+    else if (assigned < target * 0.999 - 1) status = 'abaixo';
+    return { kind, targetDryT: target, assignedDryT: assigned, routes: rs.length, status };
+  }).filter((c) => c.targetDryT > 0 || c.routes > 0);
 }
 
 /** Massa úmida transportada a partir da massa seca. */
@@ -329,11 +426,14 @@ export function routeTargets(routes: Route[], premises: DetailedPremises): Map<s
   const byKind = (k: RouteKind) => active.filter((r) => routeKind(r) === k);
   const out = new Map<string, number>();
 
+  // massas digitadas primeiro; o saldo do fluxo vai para as demais rotas pelo peso (padrão 1 = partes iguais)
   const distribute = (group: Route[], total: number) => {
     const fixed = group.reduce((a, r) => a + (r.targetMass || 0), 0);
     const auto = group.filter((r) => !r.targetMass);
     const rest = Math.max(0, total - fixed);
-    for (const r of group) out.set(r.id, r.targetMass || (auto.length ? rest / auto.length : 0));
+    const w = (r: Route) => (r.share === undefined ? 1 : Math.max(0, r.share));
+    const wSum = auto.reduce((a, r) => a + w(r), 0);
+    for (const r of group) out.set(r.id, r.targetMass || (wSum > 0 ? (rest * w(r)) / wSum : 0));
   };
 
   const romGroup = byKind('rom');

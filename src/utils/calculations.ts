@@ -154,18 +154,12 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const effectiveHoursPerMonthPlanta = horasCalendarioPlanta * eoPlantaFactor;
 
   // Categorize routes for target distribution and correct hours
-  const categorize = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('terminal') || n.includes('produto') || n.includes('product')) return 'product';
-    if (n.includes('baia') || n.includes('rejeito') || n.includes('tailing')) return 'tailings';
-    if (n.includes('estéril') || n.includes('esteril') || n.includes('waste')) return 'waste';
-    return 'rom';
-  };
+  const categorize = (r: Route) => routeKind(r);
 
-  const romRoutes = activeRoutes.filter(r => categorize(r.name) === 'rom');
-  const productRoutes = activeRoutes.filter(r => categorize(r.name) === 'product');
-  const tailingsRoutes = activeRoutes.filter(r => categorize(r.name) === 'tailings');
-  const wasteRoutes = activeRoutes.filter(r => categorize(r.name) === 'waste' && premises.hasWasteRock);
+  const romRoutes = activeRoutes.filter(r => categorize(r) === 'rom');
+  const productRoutes = activeRoutes.filter(r => categorize(r) === 'product');
+  const tailingsRoutes = activeRoutes.filter(r => categorize(r) === 'tailings');
+  const wasteRoutes = activeRoutes.filter(r => categorize(r) === 'waste' && premises.hasWasteRock);
 
   const distributeTarget = (group: Route[], totalCategoryTarget: number, hours: number) => {
     // 1. Sum up manually specified targets
@@ -174,12 +168,14 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     // Note: for ROM, we respect the user's manual inputs as the primary target
     const remainingTarget = Math.max(0, totalCategoryTarget - manualTargetSum);
     const autoRoutes = group.filter(r => !r.targetMass);
+    const w = (r: Route) => (r.share === undefined ? 1 : Math.max(0, r.share));
+    const wSum = autoRoutes.reduce((a, r) => a + w(r), 0);
     
     return group.map(r => {
       let target = r.targetMass;
       if (!target) {
         // Distribute remaining target equally among auto routes
-        target = autoRoutes.length > 0 ? remainingTarget / autoRoutes.length : 0;
+        target = wSum > 0 ? (remainingTarget * w(r)) / wSum : 0;
       }
       return {
         ...r,
