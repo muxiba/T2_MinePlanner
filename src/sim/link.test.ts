@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PREMISES } from '../constants';
 import { emptyModel, defaultCircuit } from './defaults';
 import { emptyPlan, type MinePlan } from './plan';
-import { circuitTargets, generateMovements, hoursBreakdown, periodDays, rainyCalendar, syncPeriods, withPremises, PREMISES_CONFIG_ID } from './link';
+import { circuitTargets, generateMovements, hoursBreakdown, periodDays, rainyCalendar, suggestedRomT, syncDerived, syncPeriods, withPremises, PREMISES_CONFIG_ID } from './link';
 import type { SimModel } from './types';
 
 const P: any = { ...DEFAULT_PREMISES, truckCapacity: 40, truckVolumeM3: 22, dfMina: 85, ufMina: 85, contractedHoursMina: 24, velocidadeCheio: 15, velocidadeVazio: 20, loadingTime: 2, dumpingTime: 2, weighingTimeLoaded: 1, weighingTimeEmpty: 0, queueMin: 2, targetMonthlyROM: 184407, rmGlobal: 45.11, rejeitoTotal: 54.89, umidadeNatural: 9, perdaMaterial: 1, processType: 'umido' };
@@ -16,6 +16,10 @@ describe('ligação com as premissas', () => {
     expect(periodDays('ano', c).work).toBe(6 * 20 + 6 * 26);
     expect(periodDays('quinquenio', c).work).toBe(5 * 276);
     expect(periodDays('mes', c, undefined, 1).work).toBe(20);
+    expect(periodDays('mes', c, undefined, undefined, 3).work).toBeCloseTo(276 / 4, 6);
+    expect(periodDays('ano', c, undefined, undefined, 2).work).toBe(552);
+    expect(suggestedRomT(P, 'mes', undefined, 3)).toBe(184407 * 3);
+    expect(suggestedRomT(P, 'quinquenio', undefined, 1)).toBe(184407 * 60);
   });
 
   it('períodos acompanham o calendário', () => {
@@ -38,6 +42,12 @@ describe('ligação com as premissas', () => {
     expect(e.scenarios[0].efficiency).toBe(85);
     const calc = circuitTargets(e, P);
     expect(calc[0].flow).toBe('rom');
+    expect(calc[0].tonnesDry).toBe(184407); // um mês das premissas
+    expect(calc[0].tonnes).toBeCloseTo(184407 * 1.1, 3);
+    expect(calc[1].tonnesDry).toBeCloseTo(184407 * 0.4511, 3);
+    const ov = circuitTargets({ ...e, circuits: e.circuits.map((c, i) => (i === 0 ? { ...c, tonnesDryOverride: 100000 } : c)) }, P);
+    expect(ov[0].tonnesDry).toBe(100000);
+    expect(ov[0].overridden).toBe(true);
     expect(calc[1].flow).toBe('produto');
     // ciclo igual ao do Dimensionamento com velocidade constante: carga 2 + ida + basculamento 2 + volta + pesagem 1 + fila 2
     const ida = (2.085 / 15) * 60;
@@ -64,8 +74,14 @@ describe('ligação com as premissas', () => {
     const r = generateMovements(plan, P, () => `m${k++}`);
     expect(r.warnings).toEqual([]);
     const t = (o: string, d: string) => r.plan.movements.find((m) => m.origin === o && m.destination === d)!.tonnes[0];
-    expect(t('f', 'u')).toBe(1_100_000); // seca × (1 + 9% + 1%)
-    expect(t('u', 't')).toBe(Math.round(1_000_000 * 0.4511 * 1.1));
-    expect(t('u', 'd')).toBe(Math.round(1_000_000 * 0.5489 * 1.1));
+    expect(r.plan.tonnesBasis).toBe('seca');
+    expect(t('f', 'u')).toBe(1_000_000);
+    expect(t('u', 't')).toBe(Math.round(1_000_000 * 0.4511));
+    expect(t('u', 'd')).toBe(Math.round(1_000_000 * 0.5489));
+    // ROM editado: produto e rejeito acompanham
+    const edited = { ...r.plan, movements: r.plan.movements.map((m) => (m.origin === 'f' ? { ...m, tonnes: [2_000_000] } : m)) };
+    const s2 = syncDerived(edited, P);
+    expect(s2.movements.find((m) => m.destination === 't')!.tonnes[0]).toBe(Math.round(2_000_000 * 0.4511));
+    expect(s2.wetFactor).toBeCloseTo(1.1, 6);
   });
 });

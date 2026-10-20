@@ -62,7 +62,16 @@ export function speedFor(table: GradeSpeed[], effGrade: number, limit: number) {
 }
 
 /** Tempo de viagem (min) carregado e vazio para um perfil, e o perfil acumulado (para animação). */
-export function travelTimes(points: { x: number; y: number; z: number }[], speed: SpeedTable, limit: number, rr: number) {
+/** Limites de velocidade (km/h) carregado e vazio: os da configuração, se houver, senão os gerais do modelo. */
+export function limitsOf(model: Pick<SimModel, 'speedLimitKmh' | 'speedLimitLoadedKmh' | 'speedLimitEmptyKmh'>, cfg?: Pick<TruckConfig, 'speedLimitLoadedKmh' | 'speedLimitEmptyKmh'>) {
+  return {
+    loaded: cfg?.speedLimitLoadedKmh || model.speedLimitLoadedKmh || model.speedLimitKmh || 40,
+    empty: cfg?.speedLimitEmptyKmh || model.speedLimitEmptyKmh || model.speedLimitKmh || 40,
+  };
+}
+
+export function travelTimes(points: { x: number; y: number; z: number }[], speed: SpeedTable, limitIn: number | { loaded: number; empty: number }, rr: number) {
+  const limit = typeof limitIn === 'number' ? { loaded: limitIn, empty: limitIn } : limitIn;
   const segs = routeProfile(points, 20);
   let loaded = 0;
   let empty = 0;
@@ -70,8 +79,8 @@ export function travelTimes(points: { x: number; y: number; z: number }[], speed
   const cumEmpty: number[] = [0];
   const s: number[] = [0];
   for (const g of segs) {
-    const vl = speedFor(speed.loaded, g.grade + rr, limit) / 0.06; // km/h → m/min
-    const ve = speedFor(speed.empty, -g.grade + rr, limit) / 0.06;
+    const vl = speedFor(speed.loaded, g.grade + rr, limit.loaded) / 0.06; // km/h → m/min
+    const ve = speedFor(speed.empty, -g.grade + rr, limit.empty) / 0.06;
     loaded += g.len / vl;
     empty += g.len / ve;
     cumLoaded.push(loaded);
@@ -334,7 +343,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
 
   const ctx = circuits.map((c, ci) => {
     const route = routes.get(c.routeId)!;
-    const tt = travelTimes(route.points, cfg.speed, model.speedLimitKmh, model.rollingResistance);
+    const tt = travelTimes(route.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance);
     geometry.push({
       circuitId: c.id,
       points: route.points,

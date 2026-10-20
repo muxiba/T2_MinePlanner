@@ -6,7 +6,7 @@
  * do ponto de carga daquele período ao ponto de descarga, pelo caminho mais curto na malha,
  * com acessos internos (rampa limitada) nas pontas.
  */
-import { loadTime, payloadFor, replicate, travelTimes } from './des';
+import { limitsOf, loadTime, payloadFor, replicate, travelTimes } from './des';
 import { simplify } from './dxf';
 import type { AggregateStats, Circuit, Scenario, SimModel, SimRoute, TruckConfig, Vec3 } from './types';
 
@@ -87,8 +87,10 @@ export interface Movement {
   dumpStations: number;
   weighing: boolean;
   weighMin: number;
-  /** toneladas por período (índice = período − 1) */
+  /** toneladas por período (índice = período − 1), na base do plano (seca ou úmida) */
   tonnes: number[];
+  /** movimentação calculada a partir do ROM (não editável): produto e rejeito do ROM que entra na usina, estéril do ROM da frente */
+  derived?: { kind: 'produto' | 'rejeito' | 'esteril'; source: string };
 }
 
 export interface Period {
@@ -99,6 +101,8 @@ export interface Period {
   kind?: import('./link').PeriodKind;
   /** dias corridos, quando kind = 'dias' */
   days?: number;
+  /** quantidade de unidades (ex.: 3 meses, 2 anos); padrão 1 */
+  qty?: number;
   /** mês do calendário (1–12), quando kind = 'mes'; vazio = mês médio */
   month?: number;
   /** dias corridos do período (derivado) */
@@ -130,6 +134,10 @@ export interface MinePlan {
   accessTortuosity: number;
   /** densidade do rejeito disposto (t/m³), para conferir a capacidade dos sólidos */
   disposalDensity: number;
+  /** base das toneladas das movimentações: 'seca' (convertida para úmida no transporte) ou 'umida'; vazio = úmida */
+  tonnesBasis?: 'seca' | 'umida';
+  /** fator seca → úmida transportada (das premissas) */
+  wetFactor?: number;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -566,8 +574,9 @@ export function buildPeriodModel(base: SimModel, plan: MinePlan, period: number,
   const info: PeriodCircuitInfo[] = [];
   const per = plan.periods[period - 1];
   const days = Math.max(1, per?.workDays ?? 1);
+  const basisK = plan.tonnesBasis === 'seca' ? plan.wetFactor || 1 : 1;
   for (const m of plan.movements) {
-    const t = m.tonnes[period - 1] ?? 0;
+    const t = (m.tonnes[period - 1] ?? 0) * basisK;
     if (!(t > 0)) continue;
     const o = resolvePlace(plan, m.origin, period);
     const d = resolvePlace(plan, m.destination, period);
@@ -659,7 +668,7 @@ export interface PeriodResult {
 /** Estimativa inicial: caminhões = produção horária × ciclo ÷ (carga útil × eficiência × disponibilidade). */
 function initialTrucks(model: SimModel, c: Circuit, cfg: TruckConfig, sc: Scenario, targetTpd: number) {
   const r = model.routes.find((x) => x.id === c.routeId)!;
-  const tt = travelTimes(r.points, cfg.speed, model.speedLimitKmh, model.rollingResistance);
+  const tt = travelTimes(r.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance);
   const cycle = loadTime(cfg, c) + (tt.loaded + tt.empty) * (sc.travelFactor || 1) + cfg.dumpMin + cfg.maneuverMin + (c.weighing ? c.weighMin : 0);
   const tph = targetTpd / Math.max(1, sc.hoursPerDay);
   const perTruck = (payloadFor(cfg, c) * 60) / cycle * (sc.efficiency / 100) * (sc.truckDf / 100);

@@ -9,7 +9,7 @@
 import type { DetailedPremises } from '@/types';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
-import { loadTime, payloadFor, travelTimes } from './des';
+import { limitsOf, loadTime, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
 import type { Circuit, Scenario, SimModel, SpeedTable, TruckConfig } from './types';
 
@@ -19,12 +19,22 @@ import type { Circuit, Scenario, SimModel, SpeedTable, TruckConfig } from './typ
 
 export type PeriodKind = 'mes' | 'ano' | 'quinquenio' | 'dias';
 
-export const PERIOD_KINDS: { id: PeriodKind; label: string }[] = [
-  { id: 'mes', label: 'Mês' },
-  { id: 'ano', label: 'Ano' },
-  { id: 'quinquenio', label: 'Quinquênio (5 anos)' },
-  { id: 'dias', label: 'Número de dias' },
+export const PERIOD_KINDS: { id: PeriodKind; label: string; plural: string }[] = [
+  { id: 'dias', label: 'Dias', plural: 'dias' },
+  { id: 'mes', label: 'Meses', plural: 'meses' },
+  { id: 'ano', label: 'Anos', plural: 'anos' },
+  { id: 'quinquenio', label: 'Quinquênios (5 anos)', plural: 'quinquênios' },
 ];
+
+/** Texto da duração: "3 meses", "1 ano", "45 dias". */
+export function periodText(kind: PeriodKind | undefined, qty = 1, days?: number) {
+  const k = kind ?? 'ano';
+  if (k === 'dias') return `${days ?? qty} dias`;
+  const n = Math.max(1, qty);
+  const one = { mes: 'mês', ano: 'ano', quinquenio: 'quinquênio' }[k];
+  const many = { mes: 'meses', ano: 'anos', quinquenio: 'quinquênios' }[k];
+  return `${n.toLocaleString('pt-BR')} ${n === 1 ? one : many}`;
+}
 
 export const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 /** meses de chuva: janeiro, fevereiro, março, outubro, novembro e dezembro */
@@ -49,36 +59,41 @@ export function flatCalendar(workDays = DRY_WORKDAYS): MonthCal[] {
 
 const sum = (c: MonthCal[], k: 'days' | 'workDays') => c.reduce((a, m) => a + (m[k] || 0), 0);
 
-/** Dias trabalhados e dias corridos de um período. */
-export function periodDays(kind: PeriodKind | undefined, calendar: MonthCal[] | undefined, days?: number, month?: number) {
+/**
+ * Dias trabalhados e dias corridos de um período de `qty` unidades (dias, meses, anos ou quinquênios).
+ * Mês com `month` informado usa aquele mês do calendário; sem mês, o mês médio do calendário.
+ */
+export function periodDays(kind: PeriodKind | undefined, calendar: MonthCal[] | undefined, days?: number, month?: number, qty = 1) {
   const cal = calendar?.length ? calendar : defaultCalendar();
   const yearWork = sum(cal, 'workDays');
   const yearCal = sum(cal, 'days') || 365;
+  const n = Math.max(0, qty || 1);
   switch (kind) {
     case 'mes': {
-      const m = month && cal[month - 1];
-      return m ? { work: m.workDays, calendar: m.days } : { work: yearWork / 12, calendar: yearCal / 12 };
+      const m = month && n === 1 ? cal[month - 1] : undefined;
+      return m ? { work: m.workDays, calendar: m.days } : { work: (yearWork / 12) * n, calendar: (yearCal / 12) * n };
     }
     case 'quinquenio':
-      return { work: yearWork * 5, calendar: yearCal * 5 };
+      return { work: yearWork * 5 * n, calendar: yearCal * 5 * n };
     case 'dias': {
-      const d = Math.max(1, days ?? 30);
+      const d = Math.max(1, days ?? qty ?? 30);
       return { work: d * (yearWork / yearCal), calendar: d };
     }
     case 'ano':
     default:
-      return { work: yearWork, calendar: yearCal };
+      return { work: yearWork * n, calendar: yearCal * n };
   }
 }
 
-/** Meses equivalentes do período (para sugerir a meta a partir do consumo mensal das premissas). */
-export function periodMonths(kind: PeriodKind | undefined, days?: number) {
-  return kind === 'mes' ? 1 : kind === 'quinquenio' ? 60 : kind === 'dias' ? Math.max(1, days ?? 30) / 30.4375 : 12;
+/** Meses equivalentes do período (para multiplicar o consumo mensal das premissas). */
+export function periodMonths(kind: PeriodKind | undefined, days?: number, qty = 1) {
+  const n = Math.max(0, qty || 1);
+  return kind === 'mes' ? n : kind === 'quinquenio' ? 60 * n : kind === 'dias' ? Math.max(1, days ?? qty ?? 30) / 30.4375 : 12 * n;
 }
 
-/** Meta de ROM do período sugerida pelas premissas (t seca). */
-export function suggestedRomT(premises: DetailedPremises, kind: PeriodKind | undefined, days?: number) {
-  return Math.round((premises.targetMonthlyROM || 0) * periodMonths(kind, days));
+/** Meta de ROM do período pelas premissas (t seca) = consumo mensal × meses do período. */
+export function suggestedRomT(premises: DetailedPremises, kind: PeriodKind | undefined, days?: number, qty = 1) {
+  return Math.round((premises.targetMonthlyROM || 0) * periodMonths(kind, days, qty));
 }
 
 /** Atualiza os dias trabalhados de cada período pelo tipo e pelo calendário. */
@@ -86,7 +101,7 @@ export function syncPeriods(plan: MinePlan): MinePlan {
   let changed = false;
   const periods = plan.periods.map((p) => {
     if (!p.kind) return p;
-    const d = periodDays(p.kind, plan.calendar, p.days, p.month);
+    const d = periodDays(p.kind, plan.calendar, p.days, p.month, p.qty);
     const work = Math.round(d.work * 10) / 10;
     if (Math.abs(work - p.workDays) < 1e-6 && Math.abs((p.calendarDays ?? 0) - d.calendar) < 1e-6) return p;
     changed = true;
@@ -130,13 +145,30 @@ export function guessFlow(name: string): Flow {
   return 'rom';
 }
 
-/** t úmidas transportadas de cada fluxo para uma meta de ROM seca. */
+/** Fator seca → úmida transportada das premissas (ex.: 1,10 = 9% de umidade + 1% de perda). */
+export const wetFactor = (p: DetailedPremises) => wetFromDry(1, p.umidadeNatural || 0, p.perdaMaterial || 0, p.moistureMode);
+
+/** Frações do ROM: produto (RM global), rejeito (rejeito total) e estéril (REM das premissas). Processo a seco: 100% produto, sem rejeito. */
+export function flowShares(p: DetailedPremises) {
+  const seco = p.processType === 'seco';
+  return {
+    rm: (seco ? 100 : p.rmGlobal || 0) / 100,
+    rej: (seco ? 0 : p.rejeitoTotal || 0) / 100,
+    rem: p.hasWasteRock && p.targetMonthlyROM > 0 ? (p.targetMonthlyWasteRock || 0) / p.targetMonthlyROM : 0,
+  };
+}
+
+/** t secas de cada fluxo para uma meta de ROM seca: produto = ROM × RM, rejeito = ROM × rejeito, estéril = ROM × REM. */
+export function flowDryTonnes(premises: DetailedPremises, romDryT: number): Record<Flow, number> {
+  const s = flowShares(premises);
+  return { rom: romDryT, produto: romDryT * s.rm, rejeito: romDryT * s.rej, esteril: romDryT * s.rem, outro: 0 };
+}
+
+/** t úmidas transportadas de cada fluxo para uma meta de ROM seca (seca × fator de umidade e perdas). */
 export function flowWetTonnes(premises: DetailedPremises, romDryT: number): Record<Flow, number> {
-  const wet = (dry: number) => wetFromDry(dry, premises.umidadeNatural || 0, premises.perdaMaterial || 0, premises.moistureMode);
-  const rm = (premises.processType === 'seco' ? 100 : premises.rmGlobal || 0) / 100;
-  const rej = (premises.processType === 'seco' ? 0 : premises.rejeitoTotal || 0) / 100;
-  const rem = premises.hasWasteRock && premises.targetMonthlyROM > 0 ? (premises.targetMonthlyWasteRock || 0) / premises.targetMonthlyROM : 0;
-  return { rom: wet(romDryT), produto: wet(romDryT * rm), rejeito: wet(romDryT * rej), esteril: wet(romDryT * rem), outro: 0 };
+  const k = wetFactor(premises);
+  const d = flowDryTonnes(premises, romDryT);
+  return { rom: d.rom * k, produto: d.produto * k, rejeito: d.rejeito * k, esteril: d.esteril * k, outro: 0 };
 }
 
 /* ------------------------------------------------------------------------- */
@@ -263,7 +295,7 @@ export function planWithPremises(plan: MinePlan, premises: DetailedPremises, den
       weighMin: weigh,
     };
   });
-  return syncPeriods({ ...plan, hoursPerDay: premises.contractedHoursMina || plan.hoursPerDay, movements });
+  return syncPeriods(syncDerived({ ...plan, hoursPerDay: premises.contractedHoursMina || plan.hoursPerDay, movements, wetFactor: wetFactor(premises) }, premises));
 }
 
 /* ------------------------------------------------------------------------- */
@@ -290,22 +322,30 @@ export interface CircuitCalc {
   loaderTph: number;
   trucksExact: number;
   trucks: number;
+  /** t secas no período */
+  tonnesDry: number;
+  /** meta digitada pelo analista (não a do fluxo) */
+  overridden: boolean;
+  /** participação no fluxo (0–1) */
+  sharePct: number;
 }
 
 /** Período da aba Circuito (padrão: um mês das premissas). */
 export function circuitPeriod(model: SimModel, premises: DetailedPremises) {
   const p = model.period ?? { kind: 'mes' as PeriodKind };
+  const qty = p.qty ?? 1;
   const cal = model.plan?.calendar;
-  const d = periodDays(p.kind, cal, p.days);
-  const romT = p.romT ?? suggestedRomT(premises, p.kind, p.days);
-  return { kind: p.kind, days: p.days, romT, workDays: d.work, calendarDays: d.calendar };
+  const d = periodDays(p.kind, cal, p.kind === 'dias' ? p.days ?? qty : undefined, undefined, qty);
+  const romT = p.romT ?? suggestedRomT(premises, p.kind, p.kind === 'dias' ? p.days ?? qty : undefined, qty);
+  return { kind: p.kind, qty, days: p.days, romT, suggested: p.romT === undefined, workDays: d.work, calendarDays: d.calendar };
 }
 
 /** Meta de cada circuito no período, ciclo analítico e caminhões necessários (igual ao Dimensionamento). */
 export function circuitTargets(model: SimModel, premises: DetailedPremises): CircuitCalc[] {
   if (!model.circuits.length) return [];
   const per = circuitPeriod(model, premises);
-  const flows = flowWetTonnes(premises, per.romT);
+  const flows = flowDryTonnes(premises, per.romT);
+  const k = wetFactor(premises);
   const sc = model.scenarios[0];
   const cfg = model.configs[0];
   if (!sc || !cfg) return [];
@@ -314,11 +354,21 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
   const shareSum: Partial<Record<Flow, number>> = {};
   for (const c of model.circuits) shareSum[flowOf(c)] = (shareSum[flowOf(c)] ?? 0) + (c.share ?? 1);
   const queue = linkOn(model) ? premises.queueMin || 0 : 0;
+  // produto, rejeito e estéril saem do ROM que de fato é transportado (inclusive metas digitadas nos circuitos de ROM)
+  const romCircuits = model.circuits.filter((c) => flowOf(c) === 'rom');
+  const romDry = romCircuits.length
+    ? romCircuits.reduce((a, c) => a + (c.tonnesDryOverride ?? flows.rom * ((c.share ?? 1) / (shareSum.rom || 1))), 0)
+    : per.romT;
+  const derived = flowDryTonnes(premises, romDry);
   return model.circuits.map((c) => {
     const flow = flowOf(c);
-    const tonnes = flow === 'outro' ? c.tonnesManual ?? 0 : (flows[flow] * (c.share ?? 1)) / (shareSum[flow] || 1);
+    const sharePct = flow === 'outro' ? 1 : (c.share ?? 1) / (shareSum[flow] || 1);
+    const fromFlow = flow === 'outro' ? c.tonnesManual ?? 0 : (flow === 'rom' ? flows.rom : derived[flow]) * sharePct;
+    const overridden = c.tonnesDryOverride !== undefined && flow !== 'outro';
+    const tonnesDry = overridden ? c.tonnesDryOverride! : fromFlow;
+    const tonnes = tonnesDry * k;
     const r = model.routes.find((x) => x.id === c.routeId);
-    const tt = r ? travelTimes(r.points, cfg.speed, model.speedLimitKmh, model.rollingResistance) : { loaded: 0, empty: 0 };
+    const tt = r ? travelTimes(r.points, cfg.speed, limitsOf(model, cfg), model.rollingResistance) : { loaded: 0, empty: 0 };
     const loadMin = loadTime(cfg, c);
     const dumpMin = cfg.dumpMin + cfg.maneuverMin;
     const weighMin = c.weighing ? c.weighMin : 0;
@@ -346,6 +396,9 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
       loaderTph: c.loaderTph,
       trucksExact,
       trucks: Math.ceil(trucksExact - 1e-6),
+      tonnesDry,
+      overridden,
+      sharePct,
     };
   });
 }
@@ -374,30 +427,63 @@ export function generateMovements(plan: MinePlan, premises: DetailedPremises, ne
   if (!disposal && premises.processType === 'umido') warnings.push('Sem destino com sólido (rejeito): o rejeito filtrado não foi gerado.');
   const n = plan.periods.length;
   const movements = plan.movements.map((m) => ({ ...m, tonnes: [...m.tonnes] }));
-  const put = (origin: string, destination: string, material: string, period: number, t: number) => {
+  const put = (origin: string, destination: string, material: string, period: number, t: number, derived?: Movement['derived']) => {
     let m = movements.find((x) => x.origin === origin && x.destination === destination);
     if (!m) {
       m = { ...newMovementLike(movements[0]), id: newId(), material, origin, destination, tonnes: Array.from({ length: n }, () => 0) };
       movements.push(m);
     }
+    m.derived = derived;
     while (m.tonnes.length < n) m.tonnes.push(0);
     m.tonnes[period - 1] = Math.round(t);
   };
   plan.periods.forEach((per: Period, i) => {
-    const romT = per.romT ?? suggestedRomT(premises, per.kind ?? 'ano', per.days);
-    const f = flowWetTonnes(premises, romT);
+    const romT = per.romT ?? suggestedRomT(premises, per.kind ?? 'ano', per.days, per.qty);
+    const f = flowDryTonnes(premises, romT);
     // divisão entre frentes: pela área de cada frente no período; sem área, em partes iguais
     const areas = fronts.map((fr) => plan.fronts.filter((a) => a.period === i + 1 && a.front === fr.name).reduce((s, a) => s + a.areaM2, 0));
     const totalA = areas.reduce((a, b) => a + b, 0);
     fronts.forEach((fr, k) => {
       const share = totalA > 0 ? areas[k] / totalA : 1 / fronts.length;
       put(fr.id, plant.id, 'Minério (ROM)', i + 1, f.rom * share);
-      if (pile && f.esteril > 0) put(fr.id, pile.id, 'Estéril', i + 1, f.esteril * share);
+      if (pile && f.esteril > 0) put(fr.id, pile.id, 'Estéril', i + 1, f.esteril * share, { kind: 'esteril', source: fr.id });
     });
-    if (terminal) put(plant.id, terminal.id, 'Produto', i + 1, f.produto);
-    if (disposal && f.rejeito > 0) put(plant.id, disposal.id, 'Rejeito filtrado', i + 1, f.rejeito);
+    if (terminal) put(plant.id, terminal.id, 'Produto', i + 1, f.produto, { kind: 'produto', source: plant.id });
+    if (disposal && f.rejeito > 0) put(plant.id, disposal.id, 'Rejeito filtrado', i + 1, f.rejeito, { kind: 'rejeito', source: plant.id });
   });
-  return { plan: { ...plan, movements }, warnings };
+  return { plan: syncDerived({ ...plan, movements, tonnesBasis: 'seca', wetFactor: wetFactor(premises) }, premises), warnings };
+}
+
+/**
+ * Recalcula as movimentações derivadas a partir do ROM (fonte única):
+ * produto = ROM que entra na usina × RM global; rejeito = ROM que entra na usina × rejeito total;
+ * estéril = ROM que sai da frente × REM. Assim o mesmo número não aparece com valores diferentes.
+ * O plano precisa estar em t secas para a conta valer.
+ */
+export function syncDerived(plan: MinePlan, premises: DetailedPremises): MinePlan {
+  if (!plan.movements.some((m) => m.derived)) return plan;
+  const s = flowShares(premises);
+  const n = plan.periods.length;
+  const isRomInto = (m: Movement, place: string) => !m.derived && m.destination === place && plan.places.find((p) => p.id === m.origin)?.kind === 'frente';
+  const isRomFrom = (m: Movement, place: string) => !m.derived && m.origin === place && plan.places.find((p) => p.id === m.destination)?.kind === 'usina';
+  let changed = false;
+  const movements = plan.movements.map((m) => {
+    if (!m.derived) return m;
+    const tonnes = Array.from({ length: n }, (_, i) => {
+      const rom =
+        m.derived!.kind === 'esteril'
+          ? plan.movements.filter((x) => isRomFrom(x, m.derived!.source)).reduce((a, x) => a + (x.tonnes[i] ?? 0), 0)
+          : plan.movements.filter((x) => isRomInto(x, m.derived!.source)).reduce((a, x) => a + (x.tonnes[i] ?? 0), 0);
+      const f = m.derived!.kind === 'produto' ? s.rm : m.derived!.kind === 'rejeito' ? s.rej : s.rem;
+      return Math.round(rom * f);
+    });
+    if (tonnes.every((t, i) => t === (m.tonnes[i] ?? 0)) && m.tonnes.length === n) return m;
+    changed = true;
+    return { ...m, tonnes };
+  });
+  const k = wetFactor(premises);
+  if (!changed && plan.wetFactor === k) return plan;
+  return { ...plan, movements, wetFactor: k };
 }
 
 function newMovementLike(m?: Movement): Movement {

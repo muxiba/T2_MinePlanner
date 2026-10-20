@@ -39,6 +39,11 @@ export interface TruckConfig {
   /** manobra para descarga (min) */
   maneuverMin: number;
   speed: SpeedTable;
+  /** limites de velocidade próprios (km/h), ex.: caminhão rodoviário em estrada; vazio = os gerais */
+  speedLimitLoadedKmh?: number;
+  speedLimitEmptyKmh?: number;
+  /** tipo de veículo: fora de estrada/mina ou rodoviário */
+  vehicle?: 'mina' | 'rodoviario';
   /** custo de propriedade/locação (R$/h calendário) */
   costFixedPerH: number;
   /** custo operacional (R$/h trabalhada): combustível, operador, pneus, manutenção */
@@ -75,8 +80,10 @@ export interface Circuit {
   flow?: import('./link').Flow;
   /** peso na divisão do fluxo entre circuitos do mesmo fluxo (padrão 1) */
   share?: number;
-  /** t no período quando o fluxo é 'outro' */
+  /** t secas no período quando o fluxo é 'outro' */
   tonnesManual?: number;
+  /** meta do circuito digitada (t secas no período); vazio = calculada pelo fluxo */
+  tonnesDryOverride?: number;
   /** false = caminhões digitados; padrão = calculados pela meta do período */
   autoTrucks?: boolean;
 }
@@ -124,8 +131,11 @@ export interface SimModel {
   circuits: Circuit[];
   receiving: Receiving[];
   scenarios: Scenario[];
-  /** limite de velocidade da via (km/h) */
+  /** limite de velocidade da via (km/h); mantido por compatibilidade */
   speedLimitKmh: number;
+  /** limite de velocidade carregado e vazio (km/h); vazio = speedLimitKmh */
+  speedLimitLoadedKmh?: number;
+  speedLimitEmptyKmh?: number;
   /** resistência ao rolamento (%), somada à rampa */
   rollingResistance: number;
   /** tempo médio de reparo de caminhão (h) */
@@ -138,7 +148,7 @@ export interface SimModel {
   /** ligação com as Premissas Fundamentais (padrão: ligada) */
   link?: { enabled: boolean; speedMode?: 'rampa' | 'constante' };
   /** período simulado na aba Circuito */
-  period?: { kind: import('./link').PeriodKind; days?: number; romT?: number };
+  period?: { kind: import('./link').PeriodKind; qty?: number; days?: number; romT?: number };
   /** plano de lavra por períodos (frentes, destinos e movimentações) */
   plan?: import('./plan').MinePlan;
   /** dados financeiros (custos, vida útil, receita) */

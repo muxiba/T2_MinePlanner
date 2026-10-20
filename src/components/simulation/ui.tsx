@@ -14,7 +14,7 @@ export const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency',
 export const inputCls =
   'w-full rounded-lg border border-black/12 bg-white px-2 py-1.5 text-sm tabular-nums focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25 focus:outline-none';
 
-export const Num: React.FC<{ label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; className?: string; locked?: string }> = ({
+export const Num: React.FC<{ label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; className?: string; locked?: string; help?: string }> = ({
   label,
   value,
   onChange,
@@ -22,6 +22,7 @@ export const Num: React.FC<{ label: string; value: number; onChange: (v: number)
   step = 1,
   className,
   locked,
+  help,
 }) => {
   const id = React.useId();
   return (
@@ -38,6 +39,7 @@ export const Num: React.FC<{ label: string; value: number; onChange: (v: number)
       ) : (
         <input id={id} type="number" step={step} className={inputCls} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
       )}
+      {help && <p className="mt-1 text-[11px] leading-snug text-black/45">{help}</p>}
     </div>
   );
 };

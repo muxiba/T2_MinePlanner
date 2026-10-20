@@ -717,7 +717,19 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                 <table className="w-full text-sm" style={{ minWidth: 520 + nPer * 84 }}>
                   <thead>
                     <tr className="text-left text-xs text-black/45">
-                      <th className="sticky left-0 z-10 bg-white py-1 pr-2 font-medium">Movimentação</th>
+                      <th className="sticky left-0 z-10 bg-white py-1 pr-2 font-medium">
+                        Movimentação{' '}
+                        <select
+                          className="ml-1 rounded border border-black/10 px-1 py-0.5 text-[11px] font-normal"
+                          value={plan.tonnesBasis ?? 'umida'}
+                          onChange={(e) => setPlan({ ...plan, tonnesBasis: e.target.value as 'seca' | 'umida' })}
+                          aria-label="Base das toneladas"
+                          title="Seca: o simulador converte para úmida (umidade + perdas das premissas) antes de dimensionar os caminhões"
+                        >
+                          <option value="seca">t seca</option>
+                          <option value="umida">t úmida</option>
+                        </select>
+                      </th>
                       {plan.periods.map((p, i) => (
                         <th key={i} className="py-1 pr-1 text-right font-medium">{p.label}</th>
                       ))}
@@ -728,10 +740,18 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                       <tr key={m.id} className="border-t border-black/5">
                         <td className="sticky left-0 z-10 bg-white py-1 pr-2 text-xs">
                           <span className="font-medium">{placeName(m.origin)} → {placeName(m.destination)}</span>
-                          <span className="block text-black/45">{m.material}</span>
+                          <span className="block text-black/45">
+                            {m.material}
+                            {m.derived && <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-semibold text-emerald-700">= ROM × {m.derived.kind === 'produto' ? 'RM' : m.derived.kind === 'rejeito' ? 'rejeito %' : 'REM'}</span>}
+                          </span>
                         </td>
                         {plan.periods.map((_, i) => (
                           <td key={i} className="py-1 pr-1">
+                            {m.derived ? (
+                              <p className="w-20 rounded-md bg-black/[0.04] px-1 py-1 text-right text-sm tabular-nums text-black/60" title="Calculado do ROM pelas premissas (RM global, rejeito total ou REM). Mude o ROM para alterar.">
+                                {t0(m.tonnes[i] ?? 0)}
+                              </p>
+                            ) : (
                             <input
                               type="number"
                               step={1000}
@@ -748,12 +768,13 @@ const PlanView: React.FC<Props> = ({ dem, model, setModel, canEdit, terrain, con
                                 setMovement(m.id, { tonnes: m.tonnes.map((t, j) => (j >= i && j - i < parsed.length ? parsed[j - i] : t)) });
                               }}
                             />
+                            )}
                           </td>
                         ))}
                       </tr>
                     ))}
                     <tr className="border-t-2 border-black/10 text-xs font-semibold">
-                      <td className="sticky left-0 bg-white py-1.5 pr-2">Total (Mt)</td>
+                      <td className="sticky left-0 bg-white py-1.5 pr-2">Total (Mt {plan.tonnesBasis === 'seca' ? 'seca' : 'úmida'})</td>
                       {totals.map((t, i) => (
                         <td key={i} className="py-1.5 pr-2 text-right tabular-nums">{mt(t)}</td>
                       ))}
@@ -1137,7 +1158,7 @@ const PeriodsTable: React.FC<{
   const rows = plan.periods.map((p) => {
     const kind = p.kind ?? 'ano';
     const calDays = p.calendarDays ?? (kind === 'ano' ? 365 : p.workDays);
-    const romT = p.romT ?? (premises ? suggestedRomT(premises, kind, p.days) : 0);
+    const romT = p.romT ?? (premises ? suggestedRomT(premises, kind, p.days, p.qty) : 0);
     const h = hoursBreakdown(calDays, p.workDays, hpd, df, uf);
     const f = premises ? flowWetTonnes(premises, romT) : null;
     return { p, kind, calDays, romT, h, f };
@@ -1184,7 +1205,10 @@ const PeriodsTable: React.FC<{
                 </td>
                 <td className="py-1 pr-2">
                   <div className="flex gap-1">
-                    <select className={clsx(inputCls, 'w-32')} value={kind} onChange={(e) => setPeriodRow(i, { kind: e.target.value as PeriodKind })} aria-label="Duração do período">
+                    {kind !== 'dias' && (
+                      <input type="number" min={1} className={clsx(inputCls, 'w-14 text-right')} value={p.qty ?? 1} onChange={(e) => setPeriodRow(i, { qty: Math.max(1, Math.round(Number(e.target.value) || 1)), month: undefined })} aria-label="Quantidade" />
+                    )}
+                    <select className={clsx(inputCls, 'w-32')} value={kind} onChange={(e) => setPeriodRow(i, { kind: e.target.value as PeriodKind })} aria-label="Unidade do período">
                       {PERIOD_KINDS.map((k) => (
                         <option key={k.id} value={k.id}>{k.label}</option>
                       ))}
@@ -1192,7 +1216,7 @@ const PeriodsTable: React.FC<{
                     {kind === 'dias' && (
                       <input type="number" className={clsx(inputCls, 'w-20 text-right')} value={p.days ?? 30} onChange={(e) => setPeriodRow(i, { days: Math.max(1, Number(e.target.value)) })} aria-label="Dias corridos" />
                     )}
-                    {kind === 'mes' && (
+                    {kind === 'mes' && (p.qty ?? 1) === 1 && (
                       <select className={clsx(inputCls, 'w-28')} value={p.month ?? 0} onChange={(e) => setPeriodRow(i, { month: Number(e.target.value) || undefined })} aria-label="Mês do calendário">
                         <option value={0}>mês médio</option>
                         {MONTH_NAMES.map((m, j) => (
