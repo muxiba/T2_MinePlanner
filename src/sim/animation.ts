@@ -6,7 +6,7 @@ import { cumulative, pointAt } from './dxf';
 import type { CircuitGeometry } from './des';
 import type { TraceItem, TruckState, Vec3 } from './types';
 
-export type DotKind = 'carregado' | 'vazio' | 'fila' | 'carregando' | 'descarregando' | 'manutencao' | 'ocioso';
+export type DotKind = 'carregado' | 'vazio' | 'fila' | 'carregando' | 'descarregando' | 'interferencia' | 'turno' | 'refeicao' | 'abastecimento' | 'manutencao' | 'ocioso';
 
 export const DOT_KINDS: { id: DotKind; label: string }[] = [
   { id: 'carregado', label: 'Viagem carregado' },
@@ -14,6 +14,10 @@ export const DOT_KINDS: { id: DotKind; label: string }[] = [
   { id: 'carregando', label: 'Carregando' },
   { id: 'descarregando', label: 'Pesagem e descarga' },
   { id: 'fila', label: 'Na fila' },
+  { id: 'interferencia', label: 'Interferência na via' },
+  { id: 'turno', label: 'Troca de turno / inspeção' },
+  { id: 'refeicao', label: 'Refeição' },
+  { id: 'abastecimento', label: 'Abastecimento e lubrificação' },
   { id: 'manutencao', label: 'Manutenção' },
   { id: 'ocioso', label: 'Sem utilização (fora do turno, perdas)' },
 ];
@@ -35,6 +39,14 @@ export function kindOf(s: TruckState): DotKind {
       return 'descarregando';
     case 'manutencao':
       return 'manutencao';
+    case 'interferencia':
+      return 'interferencia';
+    case 'troca_turno':
+      return 'turno';
+    case 'refeicao':
+      return 'refeicao';
+    case 'abastecimento':
+      return 'abastecimento';
     default:
       return 'ocioso';
   }
@@ -202,8 +214,14 @@ export function makeAnimator(trace: TraceItem[], geometry: CircuitGeometry[], lo
         else qq.serving++;
         s = waiting ? Math.max(0, L - 14 * qq.waiting) : L;
         loaded = it.state !== 'descarregando' || frac < 0.5;
+      } else if (it.state === 'interferencia') {
+        // parado na via: no fim da ida (carregado) ou no começo da volta (vazio)
+        const prev = list[list.indexOf(it) - 1];
+        loaded = prev?.state === 'carregado';
+        s = loaded ? L * 0.8 : L * 0.25;
+        forward = loaded;
       } else {
-        // manutenção, fora do turno, perdas: estacionado no pátio perto da carga
+        // manutenção, paradas programadas, fora do turno, perdas: estacionado no pátio perto da carga
         s = Math.min(L, 30 + (truck % 8) * 8);
       }
       const p = pointAt(pts, cum, s);
@@ -230,7 +248,7 @@ export function makeAnimator(trace: TraceItem[], geometry: CircuitGeometry[], lo
   function totals(from: number, t: number) {
     const trucks: TruckTotals[] = [];
     for (const [truck, list] of byTruck) {
-      const min = { carregado: 0, vazio: 0, fila: 0, carregando: 0, descarregando: 0, manutencao: 0, ocioso: 0 } as Record<DotKind, number>;
+      const min = Object.fromEntries(DOT_KINDS.map((k) => [k.id, 0])) as Record<DotKind, number>;
       let trips = 0;
       let current: DotKind | null = null;
       const ci = list[0]?.circuit ?? 0;
@@ -248,7 +266,7 @@ export function makeAnimator(trace: TraceItem[], geometry: CircuitGeometry[], lo
     const circuits: CircuitTotals[] = geometry.map((g, ci) => {
       const ts = trucks.filter((x) => x.circuit === ci);
       const trips = ts.reduce((a, x) => a + x.trips, 0);
-      const working = ts.reduce((a, x) => a + x.min.carregado + x.min.vazio + x.min.fila + x.min.carregando + x.min.descarregando, 0);
+      const working = ts.reduce((a, x) => a + x.min.carregado + x.min.vazio + x.min.fila + x.min.carregando + x.min.descarregando + x.min.interferencia, 0);
       const queue = ts.reduce((a, x) => a + x.min.fila, 0);
       const busy = ts.reduce((a, x) => a + x.min.carregando, 0);
       const repair = loaderTrace.filter((x) => x.circuit === ci).reduce((a, x) => a + Math.max(0, Math.min(x.t1, t) - Math.max(x.t0, from)), 0);

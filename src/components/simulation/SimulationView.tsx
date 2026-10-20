@@ -538,7 +538,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   const k = wetFactor(premises);
                   const sh = flowShares(premises);
                   const sc = model.scenarios[0];
-                  const h = hoursBreakdown(per.calendarDays, per.workDays, sc?.hoursPerDay ?? 24, sc?.truckDf ?? 0, sc?.efficiency ?? 0);
+                  const h = hoursBreakdown(per.calendarDays, per.workDays, sc?.hoursPerDay ?? 24, sc?.truckDf ?? 0, linked ? premises.ufMina : sc?.efficiency ?? 0);
                   const rows: [string, number, string][] = [['ROM (alimenta a planta)', d.rom, 'meta do período']];
                   if (premises.processType !== 'seco') {
                     rows.push(['Produto', d.produto, `ROM × RM global ${n1(sh.rm * 100)}%`]);
@@ -599,6 +599,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                       <th className="py-1.5 pr-2 text-right font-medium">Volta (min)</th>
                       <th className="py-1.5 pr-2 text-right font-medium">Pesagem (min)</th>
                       <th className="py-1.5 pr-2 text-right font-medium">Fila (min)</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Interf. (min)</th>
                       <th className="py-1.5 pr-2 text-right font-medium">Ciclo (min)</th>
                       <th className="py-1.5 pr-2 text-right font-medium">Por caminhão (t/h)</th>
                       <th className="py-1.5 text-right font-medium">Caminhões (un.)</th>
@@ -642,6 +643,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                           <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.emptyMin)}</td>
                           <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.weighMin)}</td>
                           <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.queueMin)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.interferenceMin)}</td>
                           <td className="py-1.5 pr-2 text-right font-semibold tabular-nums">{n1(x.cycleMin)}</td>
                           <td className="py-1.5 pr-2 text-right tabular-nums">{n1(x.perTruckTph)}</td>
                           <td className="py-1.5 text-right tabular-nums">
@@ -660,7 +662,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                           <td className="py-1.5 pr-2 font-semibold">Total ROM</td>
                           <td className={clsx('py-1.5 pr-2 text-right font-semibold tabular-nums', ok ? 'text-emerald-700' : 'text-amber-700')}>{t0(romDry)}</td>
                           <td className="py-1.5 pr-2 text-right tabular-nums">{t0(romDry * wetFactor(premises))}</td>
-                          <td colSpan={10} className="py-1.5 pl-2 text-black/50">
+                          <td colSpan={11} className="py-1.5 pl-2 text-black/50">
                             {ok ? 'A soma dos circuitos de ROM é igual à meta de ROM do período.' : `A soma dos circuitos de ROM (${t0(romDry)} t) difere da meta do período (${t0(per.romT)} t): confira as metas digitadas.`}
                           </td>
                         </tr>
@@ -669,7 +671,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   </tfoot>
                 </table>
                 <p className="mt-1.5 text-[11px] text-black/45">
-                  Necessária = t úmida ÷ horas produtivas (dias trabalhados × horas/dia × DF × UF). Ciclo = carga + ida + basculamento + volta + pesagem + fila. Por caminhão = carga útil × 60 ÷ ciclo. Caminhões = necessária ÷ por caminhão, arredondado para cima. A simulação depois mede as filas e esperas reais com esses caminhões.
+                  Necessária = t úmida ÷ horas produtivas (dias trabalhados × horas/dia × DF × UF). Ciclo = carga + ida + basculamento + volta + pesagem + fila + interferências na via. Por caminhão = carga útil × 60 ÷ ciclo. Caminhões = necessária ÷ por caminhão, arredondado para cima. A simulação depois mede as filas e esperas reais com esses caminhões.
                 </p>
               </div>
               <div className="space-y-5">
@@ -954,7 +956,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                         <input className={inputCls} value={s.name} onChange={(e) => setScenario(s.id, { name: e.target.value })} aria-label="Nome do cenário" />
                       </td>
                       {(['hoursPerDay', 'days', 'truckDf', 'efficiency', 'travelFactor', 'receivingFactor', 'cv'] as const).map((k) => {
-                        const locked = linked && (k === 'hoursPerDay' || (si === 0 && (k === 'truckDf' || k === 'efficiency')));
+                        const locked = linked && (k === 'hoursPerDay' || (si === 0 && k === 'truckDf') || (k === 'efficiency' && (si === 0 || !!premises.losses?.enabled)));
                         return (
                           <td key={k} className="py-1 pr-2">
                             {locked ? (
@@ -1100,6 +1102,83 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   })()}
                 </div>
               )}
+
+              {matrix && (() => {
+                const cell = matrix.find((m) => m.configId === sel.configId && m.scenarioId === sel.scenarioId);
+                if (!cell) return null;
+                const sh = cell.stats.stateShare;
+                const groups: { label: string; states: (keyof typeof sh)[]; color: string; note: string }[] = [
+                  { label: 'Produtivo (viagem, carga, descarga, pesagem)', states: ['carregado', 'vazio', 'carregando', 'descarregando', 'pesando'], color: '#059669', note: 'tempo útil do ciclo' },
+                  { label: 'Filas (carga, balança, descarga)', states: ['fila_carga', 'fila_balanca', 'fila_descarga'], color: '#eb6834', note: 'espera por recurso ocupado' },
+                  { label: 'Interferências na via', states: ['interferencia'], color: '#e87ba4', note: 'cruzamentos, apoio, tráfego' },
+                  { label: 'Troca de turno e inspeção', states: ['troca_turno'], color: '#5b6b7f', note: 'premissas: perdas detalhadas' },
+                  { label: 'Refeição', states: ['refeicao'], color: '#b38f00', note: 'em revezamento' },
+                  { label: 'Abastecimento e lubrificação', states: ['abastecimento'], color: '#0e7490', note: '1 vez por dia' },
+                  { label: 'Perdas operacionais (UF)', states: ['perdas'], color: '#a8a29e', note: 'parte da UF não detalhada' },
+                  { label: 'Manutenção', states: ['manutencao'], color: '#d12f2f', note: 'pela DF e pelo reparo médio' },
+                  { label: 'Fora do turno', states: ['fora_turno'], color: '#cbd5e1', note: 'horas do dia sem operação' },
+                ];
+                const rows = groups.map((g) => ({ ...g, share: g.states.reduce((a, k) => a + (sh[k] ?? 0), 0) })).filter((g) => g.share > 0.0005);
+                const days = per.workDays;
+                const nTrucks = model.circuits.reduce((a, c) => a + c.trucks, 0);
+                return (
+                  <Card
+                    title="Para onde vai o tempo de cada caminhão"
+                    description={`Média das ${model.replications} repetições do cenário escolhido. Por dia de operação e no período (${periodText(per.kind, per.qty, model.period?.days)}: ${n1(days)} dias trabalhados de ${n1(per.calendarDays)}).`}
+                  >
+                    <div className="mb-3 flex h-5 overflow-hidden rounded-md">
+                      {rows.map((g) => (
+                        <div key={g.label} style={{ width: `${g.share * 100}%`, background: g.color }} title={`${g.label}: ${pc(g.share)}`} />
+                      ))}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[720px] text-sm">
+                        <thead>
+                          <tr className="border-b border-black/10 text-left text-xs text-black/45">
+                            <th className="py-1.5 pr-2 font-medium">Atividade</th>
+                            <th className="py-1.5 pr-2 text-right font-medium">% do dia</th>
+                            <th className="py-1.5 pr-2 text-right font-medium">h por caminhão por dia</th>
+                            <th className="py-1.5 pr-2 text-right font-medium">h por caminhão no período</th>
+                            <th className="py-1.5 pr-2 text-right font-medium">h da frota no período ({nTrucks} cam.)</th>
+                            <th className="py-1.5 font-medium">Observação</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((g) => (
+                            <tr key={g.label} className="border-b border-black/5">
+                              <td className="py-1.5 pr-2">
+                                <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: g.color }} />
+                                {g.label}
+                              </td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{pc(g.share)}</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{n1(g.share * 24)}</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{t0(g.share * 24 * days)}</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{t0(g.share * 24 * days * nTrucks)}</td>
+                              <td className="py-1.5 text-xs text-black/50">{g.note}</td>
+                            </tr>
+                          ))}
+                          {per.calendarDays - days > 0.05 && (
+                            <tr className="border-b border-black/5">
+                              <td className="py-1.5 pr-2">
+                                <span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm bg-sky-200 align-middle" />
+                                Dias não trabalhados (chuva, folgas)
+                              </td>
+                              <td className="py-1.5 pr-2 text-right text-black/40">—</td>
+                              <td className="py-1.5 pr-2 text-right text-black/40">—</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{t0((per.calendarDays - days) * 24)}</td>
+                              <td className="py-1.5 pr-2 text-right tabular-nums">{t0((per.calendarDays - days) * 24 * nTrucks)}</td>
+                              <td className="py-1.5 text-xs text-black/50">calendário do plano</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    {!premises.losses?.enabled && (
+                      <p className="mt-2 text-xs text-black/50">Para ver troca de turno, refeição, abastecimento e interferências separadas, ligue “Usar perdas detalhadas” em 1. Premissas Fundamentais.</p>
+                    )}
+                  </Card>
+                );
+              })()}
 
               <Card
                 title="Busca da frota mínima"

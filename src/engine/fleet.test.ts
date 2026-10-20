@@ -180,3 +180,15 @@ describe('frota automática por rota', () => {
     expect(r.filter((x) => x.active).reduce((s, x) => s + x.truckCount, 0)).toBeLessThanOrEqual(3 + 1e-9);
   });
 });
+
+describe('perdas operacionais detalhadas', () => {
+  it('UF calculada pelas paradas fixas e interferência no ciclo', async () => {
+    const { ufFromLosses, fixedLossMinPerDay } = await import('./losses');
+    const p = { ...P, contractedHoursMina: 24, losses: { enabled: true, shifts: 3, shiftChangeMin: 20, mealMin: 60, fuelMin: 30, interferenceMin: 1.5, otherMinPerShift: 10 } };
+    expect(fixedLossMinPerDay(p).total).toBe(300);
+    expect(ufFromLosses(p)).toBeCloseTo((1 - 300 / 1440) * 100, 6);
+    const a = analyzeRoute(mine, p, 100000);
+    const b = analyzeRoute(mine, { ...p, losses: { ...p.losses, enabled: false } }, 100000);
+    expect(a.cycle.totalMin - b.cycle.totalMin).toBeCloseTo(1.5, 6);
+  });
+});

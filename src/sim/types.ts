@@ -123,6 +123,8 @@ export interface Scenario {
   receivingFactor: number;
   /** coeficiente de variação dos tempos (0,15 = ±15%) */
   cv: number;
+  /** paradas operacionais detalhadas; com elas a eficiência cobre só o que não está listado */
+  stops?: OperationalStops;
 }
 
 export interface SimModel {
@@ -168,7 +170,11 @@ export type TruckState =
   | 'vazio'
   | 'manutencao'
   | 'fora_turno'
-  | 'perdas';
+  | 'perdas'
+  | 'troca_turno'
+  | 'refeicao'
+  | 'abastecimento'
+  | 'interferencia';
 
 export const STATE_LABELS: Record<TruckState, string> = {
   fila_carga: 'Fila na carga',
@@ -182,7 +188,25 @@ export const STATE_LABELS: Record<TruckState, string> = {
   manutencao: 'Manutenção',
   fora_turno: 'Fora do turno',
   perdas: 'Perdas operacionais',
+  troca_turno: 'Troca de turno',
+  refeicao: 'Refeição',
+  abastecimento: 'Abastecimento e lubrificação',
+  interferencia: 'Interferência na via',
 };
+
+/** Paradas operacionais simuladas como eventos (das Premissas Fundamentais). */
+export interface OperationalStops {
+  /** turnos por dia */
+  shifts: number;
+  /** troca de turno (min por troca) */
+  shiftChangeMin: number;
+  /** refeição (min por turno, por caminhão) */
+  mealMin: number;
+  /** abastecimento e lubrificação (min por caminhão por dia) */
+  fuelMin: number;
+  /** interferências na via (min por viagem, em média): cruzamentos, equipamentos de apoio, tráfego externo */
+  interferenceMin: number;
+}
 
 /** Trecho de animação: um caminhão em um estado entre t0 e t1 (min). Viagens guardam o sentido. */
 export interface TraceItem {

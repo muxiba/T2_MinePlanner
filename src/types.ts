@@ -154,6 +154,20 @@ export interface DetailedPremises {
   moistureMode?: 'somada' | 'base_umida';
   /** Fila por ciclo (min), padrão de todas as rotas (a manobra já está em Basculamento/Manobra). */
   queueMin?: number;
+  /**
+   * Perdas operacionais detalhadas do caminhão. Ligadas, a UF da mina passa a ser calculada por elas
+   * e o simulador gera cada parada como evento (troca de turno, refeição, abastecimento, interferências).
+   */
+  losses?: {
+    enabled: boolean;
+    shifts: number;
+    shiftChangeMin: number;
+    mealMin: number;
+    fuelMin: number;
+    interferenceMin: number;
+    /** outras paradas fixas (min por turno): inspeção pré-uso, DDS, etc. */
+    otherMinPerShift: number;
+  };
   /** Volume coroado da caçamba do caminhão (m³), padrão de todas as rotas. Vazio = não limita pelo volume. */
   truckVolumeM3?: number;
   /** Classe do caminhão da frota (id do catálogo), ex.: 'rod-40' = basculante 8x4 40 t. */

@@ -36,6 +36,10 @@ export const DOT_COLORS = {
   carregando: '#eda100',
   descarregando: '#8a5cd6',
   fila: '#eb6834',
+  interferencia: '#e87ba4',
+  turno: '#5b6b7f',
+  refeicao: '#b38f00',
+  abastecimento: '#0e7490',
   manutencao: '#d12f2f',
   ocioso: '#8a8984',
 } as const;

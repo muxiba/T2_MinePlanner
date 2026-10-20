@@ -407,7 +407,7 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
       `${n2(c.totalMin)} min`,
       c.mode === 'informed'
         ? 'informado (cronometrado)'
-        : `carga ${n1(c.loadMin)} + ida ${n1(c.travelLoadedMin)} + descarga ${n1(c.dumpMin)} + volta ${n1(c.travelEmptyMin)} + pesagens ${n1(c.weighMin)}${c.queueMin ? ` + fila ${n1(c.queueMin)}` : ''}`,
+        : `carga ${n1(c.loadMin)} + ida ${n1(c.travelLoadedMin)} + descarga ${n1(c.dumpMin)} + volta ${n1(c.travelEmptyMin)} + pesagens ${n1(c.weighMin)}${c.queueMin ? ` + fila ${n1(c.queueMin)}` : ''}${c.interferenceMin ? ` + interferências ${n1(c.interferenceMin)}` : ''}`,
     ],
     ['Viagens por hora efetiva', n2(60 / c.totalMin), '60 ÷ ciclo'],
     ['Produção por caminhão', `${n1(a.truckRateTph)} t/h`, 'viagens/h × carga útil'],

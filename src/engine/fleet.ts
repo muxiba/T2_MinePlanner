@@ -20,6 +20,7 @@
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
 import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import { interferenceMin } from './losses';
 
 /** Tempo de troca de caminhão sob o equipamento de carga (posicionamento), em minutos. */
 export const TRUCK_EXCHANGE_MIN = 0.6;
@@ -84,6 +85,8 @@ export interface CycleBreakdown {
   travelEmptyMin: number;
   weighMin: number;
   queueMin: number;
+  /** interferências na via por viagem (perdas detalhadas das premissas) */
+  interferenceMin: number;
   calculatedMin: number;
   informedMin: number;
   /** ciclo efetivamente usado */
@@ -298,7 +301,8 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
   const dumpMin = Math.max(premises.dumpingTime, 0);
   const weighMin = Math.max(premises.weighingTimeLoaded, 0) + Math.max(premises.weighingTimeEmpty, 0);
   const queueMin = Math.max(route.queueMin ?? 0, 0);
-  const calculatedMin = loadMin + travelLoadedMin + dumpMin + travelEmptyMin + weighMin + queueMin;
+  const interference = interferenceMin(premises);
+  const calculatedMin = loadMin + travelLoadedMin + dumpMin + travelEmptyMin + weighMin + queueMin + interference;
   const informedMin = Math.max(route.cycleTime || 0, 0);
   const mode = route.cycleMode === 'informed' && informedMin > 0 ? 'informed' : 'calculated';
   return {
@@ -308,6 +312,7 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
     travelEmptyMin,
     weighMin,
     queueMin,
+    interferenceMin: interference,
     calculatedMin,
     informedMin,
     totalMin: Math.max(mode === 'informed' ? informedMin : calculatedMin, 0.1),

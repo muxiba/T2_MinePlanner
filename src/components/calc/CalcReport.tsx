@@ -166,7 +166,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
           <thead>
             <tr className="border-b border-black/15 text-left text-black/50">
               <th className="py-1 font-medium">Rota</th>
-              {['Carga', 'Ida cheio', 'Descarga', 'Volta vazio', 'Pesagens', 'Fila', 'Ciclo'].map((h) => (
+              {['Carga', 'Ida cheio', 'Descarga', 'Volta vazio', 'Pesagens', 'Fila', 'Interf.', 'Ciclo'].map((h) => (
                 <th key={h} className="w-[10%] py-1 pl-2 text-right font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -175,7 +175,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
             {a.routes.map((r) => (
               <tr key={r.id} className="border-b border-black/5">
                 <td className="py-1">{r.name}</td>
-                {[r.cycle.loadMin, r.cycle.travelLoadedMin, r.cycle.dumpMin, r.cycle.travelEmptyMin, r.cycle.weighMin, r.cycle.queueMin].map((v, i) => (
+                {[r.cycle.loadMin, r.cycle.travelLoadedMin, r.cycle.dumpMin, r.cycle.travelEmptyMin, r.cycle.weighMin, r.cycle.queueMin, r.cycle.interferenceMin ?? 0].map((v, i) => (
                   <td key={i} className="py-1 text-right font-mono">{n1(v)}</td>
                 ))}
                 <td className="py-1 text-right font-mono font-bold">{n1(r.cycle.totalMin)} min</td>

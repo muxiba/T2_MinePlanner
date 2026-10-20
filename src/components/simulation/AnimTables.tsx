@@ -153,6 +153,10 @@ const SHORT: Record<DotKind, string> = {
   carregando: 'Carga (h)',
   descarregando: 'Descarga (h)',
   fila: 'Fila (h)',
+  interferencia: 'Interf. (h)',
+  turno: 'Turno (h)',
+  refeicao: 'Refeição (h)',
+  abastecimento: 'Abast. (h)',
   manutencao: 'Manut. (h)',
   ocioso: 'Sem uso (h)',
 };

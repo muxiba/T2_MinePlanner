@@ -105,3 +105,22 @@ describe('simulação', () => {
     expect(s.hi).toBeGreaterThan(s.mean);
   });
 });
+
+describe('paradas operacionais detalhadas', () => {
+  it('troca de turno, refeição, abastecimento e interferências viram tempo simulado', () => {
+    const m = model(4);
+    const sc = { ...m.scenarios[0], hoursPerDay: 24, days: 4, efficiency: 100, truckDf: 100, cv: 0, stops: { shifts: 3, shiftChangeMin: 20, mealMin: 60, fuelMin: 30, interferenceMin: 2 } };
+    const res = simulate({ ...m, warmupH: 0 }, { config: m.configs[0], scenario: sc, seed: 3 });
+    const sh = res.stats.stateShare;
+    // por caminhão e por dia: 3 × 20 = 60 min de troca, 3 × 60 = 180 min de refeição, 30 min de abastecimento
+    expect(sh.troca_turno ?? 0).toBeGreaterThan(0.03);
+    expect(sh.troca_turno ?? 0).toBeLessThan(0.055);
+    expect(sh.refeicao ?? 0).toBeGreaterThan(0.10);
+    expect(sh.refeicao ?? 0).toBeLessThan(0.15);
+    expect(sh.abastecimento ?? 0).toBeGreaterThan(0.012);
+    expect(sh.abastecimento ?? 0).toBeLessThan(0.03);
+    expect(sh.interferencia ?? 0).toBeGreaterThan(0);
+    const base = simulate({ ...m, warmupH: 0 }, { config: m.configs[0], scenario: { ...sc, stops: undefined }, seed: 3 });
+    expect(res.stats.tonnes).toBeLessThan(base.stats.tonnes);
+  });
+});

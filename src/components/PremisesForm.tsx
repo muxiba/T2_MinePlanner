@@ -4,6 +4,7 @@ import { ptBR } from "date-fns/locale";
 import { Download } from "lucide-react";
 import { DetailedPremises, Route } from "../types";
 import { catalogOf } from "@/engine/fleet";
+import { DEFAULT_LOSSES, fixedLossMinPerDay, lossesOf, ufFromLosses } from "@/engine/losses";
 
 interface PremisesFormProps {
   premises: DetailedPremises;
@@ -104,8 +105,25 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       }));
     }
 
+    // perdas detalhadas ligadas: a UF da mina é calculada pelas paradas fixas
+    if (newPremises.losses?.enabled) {
+      newPremises.ufMina = Math.round(ufFromLosses(newPremises) * 10) / 10;
+      newPremises.eoMina = (newPremises.dfMina / 100) * (newPremises.ufMina / 100) * 100;
+    }
     setPremises(newPremises);
   };
+
+  const setLosses = (patch: Partial<NonNullable<DetailedPremises["losses"]>>) => {
+    const losses = { ...lossesOf(premises), ...patch };
+    const next: DetailedPremises = { ...premises, losses };
+    if (losses.enabled) {
+      next.ufMina = Math.round(ufFromLosses(next) * 10) / 10;
+      next.eoMina = (next.dfMina / 100) * (next.ufMina / 100) * 100;
+    }
+    setPremises(next);
+  };
+  const lossDay = fixedLossMinPerDay(premises);
+  const L = lossesOf(premises);
 
   const handleMonthYearChange = (month: number, year: number) => {
     const start = startOfMonth(new Date(year, month));
@@ -221,7 +239,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       title: "Mina",
       fields: [
         { label: "DF Equipamentos (%)", key: "dfMina" },
-        { label: "UF Equipamentos (%)", key: "ufMina" },
+        { label: premises.losses?.enabled ? "UF Equipamentos (%) — calculada pelas perdas" : "UF Equipamentos (%)", key: "ufMina", readOnly: !!premises.losses?.enabled },
         { label: "Rendimento DF × UF (%)", key: "eoMina", readOnly: true },
         { label: "Capacidade Frota Mina (t/h)", key: "fleetCapacityMinaTPH", readOnly: true },
       ]
@@ -449,6 +467,51 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Perdas operacionais detalhadas */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-black/40">Perdas operacionais dos caminhões</h3>
+            <p className="mt-1 max-w-3xl text-xs text-black/50">
+              Para um cenário realista: troca de turno, refeição, inspeção, abastecimento e lubrificação e interferências na via. Ligado, a UF da mina passa a ser calculada por estas paradas, as interferências entram no ciclo de cada viagem e o simulador gera cada parada como evento, com as horas mostradas nos resultados.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={!!premises.losses?.enabled} onChange={(e) => setLosses({ enabled: e.target.checked })} />
+            Usar perdas detalhadas
+          </label>
+        </div>
+        <div className={`grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 ${premises.losses?.enabled ? "" : "opacity-50"}`}>
+          {([
+            ["shifts", "Turnos por dia", "un."],
+            ["shiftChangeMin", "Troca de turno", "min por troca"],
+            ["mealMin", "Refeição", "min por turno"],
+            ["otherMinPerShift", "Inspeção / DDS / outras", "min por turno"],
+            ["fuelMin", "Abastecimento e lubrificação", "min por caminhão por dia"],
+            ["interferenceMin", "Interferências na via", "min por viagem"],
+          ] as const).map(([k, label, unit]) => (
+            <div key={k}>
+              <label className="block text-xs font-medium text-black/60 mb-1.5">
+                {label} <span className="text-black/35">({unit})</span>
+              </label>
+              <input
+                type="number"
+                step={k === "interferenceMin" ? 0.5 : 1}
+                disabled={!premises.losses?.enabled}
+                value={L[k] ?? DEFAULT_LOSSES[k]}
+                onChange={(e) => setLosses({ [k]: Math.max(0, parseFloat(e.target.value) || 0) } as Partial<NonNullable<DetailedPremises["losses"]>>)}
+                className="w-full bg-[#F8F9FA] border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-black/55">
+          Paradas fixas por caminhão por dia: troca de turno {lossDay.shiftChange} min + refeição {lossDay.meal} min + inspeção {lossDay.other} min + abastecimento {lossDay.fuel} min ={" "}
+          <b>{lossDay.total} min ({(lossDay.total / 60).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h)</b> em {premises.contractedHoursMina} h de jornada →{" "}
+          UF {ufFromLosses(premises).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%. Interferências: +{L.interferenceMin} min em cada ciclo. Chuva: pelos dias trabalhados do calendário do simulador.
+        </p>
       </div>
 
       {/* Operational Calendar Table */}

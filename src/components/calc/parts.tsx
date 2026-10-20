@@ -67,13 +67,14 @@ export const HoursCascade: React.FC<{ title: string; cal: number; df: number; uf
   );
 };
 
-export const CYCLE_PARTS: { key: 'loadMin' | 'travelLoadedMin' | 'dumpMin' | 'travelEmptyMin' | 'weighMin' | 'queueMin'; label: string; color: string }[] = [
+export const CYCLE_PARTS: { key: 'loadMin' | 'travelLoadedMin' | 'dumpMin' | 'travelEmptyMin' | 'weighMin' | 'queueMin' | 'interferenceMin'; label: string; color: string }[] = [
   { key: 'loadMin', label: 'Carga', color: '#059669' },
   { key: 'travelLoadedMin', label: 'Ida cheio', color: '#2563eb' },
   { key: 'dumpMin', label: 'Descarga', color: '#d97706' },
   { key: 'travelEmptyMin', label: 'Volta vazio', color: '#93c5fd' },
   { key: 'weighMin', label: 'Pesagens', color: '#a8a29e' },
   { key: 'queueMin', label: 'Fila', color: '#dc2626' },
+  { key: 'interferenceMin', label: 'Interferências', color: '#7c3aed' },
 ];
 
 export const CycleBars: React.FC<{ routes: RouteAnalysis[] }> = ({ routes }) => {

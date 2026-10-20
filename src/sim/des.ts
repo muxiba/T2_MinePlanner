@@ -324,6 +324,27 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const truckMttr = Math.max(0.1, model.truckMttrH) * 60;
   const truckMtbf = mtbf(sc.truckDf, truckMttr);
   const eff = Math.min(Math.max(sc.efficiency, 10), 100) / 100;
+  const stops = sc.stops && sc.stops.shifts > 0 ? sc.stops : null;
+  const nShifts = stops ? Math.max(1, Math.round(stops.shifts)) : 1;
+  const shiftLen = shiftMin / nShifts;
+  /** paradas programadas de um caminhão com horário em (a, b]: troca de turno, refeição e abastecimento */
+  const stopsBetween = (truckId: number, a: number, b: number) => {
+    const out: { t: number; dur: number; state: TruckState }[] = [];
+    if (!stops) return out;
+    for (let d = Math.floor(Math.max(0, a) / 1440); d <= Math.floor(b / 1440); d++) {
+      const day = d * 1440;
+      for (let s = 0; s < nShifts; s++) {
+        const start = day + s * shiftLen;
+        // troca de turno no início de cada turno (no início do dia só quando a operação é 24 h)
+        if (stops.shiftChangeMin > 0 && (s > 0 || shiftMin >= 1440)) out.push({ t: start, dur: stops.shiftChangeMin, state: 'troca_turno' });
+        // refeição no meio do turno, em revezamento (defasada entre caminhões)
+        if (stops.mealMin > 0) out.push({ t: start + shiftLen / 2 + ((truckId % 4) - 1.5) * 15, dur: stops.mealMin, state: 'refeicao' });
+      }
+      if (stops.fuelMin > 0) out.push({ t: day + shiftLen * 0.3 + (truckId % 10) * 12, dur: stops.fuelMin, state: 'abastecimento' });
+    }
+    return out.filter((x) => x.t > a && x.t <= b).sort((x, y) => x.t - y.t);
+  };
+  const interf = stops && stops.interferenceMin > 0 ? stops.interferenceMin / 2 : 0;
 
   type Truck = {
     id: number;
@@ -332,6 +353,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     since: number;
     opMin: number;
     nextFail: number;
+    /** paradas programadas já consideradas até este instante */
+    stopUntil?: number;
     cycleStart: number;
   };
   const stateTime: Partial<Record<TruckState, number>> = {};
@@ -384,7 +407,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     if (traceEnd > 0 && k.since < traceEnd && t > k.since) {
       trace.push({ truck: k.id, circuit: k.ci, state: k.state, t0: k.since, t1: Math.min(t, traceEnd) });
     }
-    if (k.state !== 'manutencao' && k.state !== 'fora_turno' && b > a) workedMin += b - a;
+    if (k.state !== 'manutencao' && k.state !== 'fora_turno' && k.state !== 'troca_turno' && k.state !== 'refeicao' && b > a) workedMin += b - a;
     k.state = s;
     k.since = t;
   };
@@ -408,6 +431,18 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       const s = nextShiftStart(t);
       heap.push(s, () => startCycle(k, s));
       return;
+    }
+    // parada programada vencida (troca de turno, refeição, abastecimento)? faz antes do próximo ciclo
+    if (stops) {
+      const due = stopsBetween(k.id, k.stopUntil ?? -1, t).filter((x) => x.t > t - 180);
+      if (due.length) {
+        const st = due[0];
+        k.stopUntil = st.t;
+        setState(k, st.state, t);
+        heap.push(t + st.dur, () => startCycle(k, t + st.dur));
+        return;
+      }
+      k.stopUntil = t;
     }
     const x = ctx[k.ci];
     k.cycleStart = t;
@@ -442,7 +477,18 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       x.loader.release(t + d);
       setState(k, 'carregado', t + d);
       const tr = lognormal(r, x.tt.loaded, cv * 0.5);
-      heap.push(t + d + tr, () => afterHaul(k, t + d + tr));
+      const ta = t + d + tr;
+      // interferências na via (cruzamentos, equipamentos de apoio, tráfego): espera no trajeto
+      const w = interf ? exp(r, interf) : 0;
+      if (w > 0.05) {
+        heap.push(ta, () => {
+          setState(k, 'interferencia', ta);
+          heap.push(ta + w, () => {
+            setState(k, 'carregado', ta + w);
+            afterHaul(k, ta + w);
+          });
+        });
+      } else heap.push(ta, () => afterHaul(k, ta));
     });
   };
 
@@ -494,7 +540,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       setState(k, 'vazio', t1);
       const tr = lognormal(r, x.tt.empty, cv * 0.5);
       const t2 = t1 + tr;
-      heap.push(t2, () => {
+      const wE = interf ? exp(r, interf) : 0;
+      const endEmpty = (t2: number) => {
         const productive = t2 - k.cycleStart;
         k.opMin += productive;
         const loss = (productive * (1 - eff)) / eff;
@@ -502,7 +549,13 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
           setState(k, 'perdas', t2);
           heap.push(t2 + loss, () => startCycle(k, t2 + loss));
         } else startCycle(k, t2);
-      });
+      };
+      if (wE > 0.05) {
+        heap.push(t2, () => {
+          setState(k, 'interferencia', t2);
+          heap.push(t2 + wE, () => endEmpty(t2 + wE));
+        });
+      } else heap.push(t2, () => endEmpty(t2));
     });
   };
 

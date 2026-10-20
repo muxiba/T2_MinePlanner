@@ -8,6 +8,7 @@
  */
 import type { DetailedPremises } from '@/types';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
+import { interferenceMin, lossesOf } from '@/engine/losses';
 import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
 import { limitsOf, loadTime, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
@@ -241,9 +242,15 @@ export function withPremises(model: SimModel, premises: DetailedPremises): SimMo
   const prevP = model.configs.find((c) => c.id === PREMISES_CONFIG_ID);
   const configs = [premisesConfig(model, premises, prevP), ...model.configs.filter((c) => c.id !== PREMISES_CONFIG_ID)];
   const hours = premises.contractedHoursMina || 24;
-  const scenarios: Scenario[] = model.scenarios.map((s, i) =>
-    i === 0 ? { ...s, truckDf: premises.dfMina, efficiency: premises.ufMina, hoursPerDay: hours } : { ...s, hoursPerDay: hours },
-  );
+  // perdas detalhadas: cada parada vira evento na simulação e a eficiência cobre só o que não foi listado (100%)
+  const L = premises.losses?.enabled ? lossesOf(premises) : null;
+  const stops = L
+    ? { shifts: L.shifts, shiftChangeMin: L.shiftChangeMin + L.otherMinPerShift, mealMin: L.mealMin, fuelMin: L.fuelMin, interferenceMin: L.interferenceMin }
+    : undefined;
+  const scenarios: Scenario[] = model.scenarios.map((s, i) => {
+    const base = i === 0 ? { ...s, truckDf: premises.dfMina, efficiency: premises.ufMina, hoursPerDay: hours } : { ...s, hoursPerDay: hours };
+    return stops ? { ...base, efficiency: 100, stops } : { ...base, stops: undefined };
+  });
   const loaderTph = premisesLoaderTph(premises);
   const weigh = weighOf(premises);
   const base = { ...model, configs, scenarios };
@@ -316,6 +323,7 @@ export interface CircuitCalc {
   dumpMin: number;
   weighMin: number;
   queueMin: number;
+  interferenceMin: number;
   cycleMin: number;
   payloadT: number;
   perTruckTph: number;
@@ -349,11 +357,14 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
   const sc = model.scenarios[0];
   const cfg = model.configs[0];
   if (!sc || !cfg) return [];
-  const prodH = per.workDays * (sc.hoursPerDay || 24) * ((sc.truckDf || 0) / 100) * ((sc.efficiency || 0) / 100);
+  // UF: com as perdas detalhadas a simulação usa eventos (eficiência 100%), mas a conta analítica usa a UF calculada
+  const ufPct = linkOn(model) ? premises.ufMina : sc.efficiency;
+  const prodH = per.workDays * (sc.hoursPerDay || 24) * ((sc.truckDf || 0) / 100) * ((ufPct || 0) / 100);
   const flowOf = (c: Circuit) => c.flow ?? guessFlow(c.name);
   const shareSum: Partial<Record<Flow, number>> = {};
   for (const c of model.circuits) shareSum[flowOf(c)] = (shareSum[flowOf(c)] ?? 0) + (c.share ?? 1);
   const queue = linkOn(model) ? premises.queueMin || 0 : 0;
+  const interference = linkOn(model) ? interferenceMin(premises) : 0;
   // produto, rejeito e estéril saem do ROM que de fato é transportado (inclusive metas digitadas nos circuitos de ROM)
   const romCircuits = model.circuits.filter((c) => flowOf(c) === 'rom');
   const romDry = romCircuits.length
@@ -372,7 +383,7 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
     const loadMin = loadTime(cfg, c);
     const dumpMin = cfg.dumpMin + cfg.maneuverMin;
     const weighMin = c.weighing ? c.weighMin : 0;
-    const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue;
+    const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interference;
     const payloadT = payloadFor(cfg, c);
     const perTruckTph = cycleMin > 0 ? (payloadT * 60) / cycleMin : 0;
     const needTph = prodH > 0 ? tonnes / prodH : 0;
@@ -390,6 +401,7 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
       dumpMin,
       weighMin,
       queueMin: queue,
+      interferenceMin: interference,
       cycleMin,
       payloadT,
       perTruckTph,
