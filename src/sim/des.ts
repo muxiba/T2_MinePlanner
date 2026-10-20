@@ -705,11 +705,14 @@ export function fleetSweep(
   maxTrucks = 30,
   reps = Math.min(model.replications, 5),
   onStep?: (p: SweepPoint) => void,
+  /** meta do circuito variado (t/dia); padrão: a meta do sistema quando há um só circuito */
+  circuitTargetTpd?: number,
 ) {
   const base = Object.fromEntries(model.circuits.map((c) => [c.id, c.trucks]));
   const ci = Math.max(0, model.circuits.filter((c) => model.routes.some((r) => r.id === c.routeId)).findIndex((c) => c.id === circuitId));
   const single = model.circuits.length === 1;
   const value = (s: AggregateStats) => (single ? s.tpd : s.perCircuit[ci]?.tpd ?? s.tpd);
+  const target = single ? model.targetTpd : circuitTargetTpd ?? 0;
   const points: SweepPoint[] = [];
   let minFleet: number | null = null;
   let flat = 0;
@@ -718,11 +721,11 @@ export function fleetSweep(
     const p = { trucks: n, stats };
     points.push(p);
     onStep?.(p);
-    if (single && minFleet === null && model.targetTpd > 0 && value(stats).mean >= model.targetTpd) minFleet = n;
+    if (minFleet === null && target > 0 && value(stats).mean >= target) minFleet = n;
     const prev = points[points.length - 2];
     if (prev && value(stats).mean < value(prev.stats).mean * 1.01) flat++;
     else flat = 0;
-    if (flat >= 2 && (minFleet !== null || model.targetTpd <= 0 || !single)) break;
+    if (flat >= 2 && (minFleet !== null || target <= 0)) break;
     if (flat >= 3) break;
   }
   // ponto de saturação: depois dele, cada caminhão a mais rende < 3% da produção
@@ -738,6 +741,7 @@ export function fleetSweep(
     points: points.map((p) => ({ ...p, value: value(p.stats) })),
     minFleet,
     saturation,
+    target,
     scope: single ? ('sistema' as const) : ('circuito' as const),
   };
 }

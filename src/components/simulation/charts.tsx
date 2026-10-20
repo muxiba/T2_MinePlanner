@@ -15,7 +15,6 @@ export const SweepChart: React.FC<{
 }> = ({ points, target, minFleet, saturation, scope = 'sistema' }) => {
   const [hover, setHover] = useState<number | null>(null);
   const v = (p: SweepPoint) => p.value ?? p.stats.tpd;
-  if (scope === 'circuito') target = 0;
   if (!points.length) return null;
   const W = 640;
   const H = 280;
@@ -107,7 +106,7 @@ export const SweepChart: React.FC<{
         </div>
       )}
       <figcaption className="mt-2 text-xs text-black/50">
-        {scope === 'circuito' && 'Produção deste circuito, com os demais na frota cadastrada (a meta vale para o sistema todo). '}
+        {scope === 'circuito' && `Produção deste circuito, com os demais na frota cadastrada${target > 0 ? '; a linha tracejada é a meta deste circuito por dia trabalhado' : ''}. `}
         {minFleet ? `Frota mínima para a meta: ${minFleet} caminhões (ponto escuro). ` : target > 0 ? 'Nenhuma frota testada atinge a meta. ' : ''}
         A partir de {saturation} caminhões, cada caminhão a mais rende menos de 3%: o gargalo passa a ser a carga ou a descarga. Faixa azul:
         intervalo de 95% entre as repetições.

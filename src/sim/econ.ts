@@ -208,6 +208,8 @@ export interface PeriodCost {
   revenue: number;
   dieselL: number;
   people: number;
+  /** fator de desconto do período (meio do período): valor presente = valor ÷ fator */
+  pvFactor: number;
 }
 
 export interface Evaluation {
@@ -230,6 +232,10 @@ export interface Evaluation {
   /** menor folga de produção entre os períodos (simulado ÷ meta) */
   minMargin: number;
   people: number;
+  /** fator de desconto do fim do horizonte (para o valor residual da frota) */
+  endPvFactor: number;
+  /** taxa de desconto usada (fração ao ano) */
+  rate: number;
 }
 
 export interface EvalOptions {
@@ -318,6 +324,7 @@ export function evaluate(results: PeriodResult[], plan: MinePlan, fin: Finance, 
       revenue,
       dieselL: dieselL + loaderDieselL,
       people: peopleTrucks + peopleLoaders,
+      pvFactor: df,
     });
   }
   const salvage = trucks.salvage() + loaders.salvage();
@@ -343,8 +350,136 @@ export function evaluate(results: PeriodResult[], plan: MinePlan, fin: Finance, 
     allOk: sorted.every((r) => r.ok),
     minMargin: margins.length ? Math.min(...margins) : 1,
     people: Math.max(0, ...periods.map((p) => p.people)),
+    endPvFactor: Math.pow(1 + rate, t),
+    rate,
   };
 }
+
+/* ------------------------------------------------------------------------- */
+/* Fluxo de caixa e o que move o custo                                        */
+/* ------------------------------------------------------------------------- */
+
+export const CASH_ITEMS = [
+  { key: 'revenue', label: 'Receita do material vendido', sign: 1 },
+  { key: 'purchase', label: 'Compra e troca de caminhões', sign: -1 },
+  { key: 'residualCredit', label: 'Crédito do valor residual nas trocas', sign: 1 },
+  { key: 'diesel', label: 'Diesel dos caminhões', sign: -1 },
+  { key: 'maintenance', label: 'Manutenção dos caminhões', sign: -1 },
+  { key: 'tires', label: 'Pneus', sign: -1 },
+  { key: 'labor', label: 'Mão de obra (operadores)', sign: -1 },
+  { key: 'loaders', label: 'Equipamento de carga', sign: -1 },
+  { key: 'overhead', label: 'Custos fixos (vias, supervisão)', sign: -1 },
+] as const;
+export type CashKey = (typeof CASH_ITEMS)[number]['key'];
+
+export interface CashRow {
+  label: string;
+  years: number;
+  values: Record<CashKey, number>;
+  /** custo total (positivo) */
+  cost: number;
+  /** receita − custo */
+  net: number;
+  pvFactor: number;
+  pvNet: number;
+  cumPvNet: number;
+}
+
+/** Fluxo de caixa por período da opção, com valor presente e acumulado; a última linha credita a frota restante. */
+export function cashFlow(e: Evaluation): { rows: CashRow[]; salvage: { value: number; pv: number }; totals: Record<CashKey, number> & { cost: number; net: number; pvNet: number } } {
+  let cum = 0;
+  const rows: CashRow[] = e.periods.map((p) => {
+    const values: Record<CashKey, number> = {
+      revenue: p.revenue,
+      purchase: p.capex + p.residualCredit,
+      residualCredit: p.residualCredit,
+      diesel: p.diesel,
+      maintenance: p.maintenance,
+      tires: p.tires,
+      labor: p.labor,
+      loaders: p.loaders,
+      overhead: p.overhead,
+    };
+    const cost = p.total;
+    const net = p.revenue - cost;
+    const pvNet = net / (p.pvFactor || 1);
+    cum += pvNet;
+    return { label: p.label, years: p.years, values, cost, net, pvFactor: p.pvFactor || 1, pvNet, cumPvNet: cum };
+  });
+  const totals = Object.fromEntries(CASH_ITEMS.map((c) => [c.key, rows.reduce((a, r) => a + r.values[c.key], 0)])) as Record<CashKey, number>;
+  const salvagePv = e.salvage / (e.endPvFactor || 1);
+  return {
+    rows,
+    salvage: { value: e.salvage, pv: salvagePv },
+    totals: { ...totals, cost: rows.reduce((a, r) => a + r.cost, 0) - e.salvage, net: rows.reduce((a, r) => a + r.net, 0) + e.salvage, pvNet: cum + salvagePv },
+  };
+}
+
+export const DRIVER_CATS = [
+  { key: 'capex', label: 'Equipamentos (compra − residual)', why: 'mais caminhões no pico ou trocas por fim de vida útil' },
+  { key: 'diesel', label: 'Diesel', why: 'mais horas de caminhão por tonelada (ciclo mais longo, filas, caminhão menor)' },
+  { key: 'maintenance', label: 'Manutenção', why: 'mais horas trabalhadas e frota mais velha' },
+  { key: 'tires', label: 'Pneus', why: 'mais horas trabalhadas' },
+  { key: 'labor', label: 'Mão de obra', why: 'mais caminhões em operação (operadores × turnos × folguistas)' },
+  { key: 'loaders', label: 'Equipamento de carga', why: 'mais equipamentos de carga ou mais horas' },
+  { key: 'overhead', label: 'Custos fixos', why: 'iguais entre opções; pesam mais por t quando a produção é menor' },
+] as const;
+
+export interface DriverRow {
+  configId: string;
+  scenarioId: string;
+  tonnes: number;
+  /** R$/t sem desconto por categoria */
+  perT: Record<(typeof DRIVER_CATS)[number]['key'], number>;
+  totalPerT: number;
+  truckHoursPerKt: number;
+  dieselLPerT: number;
+  peakTrucks: number;
+  avgTrucks: number;
+  people: number;
+  replacements: number;
+}
+
+export function costDrivers(e: Evaluation): DriverRow {
+  const T = Math.max(1, e.tonnes);
+  const perT = Object.fromEntries(DRIVER_CATS.map((c) => [c.key, e.periods.reduce((a, p) => a + (p[c.key] as number), 0) / T])) as DriverRow['perT'];
+  const yrs = e.periods.reduce((a, p) => a + p.years, 0) || 1;
+  return {
+    configId: e.configId,
+    scenarioId: e.scenarioId,
+    tonnes: e.tonnes,
+    perT,
+    totalPerT: Object.values(perT).reduce((a, b) => a + b, 0),
+    truckHoursPerKt: (e.periods.reduce((a, p) => a + p.truckHours, 0) / T) * 1000,
+    dieselLPerT: e.periods.reduce((a, p) => a + p.dieselL, 0) / T,
+    peakTrucks: e.peakTrucks,
+    avgTrucks: e.periods.reduce((a, p) => a + p.trucks * p.years, 0) / yrs,
+    people: e.people,
+    replacements: e.replacements,
+  };
+}
+
+/** Frases que explicam por que uma opção custa mais (ou menos) que a referência. */
+export function explainDifference(a: DriverRow, ref: DriverRow, nameA: string, nameRef: string): string[] {
+  const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const out: string[] = [];
+  const d = a.totalPerT - ref.totalPerT;
+  if (Math.abs(d) < 0.005) return [`${nameA} tem o mesmo custo por tonelada que ${nameRef}.`];
+  out.push(`${nameA} custa ${brl(Math.abs(d))}/t ${d > 0 ? 'a mais' : 'a menos'} que ${nameRef} (sem desconto).`);
+  const parts = DRIVER_CATS.map((c) => ({ c, v: a.perT[c.key] - ref.perT[c.key] }))
+    .filter((x) => Math.abs(x.v) >= 0.01)
+    .sort((x, y) => Math.abs(y.v) - Math.abs(x.v))
+    .slice(0, 3);
+  for (const { c, v } of parts) {
+    let why: string = c.why;
+    if (c.key === 'labor' || c.key === 'capex') why = `pico de ${a.peakTrucks} contra ${ref.peakTrucks} caminhões${a.replacements !== ref.replacements ? `, ${a.replacements} contra ${ref.replacements} trocas` : ''}`;
+    if (c.key === 'diesel' || c.key === 'maintenance' || c.key === 'tires') why = `${a.truckHoursPerKt.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} contra ${ref.truckHoursPerKt.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} horas de caminhão por mil t`;
+    if (c.key === 'overhead') why = `${Math.round(a.tonnes / 1e3).toLocaleString('pt-BR')} contra ${Math.round(ref.tonnes / 1e3).toLocaleString('pt-BR')} mil t para diluir o custo fixo`;
+    out.push(`${c.label}: ${v > 0 ? '+' : '−'}${brl(Math.abs(v))}/t (${why}).`);
+  }
+  return out;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* Ranking e sensibilidade                                                    */

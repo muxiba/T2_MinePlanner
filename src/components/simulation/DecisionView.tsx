@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Award, Download, Play } from 'lucide-react';
+import { Award, Download, FileText, Play } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
 import { calendarWorkDays, emptyPlan, type PeriodResult } from '@/sim/plan';
-import { CRITERIA, defaultFinance, evaluate, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
+import { CASH_ITEMS, CRITERIA, DRIVER_CATS, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
+import { downloadMemo } from '@/sim/memo';
+import { decisionMemo } from '@/sim/memoDecision';
 import { runInWorker } from '@/sim/client';
 import { Btn, Card, Progress, inputCls, n1, t0 } from './ui';
 
@@ -176,6 +178,19 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
                 <Download size={15} /> Exportar (Excel)
               </Btn>
             )}
+            {ranked.length > 0 && chosen && (
+              <Btn
+                tone="light"
+                onClick={() =>
+                  downloadMemo(
+                    decisionMemo({ model, plan, fin, ranked, chosen, criterion, sens, optName, compareNote: compare === 'config' && scenIdsRun.length > 1 ? 'Cada configuração é avaliada em todos os cenários: precisa cumprir a meta no pior deles, e o custo é a média entre eles.' : undefined }),
+                    'memorial_resultados_decisao.html',
+                  )
+                }
+              >
+                <FileText size={15} /> Memorial de cálculo
+              </Btn>
+            )}
           </div>
         }
       >
@@ -320,6 +335,16 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
             </Card>
           </div>
 
+          {/* --------------------------- o que move o custo --------------------------- */}
+          <Card title="O que move o custo de cada opção" description="Custo por tonelada separado por item (sem desconto e antes do crédito da frota que sobra no fim), e por que cada opção custa mais ou menos que a melhor.">
+            <Drivers ranked={ranked} name={optName} />
+          </Card>
+
+          {/* --------------------------- fluxo de caixa --------------------------- */}
+          <Card title={`Fluxo de caixa detalhado · ${optName(chosen)}`} description="Por período, em R$ sem inflação. Saídas negativas. Clique em outra opção na comparação para ver o fluxo dela.">
+            <CashFlowTable e={chosen} withRevenue={withRevenue} />
+          </Card>
+
           {/* --------------------------- como a simulação chegou aqui --------------------------- */}
           <Card title="Como a simulação chegou a este resultado" description="As etapas, com os números deste estudo.">
             <Steps model={model} chosen={chosen} evals={evals} criterion={criterion} />
@@ -378,6 +403,163 @@ const CostBars: React.FC<{ evals: Evaluation[]; name: (e: Evaluation) => string 
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* O que move o custo                                                          */
+/* -------------------------------------------------------------------------- */
+
+const Drivers: React.FC<{ ranked: Evaluation[]; name: (e: Evaluation) => string }> = ({ ranked, name }) => {
+  const rows = ranked.map((e) => ({ e, d: costDrivers(e) }));
+  const ref = rows[0];
+  if (!ref) return null;
+  return (
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-sm">
+          <thead>
+            <tr className="border-b border-black/10 text-left text-xs text-black/45">
+              <th className="py-1.5 pr-2 font-medium">Opção</th>
+              {DRIVER_CATS.map((c) => (
+                <th key={c.key} className="py-1.5 pr-2 text-right font-medium" title={c.why}>{c.label} (R$/t)</th>
+              ))}
+              <th className="py-1.5 pr-2 text-right font-medium">Total (R$/t)</th>
+              <th className="py-1.5 pr-2 text-right font-medium">h de caminhão por mil t</th>
+              <th className="py-1.5 text-right font-medium">Caminhões (média / pico)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ e, d }, i) => (
+              <tr key={`${e.configId}|${e.scenarioId}`} className="border-b border-black/5">
+                <td className="py-1.5 pr-2 font-medium">{name(e)}</td>
+                {DRIVER_CATS.map((c) => {
+                  const diff = i > 0 ? d.perT[c.key] - ref.d.perT[c.key] : 0;
+                  return (
+                    <td key={c.key} className="py-1.5 pr-2 text-right tabular-nums">
+                      {brl2(d.perT[c.key])}
+                      {i > 0 && Math.abs(diff) >= 0.01 && <span className={clsx('block text-[11px]', diff > 0 ? 'text-red-700' : 'text-emerald-700')}>{diff > 0 ? '+' : '−'}{brl2(Math.abs(diff))}</span>}
+                    </td>
+                  );
+                })}
+                <td className="py-1.5 pr-2 text-right font-semibold tabular-nums">{brl2(d.totalPerT)}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">{n1(d.truckHoursPerKt)}</td>
+                <td className="py-1.5 text-right tabular-nums">{n1(d.avgTrucks)} / {d.peakTrucks}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 1 && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {rows.slice(1, 5).map(({ e, d }) => (
+            <div key={`${e.configId}|${e.scenarioId}`} className="rounded-lg bg-black/[0.03] px-3 py-2 text-sm text-black/70">
+              {explainDifference(d, ref.d, name(e), name(ref.e)).map((line, i) => (
+                <p key={i} className={i === 0 ? 'font-medium text-black/85' : 'mt-0.5'}>{i > 0 && '• '}{line}</p>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-black/45">
+        Mais caminhões elevam compra e mão de obra; mais horas de caminhão por tonelada (ciclo longo, filas, caçamba menor) elevam diesel, manutenção e pneus; a vida útil define quantas trocas cabem no horizonte. Custos fixos são iguais para todas as opções.
+      </p>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Fluxo de caixa                                                              */
+/* -------------------------------------------------------------------------- */
+
+const CashFlowTable: React.FC<{ e: Evaluation; withRevenue: boolean }> = ({ e, withRevenue }) => {
+  const cf = cashFlow(e);
+  const money = (v: number) => {
+    const k = Math.round(v / 1e3);
+    return <span className={clsx(k < 0 && 'text-red-700')}>{(k === 0 ? 0 : k).toLocaleString('pt-BR')}</span>;
+  };
+  const items = CASH_ITEMS.filter((c) => withRevenue || c.key !== 'revenue');
+  const cell = 'py-1 pr-2 text-right tabular-nums whitespace-nowrap';
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ minWidth: 260 + (cf.rows.length + 2) * 90 }}>
+          <thead>
+            <tr className="border-b border-black/10 text-left text-xs text-black/45">
+              <th className="sticky left-0 bg-white py-1.5 pr-2 font-medium">R$ mil</th>
+              {cf.rows.map((r) => (
+                <th key={r.label} className="py-1.5 pr-2 text-right font-medium">{r.label}</th>
+              ))}
+              <th className="py-1.5 pr-2 text-right font-medium">Residual final</th>
+              <th className="py-1.5 text-right font-medium">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((c) => (
+              <tr key={c.key} className="border-b border-black/5">
+                <td className="sticky left-0 bg-white py-1 pr-2">{c.label}</td>
+                {cf.rows.map((r) => (
+                  <td key={r.label} className={cell}>{money(c.sign * r.values[c.key])}</td>
+                ))}
+                <td className={cell} />
+                <td className={cell}>{money(c.sign * cf.totals[c.key])}</td>
+              </tr>
+            ))}
+            <tr className="border-b border-black/5">
+              <td className="sticky left-0 bg-white py-1 pr-2">Valor residual da frota restante</td>
+              {cf.rows.map((r) => (
+                <td key={r.label} className={cell} />
+              ))}
+              <td className={cell}>{money(cf.salvage.value)}</td>
+              <td className={cell}>{money(cf.salvage.value)}</td>
+            </tr>
+            <tr className="border-t-2 border-black/30 font-semibold">
+              <td className="sticky left-0 bg-white py-1 pr-2">Fluxo líquido</td>
+              {cf.rows.map((r) => (
+                <td key={r.label} className={cell}>{money(r.net)}</td>
+              ))}
+              <td className={cell}>{money(cf.salvage.value)}</td>
+              <td className={cell}>{money(cf.totals.net)}</td>
+            </tr>
+            <tr className="text-black/55">
+              <td className="sticky left-0 bg-white py-1 pr-2">Fator de desconto</td>
+              {cf.rows.map((r) => (
+                <td key={r.label} className={cell}>{r.pvFactor.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}</td>
+              ))}
+              <td className={cell}>{e.endPvFactor.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}</td>
+              <td className={cell} />
+            </tr>
+            <tr>
+              <td className="sticky left-0 bg-white py-1 pr-2">Fluxo em valor presente</td>
+              {cf.rows.map((r) => (
+                <td key={r.label} className={cell}>{money(r.pvNet)}</td>
+              ))}
+              <td className={cell}>{money(cf.salvage.pv)}</td>
+              <td className={clsx(cell, 'font-semibold')}>{money(cf.totals.pvNet)}</td>
+            </tr>
+            <tr>
+              <td className="sticky left-0 bg-white py-1 pr-2">VP acumulado</td>
+              {cf.rows.map((r) => (
+                <td key={r.label} className={cell}>{money(r.cumPvNet)}</td>
+              ))}
+              <td className={cell}>{money(cf.totals.pvNet)}</td>
+              <td className={cell} />
+            </tr>
+            <tr className="text-black/55">
+              <td className="sticky left-0 bg-white py-1 pr-2">Custo por tonelada (R$/t)</td>
+              {cf.rows.map((r, i) => (
+                <td key={r.label} className={cell}>{e.periods[i].tonnes ? brl2(r.cost / e.periods[i].tonnes) : '—'}</td>
+              ))}
+              <td className={cell} />
+              <td className={cell}>{e.tonnes ? brl2(cf.totals.cost / e.tonnes) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-black/45">
+        Fluxo em valor presente = fluxo ÷ (1 + taxa)^(anos até o meio do período). {withRevenue ? 'A soma é o VPL do transporte.' : 'Sem receita: a soma é o VPL dos custos (negativo).'} A frota que sobra no fim é creditada pelo valor depreciado.
+      </p>
     </div>
   );
 };

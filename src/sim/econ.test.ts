@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FleetLedger, agedDf, defaultFinance, evaluate, rank, sensitivity, type EquipFinance } from './econ';
+import { FleetLedger, agedDf, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type EquipFinance } from './econ';
 import { emptyPlan, type PeriodResult } from './plan';
 
 const eq: EquipFinance = { price: 1000, residualPct: 20, lifeH: 10_000, dieselMode: 'lph', dieselLph: 10, dieselLpt: 0, maintPerH: 1, maintEscPct: 100, tiresPerH: 0, operatorsPerUnit: 1, dfLossPer10kH: 5 };
@@ -52,5 +52,21 @@ describe('vida útil e economia', () => {
     );
     expect(sens[0].key).toBe('diesel');
     expect(sens[0].high).toBeGreaterThan(sens[0].low);
+  });
+
+  it('fluxo de caixa fecha com o VPL e explica a diferença de custo', () => {
+    const plan = emptyPlan();
+    plan.periods = plan.periods.slice(0, 2);
+    const fin = { ...defaultFinance([{ id: 'A', payloadT: 40 }]), discountRate: 10, overheadPerYear: 0, revenuePerT: 5, revenueMaterial: '' };
+    fin.trucks.A = { ...eq };
+    const a = evaluate([pr(1, 2, 1000), pr(2, 2, 1000)], plan, fin, 'A', 40, 's1');
+    const cf = cashFlow(a);
+    expect(cf.rows.length).toBe(2);
+    expect(cf.totals.pvNet).toBeCloseTo(a.npv!, 4);
+    expect(cf.totals.cost).toBeCloseTo(a.totalCost, 4);
+    const b = evaluate([pr(1, 4, 1000), pr(2, 4, 1000)], plan, fin, 'A', 40, 's2');
+    const txt = explainDifference(costDrivers(b), costDrivers(a), 'B', 'A');
+    expect(txt[0].includes('a mais')).toBe(true);
+    expect(txt.some((t) => t.includes('pico de 4 contra 2'))).toBe(true);
   });
 });

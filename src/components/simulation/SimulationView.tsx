@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { ArrowLeftRight, Download, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Download, FileText, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
 import type { DetailedPremises } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
@@ -21,6 +21,8 @@ import { periodModelWithFleet, type PeriodResult } from '@/sim/plan';
 import { REVENUE_REF_PER_T, SICRO_REF, sicroTruckCosts, withReferenceCosts } from '@/sim/references';
 import { FLOW_LABELS, PERIOD_KINDS, flowDryTonnes, flowShares, periodMonths, periodText, wetFactor, PREMISES_CONFIG_ID, circuitPeriod, circuitTargets, flowWetTonnes, hoursBreakdown, linkOn, premisesLoaderTph, receivingLoaders, withPremises, type Flow, type PeriodKind } from '@/sim/link';
 import { CycleBars, SweepChart } from './charts';
+import { downloadMemo } from '@/sim/memo';
+import { circuitMemo } from '@/sim/memoCircuit';
 import { Btn, Card, Num, Progress, brl, inputCls, n1, pc, t0 } from './ui';
 
 /**
@@ -182,7 +184,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   const [matrix, setMatrix] = useState<MatrixCell[] | null>(null);
   const [matrixBusy, setMatrixBusy] = useState<number | null>(null);
   const [sel, setSel] = useState<{ configId: string; scenarioId: string }>({ configId: model.configs[0]?.id ?? 'A', scenarioId: model.scenarios[0]?.id ?? 's1' });
-  const [sweep, setSweep] = useState<{ points: SweepPoint[]; minFleet: number | null; saturation: number; scope: 'sistema' | 'circuito' } | null>(null);
+  const [sweep, setSweep] = useState<{ points: SweepPoint[]; minFleet: number | null; saturation: number; scope: 'sistema' | 'circuito'; target?: number; circuitName?: string } | null>(null);
   const [sweepBusy, setSweepBusy] = useState<number | null>(null);
   const [sweepCircuit, setSweepCircuit] = useState<string>('');
 
@@ -208,17 +210,22 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
     setError(null);
     setSweepBusy(0);
     try {
-      const res = await runInWorker<{ points: SweepPoint[]; minFleet: number | null; saturation: number; scope: 'sistema' | 'circuito' }>(
-        { kind: 'sweep', model, configId: sel.configId, scenarioId: sel.scenarioId, circuitId: sweepCircuit || model.circuits[0].id, maxTrucks: 30 },
+      const cid = sweepCircuit || model.circuits[0].id;
+      const cc = calc.find((x) => x.circuitId === cid);
+      const targetTpd = model.circuits.length > 1 && cc && cc.workDays > 0 ? cc.tonnes / cc.workDays : undefined;
+      const res = await runInWorker<{ points: SweepPoint[]; minFleet: number | null; saturation: number; scope: 'sistema' | 'circuito'; target?: number }>(
+        { kind: 'sweep', model, configId: sel.configId, scenarioId: sel.scenarioId, circuitId: cid, maxTrucks: 30, targetTpd },
         (f) => setSweepBusy(f),
       );
-      setSweep(res);
+      setSweep({ ...res, circuitName: model.circuits.find((c) => c.id === cid)?.name });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSweepBusy(null);
     }
   };
+
+  const downloadCircuitMemo = () => downloadMemo(circuitMemo({ model, premises, calc, per, matrix, sel, sweep }), 'memorial_resultados_circuito.html');
 
   const exportCsv = () => {
     if (!matrix) return;
@@ -1047,6 +1054,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                 description={`${model.replications} repetições por célula, ${model.scenarios[0]?.days ?? 7} dias simulados cada. Valores em t/dia (média e intervalo de 95%).`}
                 actions={
                   <div className="flex items-center gap-2">
+                    <Btn tone="light" onClick={downloadCircuitMemo}>
+                      <FileText size={15} /> Memorial de cálculo
+                    </Btn>
                     {matrix && (
                       <Btn tone="light" onClick={exportCsv}>
                         <Download size={15} /> Exportar (Excel)
@@ -1058,6 +1068,20 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   </div>
                 }
               >
+                <details className="mb-3 rounded-lg bg-black/[0.03] px-3 py-2 text-sm text-black/70">
+                  <summary className="cursor-pointer font-medium text-emerald-700">Como ler estes resultados</summary>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    <li><b>O que é cada célula:</b> a simulação de {per.workDays > 0 ? 'um período típico' : 'vários dias'} com a configuração da linha e as condições do cenário da coluna, repetida {model.replications} vezes com sorteios diferentes (quebras, tempos de carga, filas).</li>
+                    <li><b>Número grande:</b> toneladas úmidas descarregadas por dia de operação (média das repetições), somando todos os circuitos.</li>
+                    <li><b>Faixa (ex.: 6.100–6.400):</b> intervalo de 95% de confiança da média. Faixa larga = resultado instável; aumente as repetições.</li>
+                    <li><b>% da meta:</b> produção ÷ meta diária (meta do período ÷ dias trabalhados). Em vermelho, abaixo da meta.</li>
+                    <li><b>R$/t:</b> custo do transporte por tonelada: caminhões × custo fixo × horas do período + horas trabalhadas × custo operacional, ÷ toneladas.</li>
+                    <li><b>Ciclo por configuração:</b> quanto tempo cada etapa da viagem toma, em média, já com as filas que a simulação gerou (o cálculo analítico usa uma fila fixa).</li>
+                    <li><b>Ocupação</b> da carga, da descarga e da carregadeira: fração do tempo atendendo. Acima de ~85% o recurso é o gargalo: mais caminhões viram fila.</li>
+                    <li><b>Para onde vai o tempo:</b> as horas de cada caminhão divididas entre trabalho, filas, paradas programadas, manutenção e fora do turno — a matriz que explica o resultado.</li>
+                    <li>O <b>memorial de cálculo</b> traz as fórmulas com os números deste estudo, a metodologia e todas as tabelas, pronto para imprimir ou salvar em PDF.</li>
+                  </ul>
+                </details>
                 {matrixBusy !== null && <Progress value={matrixBusy} label="Simulando…" />}
                 {matrix && (
                   <div className="overflow-x-auto">
@@ -1240,7 +1264,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
 
               <Card
                 title="Busca da frota mínima"
-                description="Varia o nº de caminhões de um circuito (os demais fixos) e mostra onde a produção atinge a meta e onde satura."
+                description="Responde: com quantos caminhões este circuito atinge a meta, e a partir de quantos não adianta pôr mais. Testa 1, 2, 3… caminhões no circuito escolhido (os demais fixos), simulando cada quantidade com as repetições."
                 actions={
                   <div className="flex flex-wrap items-end gap-2">
                     {selector}
@@ -1257,12 +1281,25 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     <Btn onClick={() => void runSweep()} busy={sweepBusy !== null}>
                       <Play size={15} /> Buscar
                     </Btn>
+                    <Btn tone="light" onClick={downloadCircuitMemo}>
+                      <FileText size={15} /> Memorial
+                    </Btn>
                   </div>
                 }
               >
+                <details className="mb-3 rounded-lg bg-black/[0.03] px-3 py-2 text-sm text-black/70">
+                  <summary className="cursor-pointer font-medium text-emerald-700">Como a busca funciona</summary>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    <li>Usa a configuração e o cenário selecionados na matriz acima ({model.configs.find((c) => c.id === sel.configId)?.name} · {model.scenarios.find((x) => x.id === sel.scenarioId)?.name}).</li>
+                    <li><b>Frota mínima</b> (ponto escuro): a menor quantidade cuja produção média alcança a meta — do sistema quando há um só circuito, do próprio circuito (meta do circuito ÷ dias trabalhados) quando há vários.</li>
+                    <li><b>Saturação:</b> a partir dela, cada caminhão a mais rende menos de 3%. O gargalo passou a ser a carga, a balança ou a descarga: mais caminhões só aumentam a fila e o custo.</li>
+                    <li>Entre a frota mínima e a saturação está a folga: caminhões extras ali protegem a meta contra quebras e meses ruins.</li>
+                    <li>A busca para quando a produção deixa de crescer 1% por caminhão por dois passos seguidos.</li>
+                  </ul>
+                </details>
                 {sweepBusy !== null && <Progress value={sweepBusy} label="Testando frotas…" />}
-                {sweep && <SweepChart points={sweep.points} target={model.targetTpd} minFleet={sweep.minFleet} saturation={sweep.saturation} scope={sweep.scope} />}
-                {!sweep && sweepBusy === null && <p className="text-sm text-black/50">Defina a meta em Circuito → Parâmetros gerais e clique em Buscar.</p>}
+                {sweep && <SweepChart points={sweep.points} target={sweep.target ?? model.targetTpd} minFleet={sweep.minFleet} saturation={sweep.saturation} scope={sweep.scope} />}
+                {!sweep && sweepBusy === null && <p className="text-sm text-black/50">Escolha o circuito e clique em Buscar. A meta vem do período (Circuito → Período simulado) ou de Parâmetros gerais.</p>}
               </Card>
             </>
           )}

@@ -11,7 +11,7 @@ import type { SimModel } from './types';
 
 export type WorkerRequest =
   | { id: number; kind: 'matrix'; model: SimModel; configIds: string[]; scenarioIds: string[] }
-  | { id: number; kind: 'sweep'; model: SimModel; configId: string; scenarioId: string; circuitId: string; maxTrucks: number }
+  | { id: number; kind: 'sweep'; model: SimModel; configId: string; scenarioId: string; circuitId: string; maxTrucks: number; targetTpd?: number }
   | { id: number; kind: 'trace'; model: SimModel; configId: string; scenarioId: string; hours: number }
   | { id: number; kind: 'terrain'; file: File; mode: 'faces' | 'contours' }
   | { id: number; kind: 'dxfLayers'; file: File }
@@ -41,6 +41,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const scenario = req.model.scenarios.find((s) => s.id === req.scenarioId)!;
       const res = fleetSweep(req.model, { config, scenario }, req.circuitId, req.maxTrucks, Math.min(req.model.replications, 5), (p) =>
         post({ id: req.id, progress: Math.min(0.95, p.trucks / req.maxTrucks) }),
+        req.targetTpd,
       );
       post({ id: req.id, result: res });
     } else if (req.kind === 'trace') {
