@@ -384,7 +384,8 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
     const loadMin = loadTime(cfg, c);
     const dumpMin = cfg.dumpMin + cfg.maneuverMin;
     const weighMin = c.weighing ? c.weighMin : 0;
-    const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interference;
+    const interfC = interference + Math.max(0, cfg.trafficDelayMin ?? 0);
+    const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interfC;
     const payloadT = payloadFor(cfg, c);
     const perTruckTph = cycleMin > 0 ? (payloadT * 60) / cycleMin : 0;
     const needTph = prodH > 0 ? tonnes / prodH : 0;
@@ -402,7 +403,7 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
       dumpMin,
       weighMin,
       queueMin: queue,
-      interferenceMin: interference,
+      interferenceMin: interfC,
       cycleMin,
       payloadT,
       perTruckTph,

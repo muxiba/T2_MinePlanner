@@ -46,6 +46,8 @@ export interface TruckConfig {
   vehicle?: 'mina' | 'rodoviario';
   /** resistência ao rolamento própria (%), ex.: estrada pavimentada ≈ 1,5; vazio = a geral do modelo */
   rollingResistance?: number;
+  /** interferências próprias deste veículo (min por viagem): tráfego, travessias urbanas, pedágio, semáforos */
+  trafficDelayMin?: number;
   /** custo de propriedade/locação (R$/h calendário) */
   costFixedPerH: number;
   /** custo operacional (R$/h trabalhada): combustível, operador, pneus, manutenção */

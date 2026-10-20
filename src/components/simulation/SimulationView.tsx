@@ -5,7 +5,7 @@ import type { DetailedPremises } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { CONFIG_PRESETS, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
-import { limitsOf, payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
+import { configFor, limitsOf, payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
 import { DOT_KINDS, makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
 import { combineDem, periodDem, type Dem } from '@/sim/dem';
@@ -13,7 +13,7 @@ import View3D from './View3D';
 import { runInWorker } from '@/sim/client';
 import { loadLocal, removeLocal, saveLocal } from '@/sim/storage';
 import MapCanvas, { DOT_COLORS, LOADER_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
-import AnimTables from './AnimTables';
+import AnimTables, { type AnimInfo, type AnimPeriod } from './AnimTables';
 import PlanView from './PlanView';
 import FinanceView from './FinanceView';
 import DecisionView from './DecisionView';
@@ -279,8 +279,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   const [animT, setAnimT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(120);
+  /** dias de operação animados */
+  const [animDays, setAnimDays] = useState(1);
   const animator = useMemo(() => (anim ? makeAnimator(anim.trace, anim.geometry, anim.loaderTrace) : null), [anim]);
-  const [animInfo, setAnimInfo] = useState<{ name: string; material: string }[]>([]);
+  const [animInfo, setAnimInfo] = useState<AnimInfo[]>([]);
+  const [animPer, setAnimPer] = useState<AnimPeriod | undefined>(undefined);
   const raf = useRef<number | null>(null);
 
   useEffect(() => {
@@ -324,20 +327,27 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
           ],
         };
       }
-      const res = await runInWorker<RunResult>({ kind: 'trace', model: m, configId: sel.configId, scenarioId: sel.scenarioId, hours: 24 });
+      const res = await runInWorker<RunResult>({ kind: 'trace', model: m, configId: sel.configId, scenarioId: sel.scenarioId, hours: animDays * 24 + model.warmupH });
       setAnimRoutes(animPeriod > 0 ? m.routes : null);
       // material de cada circuito animado (para a tabela de produção)
       setAnimInfo(
         res.geometry.map((g) => {
           const c = m.circuits.find((x) => x.id === g.circuitId);
+          const vehicle = c ? configFor(m, c, m.configs.find((x) => x.id === sel.configId) ?? m.configs[0]).vehicle ?? 'mina' : 'mina';
           if (animPeriod > 0 && model.plan) {
             const mv = model.plan.movements.find((x) => `pm-${x.id}` === g.circuitId);
-            return { name: c?.name ?? g.circuitId, material: mv?.material ?? 'Material' };
+            return { name: c?.name ?? g.circuitId, material: mv?.material ?? 'Material', vehicle };
           }
           const flow = c ? calc.find((x) => x.circuitId === c.id)?.flow : undefined;
-          return { name: c?.name ?? g.circuitId, material: flow ? FLOW_LABELS[flow] : 'Material' };
+          return { name: c?.name ?? g.circuitId, material: flow ? FLOW_LABELS[flow] : 'Material', vehicle };
         }),
       );
+      if (animPeriod > 0 && model.plan) {
+        const pp = model.plan.periods[animPeriod - 1];
+        setAnimPer({ label: pp?.label ?? `Período ${animPeriod}`, calendarDays: pp?.calendarDays ?? 365, workDays: pp?.workDays ?? 300, months: (pp?.calendarDays ?? 365) >= 360 ? model.plan.calendar : undefined });
+      } else {
+        setAnimPer({ label: periodText(per.kind, per.qty, model.period?.days), calendarDays: per.calendarDays, workDays: per.workDays, months: per.calendarDays >= 360 && model.plan ? model.plan.calendar : undefined });
+      }
       setAnimOverlays(ov);
       setAnim(res);
       setAnimT(model.warmupH * 60);
@@ -350,7 +360,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
   };
 
   const frame = animator ? animator.frame(animT) : null;
-  const clock = `${String(Math.floor(animT / 60) % 24).padStart(2, '0')}:${String(Math.floor(animT % 60)).padStart(2, '0')}`;
+  const hhmm = `${String(Math.floor(animT / 60) % 24).padStart(2, '0')}:${String(Math.floor(animT % 60)).padStart(2, '0')}`;
+  const clock = animator && animator.end > 1500 ? `Dia ${Math.floor(animT / 1440) + 1} · ${hhmm}` : hhmm;
 
   /* -------------------------------- render ------------------------------- */
   const tabs: { id: Tab; label: string }[] = [
@@ -913,6 +924,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                       help={`0 = geral (${limitsOf(model).empty} km/h)`} />
                     <Num label="Resist. ao rolamento" suffix="%" step={0.5} value={c.rollingResistance ?? model.rollingResistance} onChange={(v) => setConfig(c.id, { rollingResistance: v })}
                       help="Asfalto ≈ 1,5 · mina 2–3 · via ruim 4–6" />
+                    <Num label="Interferências de tráfego" suffix="min/viagem" step={0.5} value={c.trafficDelayMin ?? 0} onChange={(v) => setConfig(c.id, { trafficDelayMin: Math.max(0, v) })}
+                      help="Próprias deste veículo: tráfego, travessias urbanas, pedágio. Somam às das premissas." />
                   </div>
                   {(() => {
                     const ref = sicroTruckCosts(model.scenarios[0]?.hoursPerDay ?? 24, c.vehicle);
@@ -1311,7 +1324,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
         <div className="space-y-4">
           <Card
             title="Animação do circuito"
-            description="24 horas de operação simuladas, com filas na carga e na descarga."
+            description="Dias de operação simulados viagem a viagem: filas, quebras, troca de turno, refeição, abastecimento e interferências. A matriz do período projeta o resultado para o período inteiro, com os dias de chuva."
             actions={
               <div className="flex flex-wrap items-end gap-2">
                 {selector}
@@ -1326,6 +1339,14 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                     </select>
                   </label>
                 )}
+                <label className="text-xs text-black/55">
+                  Duração animada
+                  <select className={clsx(inputCls, 'mt-1 w-36')} value={animDays} onChange={(e) => setAnimDays(Number(e.target.value))}>
+                    {[1, 2, 3, 7, 14, 30].map((d) => (
+                      <option key={d} value={d}>{d === 1 ? '1 dia' : d === 7 ? '1 semana' : d === 14 ? '2 semanas' : d === 30 ? '1 mês (30 dias)' : `${d} dias`}</option>
+                    ))}
+                  </select>
+                </label>
                 <Btn onClick={() => void runAnim()} busy={animBusy} disabled={!ready && !(animPeriod > 0)}>
                   <Play size={15} /> Gerar
                 </Btn>
@@ -1371,8 +1392,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   <label className="flex items-center gap-2 text-sm text-black/60">
                     Velocidade
                     <select className={clsx(inputCls, 'w-28')} value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-                      {[30, 60, 120, 300, 600, 1200].map((v) => (
-                        <option key={v} value={v}>{v}×</option>
+                      {[30, 60, 120, 300, 600, 1200, 3600, 14400, 43200].map((v) => (
+                        <option key={v} value={v}>{v >= 3600 ? `${v / 3600} h/s` : `${v}×`}</option>
                       ))}
                     </select>
                   </label>
@@ -1407,11 +1428,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   className="w-full accent-emerald-600"
                   aria-label="Linha do tempo"
                 />
-                <AnimTables animator={animator} from={model.warmupH * 60} t={animT} info={animInfo} />
+                <AnimTables animator={animator} from={model.warmupH * 60} t={animT} info={animInfo} period={animPer} />
                 <p className="text-xs text-black/45">
                   Equipamentos desenhados em escala (caminhão 10,5 × 2,6 m; escavadeira 9,5 × 3,3 m): aproxime com a roda do mouse. Com pouco zoom, ficam com um tamanho mínimo para continuar visíveis.{' '}
                   {animPeriod > 0 && (periodResults?.some((r) => r.period === animPeriod && r.configId === sel.configId) ? 'Frota dimensionada para o período. ' : 'Rode “Dimensionar” no Plano de lavra para usar a frota do período; por ora, 1 caminhão por movimentação. ')}
-                  Produção nas 24 h desta rodada: {t0(anim!.stats.tonnes)} t em {anim!.stats.trips} viagens. A animação mostra uma repetição; os
+                  Produção nesta rodada ({animDays === 1 ? '24 h' : `${animDays} dias`}, sem o aquecimento): {t0(anim!.stats.tonnes)} t em {anim!.stats.trips} viagens. A animação mostra uma repetição; os
                   resultados usam a média de {model.replications}.
                 </p>
               </div>

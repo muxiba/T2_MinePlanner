@@ -348,7 +348,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     }
     return out.filter((x) => x.t > a && x.t <= b).sort((x, y) => x.t - y.t);
   };
-  const interf = stops && stops.interferenceMin > 0 ? stops.interferenceMin / 2 : 0;
+  /** interferências na via (min por viagem): as das premissas + as próprias do veículo (tráfego em estrada) */
+  const interfBase = stops && stops.interferenceMin > 0 ? stops.interferenceMin : 0;
 
   type Truck = {
     id: number;
@@ -405,6 +406,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       payload: payloadFor(cfg, c),
       loadMean: loadTime(cfg, c),
       cfg,
+      /** média de cada espera (metade na ida, metade na volta) */
+      interf: (interfBase + Math.max(0, cfg.trafficDelayMin ?? 0)) / 2,
     };
   });
 
@@ -490,7 +493,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       const tr = lognormal(r, x.tt.loaded, cv * 0.5);
       const ta = t + d + tr;
       // interferências na via (cruzamentos, equipamentos de apoio, tráfego): espera no trajeto
-      const w = interf ? exp(r, interf) : 0;
+      const w = x.interf ? exp(r, x.interf) : 0;
       if (w > 0.05) {
         heap.push(ta, () => {
           setState(k, 'interferencia', ta);
@@ -551,7 +554,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       setState(k, 'vazio', t1);
       const tr = lognormal(r, x.tt.empty, cv * 0.5);
       const t2 = t1 + tr;
-      const wE = interf ? exp(r, interf) : 0;
+      const wE = x.interf ? exp(r, x.interf) : 0;
       const endEmpty = (t2: number) => {
         const productive = t2 - k.cycleStart;
         k.opMin += productive;
