@@ -217,7 +217,12 @@ export function premisesSpeed(model: SimModel, premises: DetailedPremises): Spee
 export function premisesConfig(model: SimModel, premises: DetailedPremises, prev?: TruckConfig): TruckConfig {
   return {
     id: PREMISES_CONFIG_ID,
-    name: `P – Frota das premissas (${premises.truckCapacity || 0} t${premises.truckVolumeM3 ? `, ${premises.truckVolumeM3} m³` : ''})`,
+    name: `Premissas: ${catalogOf(premises).trucks.find((t) => t.id === premises.truckClassId)?.name ?? 'caminhão'} (${premises.truckCapacity || 0} t${premises.truckVolumeM3 ? `, ${premises.truckVolumeM3} m³` : ''})`,
+    vehicle: prev?.vehicle,
+    speedLimitLoadedKmh: prev?.speedLimitLoadedKmh,
+    speedLimitEmptyKmh: prev?.speedLimitEmptyKmh,
+    rollingResistance: prev?.rollingResistance,
+    trafficDelayMin: prev?.trafficDelayMin,
     payloadT: premises.truckCapacity || 40,
     volumeM3: premises.truckVolumeM3 || undefined,
     dumpMin: Math.max(0, premises.dumpingTime || 0),
@@ -226,6 +231,12 @@ export function premisesConfig(model: SimModel, premises: DetailedPremises, prev
     costFixedPerH: prev?.costFixedPerH ?? 0,
     costVarPerH: prev?.costVarPerH ?? 0,
   };
+}
+
+/** Tira o prefixo de letra antigo (“A – …”): as letras eram só identificadores internos. */
+export function cleanConfigName<T extends { name: string }>(c: T): T {
+  const name = c.name.replace(/^[A-Z]\s*[–-]\s+/, '').replace(/^Basculante 6x4 \(frota atual\)$/, 'Basculante 6x4 – 27 t');
+  return name === c.name ? c : { ...c, name };
 }
 
 /** Taxa efetiva da carga (t/h) que reproduz o tempo de carga das premissas para o caminhão das premissas. */
@@ -240,7 +251,7 @@ export function withPremises(model: SimModel, premises: DetailedPremises): SimMo
   if (!linkOn(model)) return model;
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : 2.0;
   const prevP = model.configs.find((c) => c.id === PREMISES_CONFIG_ID);
-  const configs = [premisesConfig(model, premises, prevP), ...model.configs.filter((c) => c.id !== PREMISES_CONFIG_ID)];
+  const configs = [premisesConfig(model, premises, prevP), ...model.configs.filter((c) => c.id !== PREMISES_CONFIG_ID).map(cleanConfigName)];
   const hours = premises.contractedHoursMina || 24;
   // perdas detalhadas: cada parada vira evento na simulação e a eficiência cobre só o que não foi listado (100%)
   const L = premises.losses?.enabled ? lossesOf(premises) : null;
@@ -343,9 +354,15 @@ export function circuitPeriod(model: SimModel, premises: DetailedPremises) {
   const p = model.period ?? { kind: 'mes' as PeriodKind };
   const qty = p.qty ?? 1;
   const cal = model.plan?.calendar;
-  const d = periodDays(p.kind, cal, p.kind === 'dias' ? p.days ?? qty : undefined, undefined, qty);
+  let d = periodDays(p.kind, cal, p.kind === 'dias' ? p.days ?? qty : undefined, undefined, qty);
+  // 1 mês ligado às premissas: o mesmo calendário diário do 2. Dimensionamento (mesmas horas)
+  const dc = premises.dailyCalendar;
+  if (linkOn(model) && p.kind === 'mes' && qty === 1 && dc?.length) {
+    const hpd = premises.contractedHoursMina || 24;
+    d = { work: dc.reduce((a, x) => a + (x.hoursMina || 0), 0) / hpd, calendar: dc.length };
+  }
   const romT = p.romT ?? suggestedRomT(premises, p.kind, p.kind === 'dias' ? p.days ?? qty : undefined, qty);
-  return { kind: p.kind, qty, days: p.days, romT, suggested: p.romT === undefined, workDays: d.work, calendarDays: d.calendar };
+  return { kind: p.kind, qty, days: p.days, romT, suggested: p.romT === undefined, workDays: d.work, calendarDays: d.calendar, fromPremisesCalendar: linkOn(model) && p.kind === 'mes' && qty === 1 && !!dc?.length };
 }
 
 /** Meta de cada circuito no período, ciclo analítico e caminhões necessários (igual ao Dimensionamento). */

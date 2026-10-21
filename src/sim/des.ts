@@ -365,7 +365,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const stateTime: Partial<Record<TruckState, number>> = {};
   let tonnes = 0;
   let trips = 0;
-  const perC = circuits.map((c) => ({ name: c.name, tonnes: 0, trips: 0 }));
+  const perC = circuits.map((c) => ({ name: c.name, tonnes: 0, trips: 0, cycleSum: 0, cycles: 0 }));
   let workedMin = 0;
   let truckCount = 0;
 
@@ -558,6 +558,10 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       const endEmpty = (t2: number) => {
         const productive = t2 - k.cycleStart;
         k.opMin += productive;
+        if (k.cycleStart >= warm && t2 <= T) {
+          perC[k.ci].cycleSum += productive;
+          perC[k.ci].cycles++;
+        }
         const loss = (productive * (1 - eff)) / eff;
         if (loss > 0.01) {
           setState(k, 'perdas', t2);
@@ -633,7 +637,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     plantStockoutH: recvs.reduce((a, x) => a + x.stockout, 0) / 60,
     plantStockMinT: Math.min(...recvs.map((x) => x.plantMin)),
     costPerT: tonnes > 0 ? costTotal / tonnes : 0,
-    perCircuit: perC.map((p) => ({ ...p, tph: p.tonnes / hours })),
+    perCircuit: perC.map((p) => ({ name: p.name, tonnes: p.tonnes, trips: p.trips, tph: p.tonnes / hours, cycleMin: p.cycles ? p.cycleSum / p.cycles : 0 })),
   };
   return { stats, trace, geometry, loaderTrace };
 }
@@ -680,6 +684,7 @@ export function aggregate(runs: RunStats[]): AggregateStats {
         name: p.name,
         tph: runs.reduce((a, s) => a + s.perCircuit[i].tph, 0) / runs.length,
         tpd: summarize(runs.map((s) => s.perCircuit[i].tph * 24)),
+        cycleMin: runs.reduce((a, s) => a + (s.perCircuit[i].cycleMin ?? 0), 0) / runs.length,
       })) ?? [],
   };
 }
@@ -748,3 +753,64 @@ export function fleetSweep(
     scope: single ? ('sistema' as const) : ('circuito' as const),
   };
 }
+
+/**
+ * Frota mínima de cada circuito para a meta do circuito (t/dia), pela simulação:
+ * parte da estimativa dada, soma caminhões nos circuitos abaixo da meta até atender
+ * ou saturar (ganho < 1,5%), e depois retira o que sobrou.
+ */
+export function sizeCircuits(
+  model: SimModel,
+  opt: Omit<RunOptions, 'seed' | 'trucks'>,
+  targets: Record<string, number>,
+  start: Record<string, number>,
+  reps = Math.min(model.replications, 4),
+  onStep?: (f: number) => void,
+) {
+  const circuits = model.circuits.filter((c) => model.routes.some((r) => r.id === c.routeId));
+  const trucks: Record<string, number> = Object.fromEntries(circuits.map((c) => [c.id, Math.max(1, Math.round(start[c.id] ?? c.trucks ?? 1))]));
+  const saturated = new Set<string>();
+  const lastGot: Record<string, number> = {};
+  const ok = (a: AggregateStats, i: number, id: string) => (a.perCircuit[i]?.tpd.mean ?? 0) >= (targets[id] ?? 0) * 0.995;
+  let agg = replicate(model, { ...opt, trucks }, reps);
+  const maxIter = 40;
+  for (let it = 0; it < maxIter; it++) {
+    onStep?.(Math.min(0.8, (it + 1) / maxIter));
+    let changed = false;
+    circuits.forEach((c, i) => {
+      if (saturated.has(c.id) || ok(agg, i, c.id)) return;
+      const got = agg.perCircuit[i]?.tpd.mean ?? 0;
+      if (lastGot[c.id] !== undefined && got < lastGot[c.id] * 1.015) {
+        saturated.add(c.id);
+        trucks[c.id] = Math.max(1, trucks[c.id] - 1);
+        changed = true;
+        return;
+      }
+      lastGot[c.id] = got;
+      trucks[c.id]++;
+      changed = true;
+    });
+    if (!changed) break;
+    agg = replicate(model, { ...opt, trucks }, reps);
+  }
+  circuits.forEach((c) => {
+    while (trucks[c.id] > 1 && !saturated.has(c.id)) {
+      const test = { ...trucks, [c.id]: trucks[c.id] - 1 };
+      const a2 = replicate(model, { ...opt, trucks: test }, reps);
+      if (!circuits.every((cc, j) => saturated.has(cc.id) || ok(a2, j, cc.id))) break;
+      trucks[c.id]--;
+      agg = a2;
+    }
+  });
+  onStep?.(1);
+  return circuits.map((c, i) => ({
+    circuitId: c.id,
+    trucks: trucks[c.id],
+    targetTpd: targets[c.id] ?? 0,
+    achievedTpd: agg.perCircuit[i]?.tpd.mean ?? 0,
+    cycleMin: agg.perCircuit[i]?.cycleMin ?? 0,
+    saturated: saturated.has(c.id) && !ok(agg, i, c.id),
+  }));
+}
+
+export type SizedCircuit = ReturnType<typeof sizeCircuits>[number];

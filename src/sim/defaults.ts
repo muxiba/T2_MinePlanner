@@ -52,9 +52,9 @@ const clone = (t: SpeedTable): SpeedTable => ({ loaded: t.loaded.map((x) => ({ .
 
 export function defaultConfigs(): TruckConfig[] {
   return [
-    { id: 'A', name: 'A – Basculante 6x4 (frota atual)', payloadT: 27, volumeM3: 16, dumpMin: 1.5, maneuverMin: 1.0, speed: clone(ROAD_TRUCK_SPEED), costFixedPerH: 0, costVarPerH: 0 },
-    { id: 'B', name: 'B – Composição 9 eixos', payloadT: 48, volumeM3: 30, dumpMin: 3.0, maneuverMin: 2.0, speed: clone(LONG_COMBO_SPEED), costFixedPerH: 0, costVarPerH: 0 },
-    { id: 'C', name: 'C – Descarga inferior', payloadT: 40, volumeM3: 25, dumpMin: 1.0, maneuverMin: 0.5, speed: clone(LONG_COMBO_SPEED), costFixedPerH: 0, costVarPerH: 0 },
+    { id: 'A', name: 'Exemplo: basculante 6x4 – 27 t', payloadT: 27, volumeM3: 16, dumpMin: 1.5, maneuverMin: 1.0, speed: clone(ROAD_TRUCK_SPEED), costFixedPerH: 0, costVarPerH: 0 },
+    { id: 'B', name: 'Exemplo: composição 9 eixos – 48 t', payloadT: 48, volumeM3: 30, dumpMin: 3.0, maneuverMin: 2.0, speed: clone(LONG_COMBO_SPEED), costFixedPerH: 0, costVarPerH: 0 },
+    { id: 'C', name: 'Exemplo: descarga inferior – 40 t', payloadT: 40, volumeM3: 25, dumpMin: 1.0, maneuverMin: 0.5, speed: clone(LONG_COMBO_SPEED), costFixedPerH: 0, costVarPerH: 0 },
   ];
 }
 

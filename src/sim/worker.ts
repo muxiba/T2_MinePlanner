@@ -1,7 +1,7 @@
 /**
  * Web Worker do simulador: roda simulações e lê DXFs grandes sem travar a tela.
  */
-import { fleetSweep, replicate, simulate } from './des';
+import { fleetSweep, replicate, simulate, sizeCircuits } from './des';
 import { contoursFromFile, hillshade, terrainFromFaces } from './terrain';
 import { buildNetwork, sizePeriod, type PeriodResult } from './plan';
 import { demFromContours, demFromGrid } from './dem';
@@ -11,6 +11,7 @@ import type { SimModel } from './types';
 
 export type WorkerRequest =
   | { id: number; kind: 'matrix'; model: SimModel; configIds: string[]; scenarioIds: string[] }
+  | { id: number; kind: 'sizeCircuits'; model: SimModel; configId: string; scenarioId: string; targets: Record<string, number>; start: Record<string, number> }
   | { id: number; kind: 'sweep'; model: SimModel; configId: string; scenarioId: string; circuitId: string; maxTrucks: number; targetTpd?: number }
   | { id: number; kind: 'trace'; model: SimModel; configId: string; scenarioId: string; hours: number }
   | { id: number; kind: 'terrain'; file: File; mode: 'faces' | 'contours' }
@@ -36,6 +37,10 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         }
       }
       post({ id: req.id, result: cells });
+    } else if (req.kind === 'sizeCircuits') {
+      const config = req.model.configs.find((c) => c.id === req.configId)!;
+      const scenario = req.model.scenarios.find((s) => s.id === req.scenarioId)!;
+      post({ id: req.id, result: sizeCircuits(req.model, { config, scenario }, req.targets, req.start, undefined, (f) => post({ id: req.id, progress: f })) });
     } else if (req.kind === 'sweep') {
       const config = req.model.configs.find((c) => c.id === req.configId)!;
       const scenario = req.model.scenarios.find((s) => s.id === req.scenarioId)!;

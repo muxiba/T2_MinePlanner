@@ -390,7 +390,7 @@ const PlannerPage: React.FC = () => {
               )}
               {activeTab === 'simulacao' && (
                 <React.Suspense fallback={<p className="text-sm text-black/50">Carregando o simulador…</p>}>
-                  <SimulationView premises={premises} setPremises={setPremises} canEdit={canEdit} storageKey={`plan:${plan.planId ?? companyId}`} />
+                  <SimulationView premises={premises} setPremises={setPremises} routes={routes} setRoutes={setRoutes} canEdit={canEdit} storageKey={`plan:${plan.planId ?? companyId}`} />
                 </React.Suspense>
               )}
               {activeTab === 'dashboard' && (

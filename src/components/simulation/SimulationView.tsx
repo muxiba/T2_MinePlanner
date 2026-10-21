@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ArrowLeftRight, Download, FileText, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
-import type { DetailedPremises } from '@/types';
+import type { DetailedPremises, Route } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { CONFIG_PRESETS, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
@@ -13,6 +13,7 @@ import View3D from './View3D';
 import { runInWorker } from '@/sim/client';
 import { loadLocal, removeLocal, saveLocal } from '@/sim/storage';
 import MapCanvas, { DOT_COLORS, LOADER_COLORS, type MapOverlays, type TerrainLayer } from './MapCanvas';
+import StaticCompare from './StaticCompare';
 import AnimTables, { type AnimInfo, type AnimPeriod } from './AnimTables';
 import PlanView from './PlanView';
 import FinanceView from './FinanceView';
@@ -59,11 +60,14 @@ type MatrixCell = { configId: string; scenarioId: string; stats: AggregateStats 
 interface Props {
   premises: DetailedPremises;
   setPremises: (p: DetailedPremises) => void;
+  /** rotas do 2. Dimensionamento (para comparar e levar a frota da simulação) */
+  routes?: Route[];
+  setRoutes?: (r: Route[]) => void;
   canEdit: boolean;
   storageKey: string;
 }
 
-const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, storageKey }) => {
+const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRoutes, canEdit, storageKey }) => {
   const stored: SimModel = premises.simulation ?? emptyModel();
   // modelo efetivo: DF, UF, horas, velocidades, tempos e caminhão vêm das Premissas Fundamentais
   const model: SimModel = useMemo(() => {
@@ -588,6 +592,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                       <p className="text-[11px] text-black/50">
                         Úmida = seca × {k.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} ({n1(premises.umidadeNatural)}% de umidade + {n1(premises.perdaMaterial)}% de perda, das premissas): é o que o caminhão carrega, por isso é maior que a meta seca.
                         {' '}{n1(per.calendarDays)} dias corridos, {n1(per.workDays)} trabalhados · {t0(h.productive)} h produtivas por caminhão de {t0(h.calendar)} h.
+                        {per.fromPremisesCalendar ? ' Dias e horas do calendário diário das Premissas Fundamentais (os mesmos do 2. Dimensionamento).' : ' Dias do calendário do Plano de lavra (estação chuvosa).'}
                       </p>
                     </>
                   );
@@ -712,9 +717,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                         <div>
                           <label className="mb-1 block text-xs text-black/55">Caminhão deste circuito</label>
                           <select className={inputCls} value={c.configId ?? ''} aria-label={`Caminhão do circuito ${c.name}`} onChange={(e) => setCircuit(c.id, { configId: e.target.value || undefined })}>
-                            <option value="">A configuração comparada</option>
+                            <option value="">A que está em comparação (escolhida em Resultados e Animação)</option>
                             {model.configs.map((o) => (
-                              <option key={o.id} value={o.id}>Sempre: {o.name}{o.vehicle === 'rodoviario' ? ' (rodoviário)' : ''}</option>
+                              <option key={o.id} value={o.id}>Sempre esta: {o.name}{o.vehicle === 'rodoviario' ? ' (rodoviário)' : ''}</option>
                             ))}
                           </select>
                           <p className="mt-0.5 text-[11px] text-black/45">Trecho fora da mina? Fixe aqui um rodoviário.</p>
@@ -739,9 +744,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                             )}
                           </p>
                         </div>
-                        <Num label="Postos de carga" value={c.loaders} onChange={(v) => setCircuit(c.id, { loaders: Math.max(1, Math.round(v)) })} />
+                        <Num label="Postos de carga" value={c.loaders} onChange={(v) => setCircuit(c.id, { loaders: Math.max(1, Math.round(v)) })} help="Equipamentos de carga atendendo ao mesmo tempo. 2 = dois caminhões carregam juntos: a fila na carga cai, mas só ajuda se a carga for o gargalo." />
                         <Num label="Taxa horária da carga" suffix="t/h" value={Math.round(c.loaderTph)} onChange={(v) => setCircuit(c.id, { loaderTph: v })} step={10} locked={linked ? `Capacidade do caminhão (${premises.truckCapacity} t) ÷ tempo de carga (${premises.loadingTime} min) × 60 = ${t0(premisesLoaderTph(premises))} t/h` : undefined} />
-                        <Num label="Posicionamento" suffix="min" step={0.1} value={c.loadSpotMin} onChange={(v) => setCircuit(c.id, { loadSpotMin: v })} locked={linked ? 'Incluído no tempo de carga das premissas' : undefined} />
+                        <Num label="Posicionamento" suffix="min" step={0.1} value={c.loadSpotMin} onChange={(v) => setCircuit(c.id, { loadSpotMin: v })} locked={linked ? 'Zero de propósito: o tempo de carga das premissas já inclui o posicionamento (manobra do caminhão sob a escavadeira).' : undefined} help="Manobra do caminhão até ficar sob o equipamento de carga, antes do 1º passe. Soma ao tempo de carga e ocupa o posto." />
                         <Num label="DF da carga" suffix="%" value={c.loaderDf} onChange={(v) => setCircuit(c.id, { loaderDf: v })} locked={lockIf(true)} />
                         <Num label="Densidade solta" suffix="t/m³" step={0.05} value={c.density} onChange={(v) => setCircuit(c.id, { density: v })} locked={lockIf(true)} />
                         {linked ? (
@@ -758,10 +763,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                             {c.weighing && <Num label="Pesagem" suffix="min" step={0.1} value={c.weighMin} onChange={(v) => setCircuit(c.id, { weighMin: v })} />}
                           </>
                         )}
-                        <Num label="Pontos de descarga" value={c.dumpStations} onChange={(v) => setCircuit(c.id, { dumpStations: Math.max(1, Math.round(v)) })} />
+                        <Num label="Pontos de descarga" value={c.dumpStations} onChange={(v) => setCircuit(c.id, { dumpStations: Math.max(1, Math.round(v)) })} help="Caminhões que basculam ao mesmo tempo no destino. Circuitos com o mesmo destino dividem esses pontos e o pulmão." />
                         <div className="col-span-2">
                           <label className="mb-1 block text-xs text-black/55">Destino</label>
                           <input className={inputCls} value={c.destination} onChange={(e) => setCircuit(c.id, { destination: e.target.value })} />
+                          <p className="mt-1 text-[11px] leading-snug text-black/45">Nome do ponto de basculamento. Mesmo nome em dois circuitos = mesmo local: eles disputam os pontos de descarga e o pulmão (fila na descarga). Nome diferente = locais independentes.</p>
                         </div>
                       </div>
                     </div>
@@ -861,11 +867,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   let cfg: TruckConfig;
                   if (v === 'copiar') {
                     const base = model.configs[model.configs.length - 1];
-                    cfg = { ...structuredClone(base), id, name: `${id} – Cópia de ${base.name.replace(/^[A-Z] – /, '')}` };
+                    cfg = { ...structuredClone(base), id, name: `Cópia de ${base.name}` };
                   } else {
                     const pr = CONFIG_PRESETS.find((x) => x.id === v)!;
                     const made = pr.make();
-                    cfg = { ...made, id, name: `${id} – ${made.name}`, ...sicroTruckCosts(hpd, made.vehicle) };
+                    cfg = { ...made, id, name: made.name, ...sicroTruckCosts(hpd, made.vehicle) };
                   }
                   setModel({ ...model, configs: [...model.configs, cfg] });
                 }}
@@ -1274,6 +1280,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, canEdit, stora
                   </Card>
                 );
               })()}
+
+              <StaticCompare model={model} premises={premises} calc={calc} sel={sel} routes={routes} setRoutes={setRoutes} onError={setError} />
 
               <Card
                 title="Busca da frota mínima"

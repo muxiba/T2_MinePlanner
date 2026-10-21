@@ -246,7 +246,7 @@ export interface RunStats {
   plantStockoutH: number;
   plantStockMinT: number;
   costPerT: number;
-  perCircuit: { name: string; tonnes: number; trips: number; tph: number }[];
+  perCircuit: { name: string; tonnes: number; trips: number; tph: number; cycleMin?: number }[];
 }
 
 export interface Summary {
@@ -270,5 +270,5 @@ export interface AggregateStats {
   cycle: Partial<Record<TruckState, number>>;
   stateShare: Partial<Record<TruckState, number>>;
   bufferMaxT: number;
-  perCircuit: { name: string; tph: number; tpd: Summary }[];
+  perCircuit: { name: string; tph: number; tpd: Summary; cycleMin?: number }[];
 }
