@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:01,091
+Clique em Calend�rio.
+
+2
+00:00:01,271 --> 00:00:04,789
+A vis�o Calend�rio do m�s organiza o plano e o realizado por data.
+
+3
+00:00:04,969 --> 00:00:09,996
+Confira os indicadores do m�s no alto da p�gina e depois localize o dia desejado na grade.
+
+4
+00:00:10,176 --> 00:00:13,706
+A mensagem sem lan�amento identifica dias ainda sem apontamento.
+
+5
+00:00:13,886 --> 00:00:20,004
+A tela apresenta o que veio das premissas e dos lan�amentos, sem exigir que voc� cadastre a produ��o novamente aqui.
+
+6
+00:00:20,834 --> 00:00:24,932
+Selecione Tabela di�ria para consultar os mesmos dias em linhas e colunas.
+
+7
+00:00:25,112 --> 00:00:29,733
+Essa vis�o facilita conferir planejado, realizado e acompanhamento do m�s.
+
+8
+00:00:29,913 --> 00:00:35,544
+A op��o Incluir frota extra permite consultar a apresenta��o com as aloca��es extras configuradas.
+
+9
+00:00:35,724 --> 00:00:39,103
+Ao alternar essa op��o, confira o que mudou na visualiza��o.
+
+10
+00:00:39,283 --> 00:00:43,369
+Para alterar uma aloca��o de caminh�es por horas, volte ao Dimensionamento de Frota.
+
+11
+00:00:44,199 --> 00:00:49,784
+Os ajustes de jornada e parada de cada data ficam no Calend�rio Operacional das Premissas Fundamentais.
+
+12
+00:00:49,964 --> 00:00:54,074
+Abra essa �rea, encontre o dia e revise mina e planta separadamente.
+
+13
+00:00:54,254 --> 00:00:57,586
+Depois volte ao Calend�rio para conferir o acompanhamento atualizado.
+
+14
+00:00:57,766 --> 00:01:00,947
+Para levar a consulta a uma planilha, utilize Exportar Excel.
+
+15
+00:01:01,127 --> 00:01:07,536
+Assim voc� separa o cadastro das horas, o apontamento da produ��o e a consulta do calend�rio nos lugares corretos.

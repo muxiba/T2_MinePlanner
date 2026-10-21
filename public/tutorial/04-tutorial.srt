@@ -1,0 +1,83 @@
+1
+00:00:00,000 --> 00:00:02,531
+No menu lateral, clique em Lan�amento Produ��o.
+
+2
+00:00:02,711 --> 00:00:05,544
+Confira o m�s do plano e selecione Lan�amento manual.
+
+3
+00:00:05,724 --> 00:00:07,999
+Na tabela, localize a data correta.
+
+4
+00:00:08,179 --> 00:00:13,508
+As colunas Planejado servem de refer�ncia; as caixas de Realizado s�o os campos de preenchimento.
+
+5
+00:00:13,688 --> 00:00:16,939
+Existem entradas separadas para mina, planta e rejeito.
+
+6
+00:00:17,119 --> 00:00:21,635
+Confira o significado de cada coluna antes de copiar os dados do seu apontamento.
+
+7
+00:00:22,465 --> 00:00:26,262
+Clique na caixa de Realizado da data desejada e digite a produ��o.
+
+8
+00:00:26,442 --> 00:00:30,633
+Complete os demais campos do dia e use a a��o de salvar correspondente � linha.
+
+9
+00:00:30,813 --> 00:00:35,190
+Nesta demonstra��o, o preenchimento � apenas um exemplo e n�o foi salvo no plano.
+
+10
+00:00:35,370 --> 00:00:41,117
+Ao corrigir uma data j� lan�ada, confira o valor existente e salve a nova informa��o uma �nica vez.
+
+11
+00:00:41,297 --> 00:00:46,208
+Campos vazios merecem revis�o antes do salvamento, pois podem ser tratados como zero.
+
+12
+00:00:47,038 --> 00:00:51,218
+Se voc� disp�e de um total acumulado, selecione Lan�amento por acumulado.
+
+13
+00:00:51,398 --> 00:00:54,590
+Preencha Produ��o acumulada ROM e escolha a Data do ac�mulo.
+
+14
+00:00:54,770 --> 00:00:58,602
+Revise a data de corte antes de clicar em Processar e atualizar m�dias.
+
+15
+00:00:58,782 --> 00:01:05,899
+Essa a��o distribui o acumulado pelos dias anteriores, conforme o aviso da tela, e pode substituir registros desse intervalo.
+
+16
+00:01:06,079 --> 00:01:10,606
+Utilize esse modo somente quando ele corresponder ao apontamento que voc� deseja registrar.
+
+17
+00:01:11,436 --> 00:01:15,070
+O bot�o Exibir meta replanejada alterna a consulta da meta na tabela.
+
+18
+00:01:15,250 --> 00:01:17,723
+Exportar Excel permite baixar o acompanhamento.
+
+19
+00:01:17,903 --> 00:01:25,659
+Limpar simula��o n�o � um comando de atualizar a p�gina: ele pode apagar lan�amentos, portanto confira a confirma��o e n�o o utilize para
+
+20
+00:01:25,839 --> 00:01:26,965
+encerrar a sess�o.
+
+21
+00:01:27,145 --> 00:01:32,985
+Depois de salvar seus apontamentos, abra Replanejamento para acompanhar como o software apresenta o saldo do m�s.

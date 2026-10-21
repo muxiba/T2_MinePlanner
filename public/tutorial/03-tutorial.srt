@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:01,544
+Clique em tr�s, Resultado.
+
+2
+00:00:01,724 --> 00:00:06,461
+Comece pela mensagem no alto da p�gina e confira se a opera��o atende � meta cadastrada.
+
+3
+00:00:06,641 --> 00:00:11,111
+Abaixo aparecem os indicadores de frota e as barras de capacidade por etapa.
+
+4
+00:00:11,291 --> 00:00:15,378
+Esta tela serve para localizar rapidamente os pontos que precisam de revis�o.
+
+5
+00:00:15,558 --> 00:00:21,850
+Os valores pertencem � configura��o que est� carregada neste momento; confirme o per�odo e a empresa no cabe�alho.
+
+6
+00:00:22,680 --> 00:00:24,143
+Role at� Frota por rota.
+
+7
+00:00:24,323 --> 00:00:28,921
+Cada linha identifica o trajeto, a meta, o ciclo e os caminh�es apresentados.
+
+8
+00:00:29,101 --> 00:00:31,597
+Clique na pr�pria linha para expandir seus detalhes.
+
+9
+00:00:31,777 --> 00:00:35,945
+Compare a rota que voc� deseja revisar e evite alterar outra com nome semelhante.
+
+10
+00:00:36,125 --> 00:00:40,989
+As recomenda��es da se��o O que fazer ajudam a escolher qual configura��o consultar primeiro.
+
+11
+00:00:41,819 --> 00:00:47,125
+Com a rota expandida, confira os controles dispon�veis para ciclo, fila e equipamento de carga.
+
+12
+00:00:47,305 --> 00:00:52,216
+Os ajustes feitos no plano devem ser conferidos novamente nos indicadores de resultado.
+
+13
+00:00:52,396 --> 00:00:58,305
+Mais abaixo, a compara��o de classes de caminh�o permite consultar as alternativas apresentadas pelo sistema.
+
+14
+00:00:58,485 --> 00:01:02,874
+Para revisar todos os par�metros de uma frente, volte ao menu Dimensionamento de Frota.
+
+15
+00:01:03,054 --> 00:01:06,525
+Para guardar a configura��o antes de alter�-la, utilize Cen�rios.

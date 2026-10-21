@@ -1,0 +1,163 @@
+1
+00:00:00,000 --> 00:00:03,495
+Nesta aula vamos configurar o planejamento no T2 MinePlanner.
+
+2
+00:00:03,675 --> 00:00:06,484
+No menu lateral, clique em um, Premissas Fundamentais.
+
+3
+00:00:06,664 --> 00:00:08,789
+Confira a empresa no alto da barra lateral.
+
+4
+00:00:08,969 --> 00:00:13,032
+A tela re�ne os par�metros do per�odo e atualiza os indicadores do cabe�alho.
+
+5
+00:00:13,212 --> 00:00:16,777
+Os pr�ximos passos mostram onde preencher cada grupo de informa��es.
+
+6
+00:00:16,957 --> 00:00:20,800
+Antes de alterar um plano em uso, salve uma refer�ncia na �rea Cen�rios.
+
+7
+00:00:21,629 --> 00:00:23,684
+Localize o quadro Per�odo de Simula��o.
+
+8
+00:00:23,864 --> 00:00:25,827
+Selecione primeiro o m�s e o ano.
+
+9
+00:00:26,007 --> 00:00:32,659
+Depois preencha Consumo Planta, em toneladas por m�s, e as jornadas contratadas da mina e da planta, em horas por dia.
+
+10
+00:00:32,839 --> 00:00:36,113
+Clique no campo, selecione o valor existente e digite o novo.
+
+11
+00:00:36,293 --> 00:00:42,168
+Escolha o per�odo antes de personalizar o calend�rio, porque mudar m�s ou ano recria os dias apresentados.
+
+12
+00:00:42,998 --> 00:00:48,605
+Nos quadros Mina e Planta, informe os percentuais de DF e UF nos campos de cada opera��o.
+
+13
+00:00:48,785 --> 00:00:51,723
+Na Planta, preencha tamb�m Capacidade M�xima Planta.
+
+14
+00:00:51,903 --> 00:00:57,127
+Os valores apresentados como resultado, sem caixa de edi��o, s�o atualizados pelo sistema.
+
+15
+00:00:57,307 --> 00:01:02,950
+Se um campo n�o permitir digita��o, confira se ele � calculado ou est� vinculado a outra configura��o.
+
+16
+00:01:03,130 --> 00:01:06,311
+N�o � necess�rio procurar um bot�o de calcular nesta etapa.
+
+17
+00:01:07,141 --> 00:01:08,662
+Role at� o quadro Processo.
+
+18
+00:01:08,842 --> 00:01:12,394
+Abra Tipo de Processo e escolha a opera��o a �mido ou a seco.
+
+19
+00:01:12,574 --> 00:01:16,104
+No modo a �mido, preencha RM Global e Rejeito Total.
+
+20
+00:01:16,284 --> 00:01:22,240
+Confira Umidade Natural, Perda Material e a op��o de convers�o seca para �mida usada pelo seu planejamento.
+
+21
+00:01:22,420 --> 00:01:26,657
+Se houver est�ril, selecione Sim em Possui Est�ril e informe sua meta.
+
+22
+00:01:26,837 --> 00:01:30,285
+Campos desabilitados dependem das escolhas feitas neste quadro.
+
+23
+00:01:31,115 --> 00:01:33,995
+Em Transporte e Frota, selecione a Classe do Caminh�o.
+
+24
+00:01:34,175 --> 00:01:38,830
+Confira a capacidade, o n�mero de caminh�es e o volume da ca�amba preenchidos na tela.
+
+25
+00:01:39,010 --> 00:01:43,294
+Se usar outra configura��o, escolha Outra e informe os valores correspondentes.
+
+26
+00:01:43,474 --> 00:01:45,541
+Preencha as velocidades vazio e cheio.
+
+27
+00:01:45,721 --> 00:01:50,307
+Ao lado, complete os tempos de carregamento, basculamento, pesagens e fila.
+
+28
+00:01:50,487 --> 00:01:55,746
+Respeite as unidades escritas nos r�tulos: velocidades em quil�metros por hora e tempos em minutos.
+
+29
+00:01:56,576 --> 00:02:03,089
+A se��o Cat�logo de Equipamentos pode ser expandida para consultar e configurar os modelos utilizados no planejamento.
+
+30
+00:02:03,269 --> 00:02:05,522
+Logo abaixo est� Usar perdas detalhadas.
+
+31
+00:02:05,702 --> 00:02:12,285
+Ao ativar essa op��o, preencha turnos, troca de turno, refei��o, inspe��o, abastecimento e interfer�ncias.
+
+32
+00:02:12,465 --> 00:02:15,216
+A UF da mina passa a acompanhar esses dados.
+
+33
+00:02:15,396 --> 00:02:19,506
+Se a op��o estiver desligada, os campos detalhados ficam desabilitados.
+
+34
+00:02:19,686 --> 00:02:21,985
+Confira esse estado antes de tentar edit�-los.
+
+35
+00:02:22,815 --> 00:02:25,740
+No Calend�rio Operacional, encontre a data desejada.
+
+36
+00:02:25,920 --> 00:02:28,335
+Mina e planta t�m tabelas separadas.
+
+37
+00:02:28,515 --> 00:02:33,357
+Ajuste as horas do dia e utilize a coluna Parada para identificar uma parada programada.
+
+38
+00:02:33,537 --> 00:02:36,021
+Revise as duas opera��es antes de concluir.
+
+39
+00:02:36,201 --> 00:02:40,950
+As altera��es s�o salvas automaticamente; acompanhe a indica��o Salvo no cabe�alho.
+
+40
+00:02:41,130 --> 00:02:45,344
+Para uma confer�ncia em planilha, volte ao in�cio da tela e use Exportar Excel.
+
+41
+00:02:45,524 --> 00:02:48,740
+A pr�xima etapa fica no menu dois, Dimensionamento de Frota.

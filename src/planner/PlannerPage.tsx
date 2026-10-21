@@ -28,6 +28,7 @@ import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
 import { analyzeFleet, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, syncAutoFleet } from '@/engine/fleet';
 import SummaryView from '@/components/summary/SummaryView';
+const TutorialView = React.lazy(() => import('@/components/TutorialView'));
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
 import { dismissLegacyData, readLegacyData, usePlan, useScenarios, type SaveState } from './usePlan';
@@ -50,6 +51,7 @@ const NAV_ITEMS = [
   { id: 'scenarios', label: 'Cenários', icon: Save },
   { id: 'dashboard', label: 'Detalhes de cálculo', icon: LayoutDashboard },
   { id: 'simulacao', label: 'Simulação', icon: Waypoints },
+  { id: 'tutorial', label: 'Tutorial', icon: Play },
 ] as const;
 
 const WORKFLOW_STEPS = [
@@ -375,6 +377,11 @@ const PlannerPage: React.FC = () => {
         )}
 
         {/* Leitores veem tudo, mas os campos ficam desabilitados */}
+        {activeTab === 'tutorial' && (
+          <React.Suspense fallback={<p>Carregando tutorial.</p>}>
+            <TutorialView />
+          </React.Suspense>
+        )}
         <fieldset disabled={!canEdit} className="min-w-0">
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
