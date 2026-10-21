@@ -14,8 +14,10 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { DetailedPremises, EquipmentCatalog, LoaderSetup, Route, RouteKind } from '@/types';
+import CatalogEditor from '@/components/CatalogEditor';
 import {
-  DEFAULT_CATALOG,
+  catalogOf,
+  loaderFromCatalog,
   DEFAULT_LOOSE_DENSITY,
   KIND_LABELS,
   fmtTrucks,
@@ -295,82 +297,6 @@ const RouteEditor: React.FC<{
 /* Catálogo                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const CatalogEditor: React.FC<{ premises: DetailedPremises; setPremises: (p: DetailedPremises) => void }> = ({ premises, setPremises }) => {
-  const catalog = premises.equipmentCatalog ?? DEFAULT_CATALOG;
-  const update = (c: EquipmentCatalog) => setPremises({ ...premises, equipmentCatalog: c });
-  return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div>
-        <p className="mb-2 text-sm font-medium">Caminhões</p>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-black/45">
-              <th className="py-1 font-medium">Classe</th>
-              <th className="w-24 py-1 font-medium">Carga útil (t)</th>
-              <th className="w-24 py-1 font-medium">Volume (m³)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {catalog.trucks.map((t, i) => (
-              <tr key={t.id}>
-                <td className="py-1 pr-2">{t.name}</td>
-                {(['payloadT', 'volumeM3'] as const).map((k) => (
-                  <td key={k} className="py-1 pr-2">
-                    <input
-                      type="number"
-                      aria-label={`${t.name}: ${k === 'payloadT' ? 'carga útil' : 'volume'}`}
-                      className={inputCls}
-                      value={t[k]}
-                      onChange={(e) => update({ ...catalog, trucks: catalog.trucks.map((x, j) => (j === i ? { ...x, [k]: Number(e.target.value) } : x)) })}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <p className="mb-2 text-sm font-medium">Equipamentos de carga</p>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-black/45">
-              <th className="py-1 font-medium">Classe</th>
-              <th className="w-24 py-1 font-medium">Caçamba (m³)</th>
-              <th className="w-24 py-1 font-medium">Ciclo (s)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {catalog.loaders.map((l, i) => (
-              <tr key={l.id}>
-                <td className="py-1 pr-2">{l.name}</td>
-                {(['bucketM3', 'cycleSec'] as const).map((k) => (
-                  <td key={k} className="py-1 pr-2">
-                    <input
-                      type="number"
-                      aria-label={`${l.name}: ${k === 'bucketM3' ? 'caçamba' : 'ciclo'}`}
-                      className={inputCls}
-                      value={l[k]}
-                      onChange={(e) => update({ ...catalog, loaders: catalog.loaders.map((x, j) => (j === i ? { ...x, [k]: Number(e.target.value) } : x)) })}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-black/45 lg:col-span-2">
-        Valores típicos de referência. Ajuste com os dados do fabricante ou com o que você mede na operação. Para voltar ao padrão,{' '}
-        <button type="button" className="font-medium text-emerald-700 underline" onClick={() => update(DEFAULT_CATALOG)}>
-          restaure o catálogo
-        </button>
-        .
-      </p>
-    </div>
-  );
-};
-
 /* -------------------------------------------------------------------------- */
 /* Tela                                                                        */
 /* -------------------------------------------------------------------------- */
@@ -388,7 +314,7 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
   const [openRoute, setOpenRoute] = useState<string | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const a = analysis;
-  const catalog = premises.equipmentCatalog ?? DEFAULT_CATALOG;
+  const catalog = catalogOf(premises);
   const routeById = new Map(routes.map((r) => [r.id, r]));
   const opt = useMemo(() => optimizeFleet(routes, premises, 'folga'), [routes, premises]);
   const romPct = a.romTargetDryT > 0 ? a.romDeliverableDryT / a.romTargetDryT : 1;
@@ -585,7 +511,37 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
       {a.classComparison && (
         <section aria-labelledby="classes">
           <h3 id="classes" className="mb-1 text-lg font-semibold">Qual caminhão atende "{a.classComparison.routeName}"?</h3>
-          <p className="mb-4 text-sm text-black/50">Quantidade necessária de cada classe para a meta desta rota, mantendo DMT, velocidades e eficiências.</p>
+          <p className="mb-3 text-sm text-black/50">Quantidade necessária de cada classe para a meta desta rota, mantendo DMT, velocidades e eficiências.</p>
+          {(() => {
+            const r = routes.find((x) => x.id === a.classComparison!.routeId);
+            if (!r) return null;
+            const cat = catalogOf(premises);
+            const cur = r.loader ? cat.loaders.find((l) => l.name === r.loader!.name)?.id ?? 'custom' : '';
+            return (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-[#F8F9FA] px-4 py-3 text-sm">
+                <label htmlFor="cmp-loader" className="font-medium">Equipamento de carga desta rota</label>
+                <select
+                  id="cmp-loader"
+                  disabled={!canEdit}
+                  className={clsx(inputCls, 'w-auto min-w-64')}
+                  value={cur}
+                  onChange={(e) => {
+                    const l = cat.loaders.find((x) => x.id === e.target.value);
+                    setRoutes(routes.map((x) => (x.id === r.id ? { ...x, loader: l ? loaderFromCatalog(l, premises, x.loader?.count ?? 1) : undefined } : x)));
+                  }}
+                >
+                  <option value="">Não informado (sem caçambadas)</option>
+                  {cat.loaders.map((l) => (
+                    <option key={l.id} value={l.id}>{l.manufacturer ? `${l.manufacturer} – ` : ''}{l.name}</option>
+                  ))}
+                  {cur === 'custom' && <option value="custom">{r.loader!.name}</option>}
+                </select>
+                <span className="text-xs text-black/50">
+                  {r.loader ? 'Caçambadas = carga útil ÷ (caçamba × enchimento × densidade solta), arredondado para cima; o tempo de carga passa a ser caçambadas × ciclo.' : 'Escolha o equipamento para calcular as caçambadas de cada classe de caminhão.'}
+                </span>
+              </div>
+            );
+          })()}
           <div className="overflow-x-auto rounded-2xl border border-black/[0.07] bg-white">
             <table className="w-full min-w-[560px] text-sm">
               <thead>

@@ -57,14 +57,38 @@ export interface LoaderSetup {
   availability: number;
 }
 
-export interface TruckClass {
+/** Dados econômicos de um modelo do catálogo (opcionais; alimentam o Financeiro da simulação). */
+export interface CatalogEconomics {
+  /** fabricante (ex.: Volvo, Mercedes-Benz, Scania, Caterpillar, Komatsu) */
+  manufacturer?: string;
+  /** valor de compra (R$) */
+  price?: number;
+  /** vida útil (anos) */
+  lifeYears?: number;
+  /** horas trabalhadas por ano (para converter anos em horas) */
+  hoursPerYear?: number;
+  /** valor residual ao fim da vida útil (% da compra) */
+  residualPct?: number;
+  /** manutenção com o equipamento novo (R$/h) */
+  maintPerH?: number;
+  /** aumento da manutenção por ano de uso (%) */
+  maintEscPctYear?: number;
+  /** diesel (L/h) */
+  dieselLph?: number;
+  /** pneus / material rodante (R$/h) */
+  tiresPerH?: number;
+}
+
+export interface TruckClass extends CatalogEconomics {
   id: string;
   name: string;
   payloadT: number;
   volumeM3: number;
+  /** fora de estrada / mina ou rodoviário */
+  vehicle?: 'mina' | 'rodoviario';
 }
 
-export interface LoaderClass {
+export interface LoaderClass extends CatalogEconomics {
   id: string;
   name: string;
   bucketM3: number;

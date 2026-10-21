@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Award, Download, FileText, Play } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
 import { calendarWorkDays, emptyPlan, type PeriodResult } from '@/sim/plan';
-import { CASH_ITEMS, CRITERIA, DRIVER_CATS, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
+import { CASH_ITEMS, CRITERIA, economicLife, financeFor, DRIVER_CATS, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
 import { downloadMemo } from '@/sim/memo';
 import { decisionMemo } from '@/sim/memoDecision';
 import { runInWorker } from '@/sim/client';
@@ -100,6 +100,7 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
     [chosen, combos, plan, fin, criterion],
   );
   const cfgName = (id: string) => model.configs.find((c) => c.id === id)?.name ?? id;
+  const ecoAge = chosen ? economicLife(financeFor(fin, chosen.configId, model.configs.find((c) => c.id === chosen.configId)?.payloadT ?? 40))?.ageH ?? null : null;
   const scName = (id: string) => model.scenarios.find((s) => s.id === id)?.name ?? id;
   const optName = (e: { configId: string; scenarioId: string }) => (e.scenarioId !== '*' && scenIdsRun.length > 1 ? `${cfgName(e.configId)} · ${scName(e.scenarioId)}` : cfgName(e.configId));
   const withRevenue = fin.revenuePerT > 0;
@@ -293,6 +294,7 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
           </Card>
 
           {/* --------------------------- detalhe por período --------------------------- */}
+
           <div className="grid gap-6 xl:grid-cols-2">
             <Card title={`Vida útil e custos por período · ${optName(chosen)}`} description="Frota em operação, compras, trocas por vida útil, idade média e custo de cada período.">
               <div className="overflow-x-auto">
@@ -306,7 +308,8 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
                       <th className="py-1 pr-2 text-right font-medium">Trocas</th>
                       <th className="py-1 pr-2 text-right font-medium">Idade média</th>
                       <th className="py-1 pr-2 text-right font-medium">Custo</th>
-                      <th className="py-1 text-right font-medium">R$/t</th>
+                      <th className="py-1 pr-2 text-right font-medium">R$/t</th>
+                      <th className="py-1 font-medium">Troca</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -319,13 +322,14 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
                         <td className={clsx('py-1 pr-2 text-right tabular-nums', p.replaced > 0 && 'font-semibold text-amber-800')}>{p.replaced || ''}</td>
                         <td className="py-1 pr-2 text-right tabular-nums">{t0(p.avgAgeH)} h</td>
                         <td className="py-1 pr-2 text-right tabular-nums">{mi(p.total)}</td>
-                        <td className="py-1 text-right tabular-nums">{p.tonnes ? brl2(p.total / p.tonnes) : '—'}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums">{p.tonnes ? brl2(p.total / p.tonnes) : '—'}</td>
+                        <td className="py-1 text-xs">{ecoAge && p.avgAgeH + p.truckHours / Math.max(1, p.trucks) > ecoAge ? <span className="font-semibold text-amber-800">passa da idade ideal ({t0(ecoAge)} h)</span> : ''}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="mt-2 text-xs text-black/45">Os picos de custo coincidem com compras e trocas; a idade média faz a manutenção subir e a disponibilidade cair ao longo dos anos.</p>
+              <p className="mt-2 text-xs text-black/45">Os picos de custo coincidem com compras e trocas; a idade média faz a manutenção subir e a disponibilidade cair ao longo dos anos. “Passa da idade ideal”: a frota chega, no fim do período, a uma idade em que manter custa mais que trocar — veja Financeiro → Trocar o equipamento.</p>
             </Card>
             <Card title={`Sensibilidade · ${optName(chosen)}`} description={`Cada parâmetro variado ±20%, um de cada vez. Barras: ${withRevenue ? 'VPL' : 'custo nivelado (R$/t)'} resultante.`}>
               <Tornado rows={sens} base={withRevenue && chosen.npv !== null ? chosen.npv : chosen.costPerT} money={withRevenue} chosenKey={keyOf(chosen)} name={(k) => {

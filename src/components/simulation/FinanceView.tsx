@@ -1,11 +1,14 @@
 import React from 'react';
 import type { SimModel } from '@/sim/types';
-import { defaultFinance, defaultTruckFinance, type EquipFinance, type Finance } from '@/sim/econ';
+import { defaultFinance, defaultTruckFinance, economicLife, financeFromCatalog, type EquipFinance, type Finance } from '@/sim/econ';
+import type { CatalogEconomics, DetailedPremises } from '@/types';
+import { catalogOf } from '@/engine/fleet';
 import { Card, Num, inputCls } from './ui';
 import { REVENUE_REF_PER_T, SICRO_REF, overheadReference } from '@/sim/references';
 import { calendarWorkDays, emptyPlan } from '@/sim/plan';
 
 interface Props {
+  premises?: DetailedPremises;
   model: SimModel;
   setModel: (m: SimModel) => void;
   canEdit: boolean;
@@ -26,15 +29,21 @@ const FIELDS: Field[] = [
   { key: 'dfLossPer10kH', label: 'Perda de disponibilidade', suffix: 'p.p. a cada 10 mil h', step: 0.5 },
 ];
 
-const FinanceView: React.FC<Props> = ({ model, setModel, canEdit }) => {
+const FinanceView: React.FC<Props> = ({ premises, model, setModel, canEdit }) => {
   const fin: Finance = model.finance ?? defaultFinance(model.configs);
   const setFin = (f: Finance) => setModel({ ...model, finance: f });
   const truckFin = (id: string, payload: number) => fin.trucks[id] ?? defaultTruckFinance(payload);
   const setTruck = (id: string, payload: number, patch: Partial<EquipFinance>) => setFin({ ...fin, trucks: { ...fin.trucks, [id]: { ...truckFin(id, payload), ...patch } } });
+  const catalog = premises ? catalogOf(premises) : null;
   const cols = [
-    ...model.configs.map((c) => ({ id: c.id, name: c.name, get: () => truckFin(c.id, c.payloadT), set: (p: Partial<EquipFinance>) => setTruck(c.id, c.payloadT, p) })),
-    { id: '__loader', name: 'Equipamento de carga (por unidade)', get: () => fin.loader, set: (p: Partial<EquipFinance>) => setFin({ ...fin, loader: { ...fin.loader, ...p } }) },
+    ...model.configs.map((c) => ({ id: c.id, name: c.name, kind: 'truck' as const, get: () => truckFin(c.id, c.payloadT), set: (p: Partial<EquipFinance>) => setTruck(c.id, c.payloadT, p) })),
+    { id: '__loader', name: 'Equipamento de carga (por unidade)', kind: 'loader' as const, get: () => fin.loader, set: (p: Partial<EquipFinance>) => setFin({ ...fin, loader: { ...fin.loader, ...p } }) },
   ];
+  const fromCatalog = (x: CatalogEconomics & { id: string }) => financeFromCatalog(x);
+  const hoursPerYearOf = (f: EquipFinance) => {
+    const all = [...(catalog?.trucks ?? []), ...(catalog?.loaders ?? [])];
+    return all.find((x) => x.id === f.catalogId)?.hoursPerYear || 5000;
+  };
   const wageYear = fin.salaryMonthly * 12 * (1 + fin.chargesPct / 100);
   const [ovh, setOvh] = React.useState({ graderH: 4, sup: 1, salary: 7000 });
   const workDaysYear = calendarWorkDays((model.plan ?? emptyPlan()).calendar);
@@ -119,6 +128,32 @@ const FinanceView: React.FC<Props> = ({ model, setModel, canEdit }) => {
               </tr>
             </thead>
             <tbody>
+              {catalog && (
+                <tr className="border-t border-black/5">
+                  <td className="py-1 pr-3 text-xs text-black/60">Modelo do catálogo <span className="text-black/35">(preenche os valores)</span></td>
+                  {cols.map((c) => {
+                    const list = c.kind === 'truck' ? catalog.trucks : catalog.loaders;
+                    return (
+                      <td key={c.id} className="py-1 pr-2">
+                        <select
+                          className={inputCls}
+                          value={c.get().catalogId ?? ''}
+                          aria-label={`Modelo do catálogo – ${c.name}`}
+                          onChange={(e) => {
+                            const x = list.find((y) => y.id === e.target.value);
+                            c.set(x ? fromCatalog(x) : { catalogId: undefined });
+                          }}
+                        >
+                          <option value="">Valores digitados</option>
+                          {list.map((x) => (
+                            <option key={x.id} value={x.id}>{x.manufacturer ? `${x.manufacturer} – ` : ''}{x.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
               <tr className="border-t border-black/5">
                 <td className="py-1 pr-3 text-xs text-black/60">Diesel calculado por</td>
                 {cols.map((c) => (
@@ -154,10 +189,40 @@ const FinanceView: React.FC<Props> = ({ model, setModel, canEdit }) => {
                   })}
                 </tr>
               ))}
+              <tr className="border-t border-black/5 bg-amber-50/40">
+                <td className="py-1 pr-3 text-xs text-black/60">Troca ideal <span className="text-black/35">(idade econômica)</span></td>
+                {cols.map((c) => {
+                  const f = c.get();
+                  const e = economicLife(f);
+                  const hpy = hoursPerYearOf(f);
+                  return (
+                    <td key={c.id} className="py-1 pr-2 text-xs">
+                      {e ? (
+                        <>
+                          <span className="font-semibold">{Math.round(e.ageH).toLocaleString('pt-BR')} h</span> ≈ {(e.ageH / hpy).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} anos
+                          {e.ageH < f.lifeH * 0.95 && <span className="block text-amber-800">antes da vida útil ({Math.round(f.lifeH).toLocaleString('pt-BR')} h)</span>}
+                        </>
+                      ) : '—'}
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="border-t border-black/5">
+                <td className="py-1 pr-3 text-xs text-black/60">Trocar o equipamento</td>
+                {cols.map((c) => (
+                  <td key={c.id} className="py-1 pr-2">
+                    <select className={inputCls} value={c.get().replaceAtEconomic ? 'eco' : 'vida'} onChange={(e) => c.set({ replaceAtEconomic: e.target.value === 'eco' })} aria-label={`Troca – ${c.name}`}>
+                      <option value="vida">Ao fim da vida útil</option>
+                      <option value="eco">Na idade ideal (econômica)</option>
+                    </select>
+                  </td>
+                ))}
+              </tr>
             </tbody>
           </table>
         </div>
         <p className="mt-2 text-xs text-black/45">
+          Troca ideal: idade em que o custo médio por hora (compra − valor de mercado + manutenção acumulada) é o menor; depois dela, manter o equipamento custa mais que trocar. O alerta aparece em Resultados e decisão quando a frota passa dessa idade.
           Vida útil e desgaste: cada equipamento acumula as horas trabalhadas em cada período; ao atingir a vida útil é trocado por um novo (compra − valor residual).
           A manutenção por hora sobe com a idade e a disponibilidade cai, o que pode exigir mais caminhões nos últimos períodos. No fim do horizonte, a frota é creditada pelo valor depreciado.
         </p>

@@ -4,7 +4,9 @@ import { ArrowLeftRight, Download, FileText, FileUp, Mountain, Pause, Play, Plus
 import type { DetailedPremises, Route } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
-import { CONFIG_PRESETS, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
+import { CONFIG_PRESETS, HIGHWAY_SPEED, ROAD_TRUCK_SPEED, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
+import { catalogOf } from '@/engine/fleet';
+import { defaultFinance, defaultTruckFinance, financeFromCatalog } from '@/sim/econ';
 import { configFor, limitsOf, payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
 import { DOT_KINDS, makeAnimator } from '@/sim/animation';
 import type { Contours } from '@/sim/terrain';
@@ -842,7 +844,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
         />
       )}
 
-      {tab === 'financeiro' && <FinanceView model={model} setModel={setModel} canEdit={canEdit} />}
+      {tab === 'financeiro' && <FinanceView premises={premises} model={model} setModel={setModel} canEdit={canEdit} />}
       {tab === 'decisao' && <DecisionView model={model} results={periodResults} setResults={setPeriodResults} onError={setError} />}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
@@ -868,6 +870,25 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   if (v === 'copiar') {
                     const base = model.configs[model.configs.length - 1];
                     cfg = { ...structuredClone(base), id, name: `Cópia de ${base.name}` };
+                  } else if (v.startsWith('cat:')) {
+                    const t = catalogOf(premises).trucks.find((x) => `cat:${x.id}` === v)!;
+                    const road = t.vehicle === 'rodoviario';
+                    const nm = `${t.manufacturer ? `${t.manufacturer} ` : ''}${t.name}`;
+                    cfg = {
+                      id,
+                      name: nm,
+                      vehicle: t.vehicle ?? 'mina',
+                      payloadT: t.payloadT,
+                      volumeM3: t.volumeM3 || undefined,
+                      dumpMin: road ? 2 : 1.5,
+                      maneuverMin: 1,
+                      speed: structuredClone(road ? HIGHWAY_SPEED : ROAD_TRUCK_SPEED),
+                      ...(road ? { speedLimitLoadedKmh: 60, speedLimitEmptyKmh: 80 } : {}),
+                      ...sicroTruckCosts(hpd, t.vehicle),
+                    };
+                    const fin = model.finance ?? defaultFinance(model.configs);
+                    setModel({ ...model, configs: [...model.configs, cfg], finance: { ...fin, trucks: { ...fin.trucks, [id]: { ...defaultTruckFinance(t.payloadT), ...financeFromCatalog(t) } } } });
+                    return;
                   } else {
                     const pr = CONFIG_PRESETS.find((x) => x.id === v)!;
                     const made = pr.make();
@@ -878,6 +899,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
               >
                 <option value="">+ Adicionar configuração…</option>
                 <option value="copiar">Cópia da última configuração</option>
+                <optgroup label="Do catálogo de equipamentos (com custos e vida útil)">
+                  {catalogOf(premises).trucks.map((t) => (
+                    <option key={t.id} value={`cat:${t.id}`}>{t.manufacturer ? `${t.manufacturer} – ` : ''}{t.name}</option>
+                  ))}
+                </optgroup>
                 {(['Mina / fora de estrada', 'Rodoviário (estrada, ponta a ponta)'] as const).map((g) => (
                   <optgroup key={g} label={g}>
                     {CONFIG_PRESETS.filter((x) => x.group === g).map((x) => (

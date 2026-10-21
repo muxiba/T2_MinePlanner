@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FleetLedger, agedDf, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type EquipFinance } from './econ';
+import { FleetLedger, agedDf, economicLife, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type EquipFinance } from './econ';
 import { emptyPlan, type PeriodResult } from './plan';
 
 const eq: EquipFinance = { price: 1000, residualPct: 20, lifeH: 10_000, dieselMode: 'lph', dieselLph: 10, dieselLpt: 0, maintPerH: 1, maintEscPct: 100, tiresPerH: 0, operatorsPerUnit: 1, dfLossPer10kH: 5 };
@@ -68,5 +68,14 @@ describe('vida útil e economia', () => {
     const txt = explainDifference(costDrivers(b), costDrivers(a), 'B', 'A');
     expect(txt[0].includes('a mais')).toBe(true);
     expect(txt.some((t) => t.includes('pico de 4 contra 2'))).toBe(true);
+  });
+
+  it('idade econômica: troca antes da vida útil quando a manutenção sobe rápido', () => {
+    const slow = economicLife({ price: 1_600_000, residualPct: 20, lifeH: 25_000, maintPerH: 70, maintEscPct: 10 })!;
+    const fast = economicLife({ price: 1_600_000, residualPct: 20, lifeH: 25_000, maintPerH: 70, maintEscPct: 300 })!;
+    expect(fast.ageH).toBeLessThan(slow.ageH);
+    const l = new FleetLedger({ ...eq, maintEscPct: 2000, replaceAtEconomic: true });
+    const st = l.step(1, 9000);
+    expect(st.replaced).toBeGreaterThan(0);
   });
 });

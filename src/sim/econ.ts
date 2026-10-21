@@ -31,7 +31,51 @@ export interface EquipFinance {
   operatorsPerUnit: number;
   /** perda de disponibilidade física a cada 10.000 h de idade (pontos percentuais) */
   dfLossPer10kH: number;
+  /** troca pela idade econômica (custo médio mínimo) em vez da vida útil */
+  replaceAtEconomic?: boolean;
+  /** modelo do catálogo de onde vieram os valores */
+  catalogId?: string;
 }
+
+/**
+ * Idade econômica de troca: a idade (h) que minimiza o custo médio por hora de possuir e manter o equipamento.
+ * Valor de mercado: perde ~15% na compra e cai exponencialmente até o residual na vida útil; a manutenção sobe linearmente com a idade.
+ * Custo médio(a) = (compra − valor(a)) ÷ a + manutenção média de 0 até a.
+ */
+export function economicLife(f: Pick<EquipFinance, 'price' | 'residualPct' | 'lifeH' | 'maintPerH' | 'maintEscPct'>) {
+  if (!(f.price > 0) || !(f.lifeH > 0)) return null;
+  const r = Math.min(0.8, Math.max(0.01, (f.residualPct || 1) / 100));
+  // ao sair da concessionária o equipamento já vale ~15% menos (custos de transação); depois cai até o residual na vida útil
+  const v0 = 0.85;
+  const lambda = Math.log(v0 / r) / f.lifeH;
+  const esc = (f.maintEscPct || 0) / 100;
+  const cost = (a: number) => (f.price * (1 - v0 * Math.exp(-lambda * a))) / a + (f.maintPerH || 0) * (1 + (esc * a) / 20_000);
+  let best = { ageH: f.lifeH, costPerH: cost(f.lifeH) };
+  const step = Math.max(100, f.lifeH / 200);
+  for (let a = step; a <= f.lifeH * 3; a += step) {
+    const c = cost(a);
+    if (c < best.costPerH) best = { ageH: a, costPerH: c };
+  }
+  return best;
+}
+
+/** Premissas financeiras a partir de um modelo do catálogo (só os campos informados). */
+export function financeFromCatalog(x: { id: string; price?: number; residualPct?: number; lifeYears?: number; hoursPerYear?: number; maintPerH?: number; maintEscPctYear?: number; dieselLph?: number; tiresPerH?: number }): Partial<EquipFinance> {
+  const hpy = x.hoursPerYear || 5000;
+  return {
+    catalogId: x.id,
+    ...(x.price ? { price: x.price } : {}),
+    ...(x.residualPct !== undefined ? { residualPct: x.residualPct } : {}),
+    ...(x.lifeYears ? { lifeH: x.lifeYears * hpy } : {}),
+    ...(x.maintPerH !== undefined ? { maintPerH: x.maintPerH } : {}),
+    ...(x.maintEscPctYear !== undefined ? { maintEscPct: Math.round(((x.maintEscPctYear * 10_000) / hpy) * 10) / 10 } : {}),
+    ...(x.dieselLph !== undefined ? { dieselLph: x.dieselLph, dieselMode: 'lph' as const } : {}),
+    ...(x.tiresPerH !== undefined ? { tiresPerH: x.tiresPerH } : {}),
+  };
+}
+
+/** Idade em que o equipamento é trocado (vida útil, ou a idade econômica se marcado). */
+export const replacementAgeH = (f: EquipFinance) => (f.replaceAtEconomic ? Math.min(f.lifeH || Infinity, economicLife(f)?.ageH ?? f.lifeH) : f.lifeH);
 
 export interface Finance {
   dieselPrice: number;
@@ -157,12 +201,14 @@ export class FleetLedger {
       const mid = a0 + hoursEach / 2;
       maintenance += hoursEach * f.maintPerH * (1 + (f.maintEscPct / 100) * (mid / 10_000));
       let a = a0 + hoursEach;
-      // fim da vida útil: troca por uma nova (o que passou da vida conta na nova)
-      while (f.lifeH > 0 && a >= f.lifeH) {
-        a -= f.lifeH;
+      // fim da vida útil (ou idade econômica): troca por uma nova (o que passou conta na nova)
+      const life = replacementAgeH(f);
+      while (life > 0 && a >= life) {
+        a -= life;
         replaced++;
         capex += f.price;
-        credit += (f.price * f.residualPct) / 100;
+        // crédito: residual na vida útil; na idade econômica, o valor de mercado naquela idade
+        credit += life < f.lifeH ? f.price * 0.85 * Math.pow(Math.max(0.01, f.residualPct / 100) / 0.85, life / f.lifeH) : (f.price * f.residualPct) / 100;
       }
       this.ages[i] = a;
     }

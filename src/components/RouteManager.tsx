@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
 import type { DetailedPremises, Route, RouteKind } from '../types';
-import { FLOW_ORDER, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
+import { FLOW_ORDER, catalogOf, loaderFromCatalog, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
 import ExtraFleetManager from './ExtraFleetManager';
 
 /**
@@ -328,6 +328,30 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                             ))}
                           </select>
                         </label>
+                        <label className="col-span-2 flex flex-col gap-1 text-[10px] font-black tracking-widest text-black/45 uppercase">
+                          Equipamento de carga
+                          <span className="flex gap-2">
+                            <select
+                              value={route.loader ? catalogOf(premises).loaders.find((l) => l.name === route.loader!.name)?.id ?? 'custom' : ''}
+                              onChange={(e) => {
+                                const l = catalogOf(premises).loaders.find((x) => x.id === e.target.value);
+                                handleUpdateRoute(route.id, { loader: l ? loaderFromCatalog(l, premises, route.loader?.count ?? 1) : undefined });
+                              }}
+                              className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 py-2 text-sm font-semibold normal-case tracking-normal text-black/80"
+                            >
+                              <option value="">Não informado (usa o tempo de carga das premissas)</option>
+                              {catalogOf(premises).loaders.map((l) => (
+                                <option key={l.id} value={l.id}>{l.manufacturer ? `${l.manufacturer} – ` : ''}{l.name}</option>
+                              ))}
+                              {route.loader && !catalogOf(premises).loaders.some((l) => l.name === route.loader!.name) && <option value="custom">{route.loader.name}</option>}
+                            </select>
+                            {route.loader && (
+                              <input type="number" min={1} step={1} value={route.loader.count} title="Quantidade de equipamentos" aria-label="Quantidade de equipamentos de carga"
+                                onChange={(e) => handleUpdateRoute(route.id, { loader: { ...route.loader!, count: Math.max(1, Math.round(Number(e.target.value) || 1)) } })}
+                                className="w-16 rounded-lg border border-black/10 bg-white px-2 py-2 font-mono text-sm" />
+                            )}
+                          </span>
+                        </label>
                         {sameKindCount(kind) > 1 && !route.targetMass && (
                           <label className="flex flex-col gap-1 text-[10px] font-black tracking-widest text-black/45 uppercase" title="Divide o saldo do fluxo entre as rotas sem massa digitada: 1 e 1 = metade para cada; 3 e 1 = 75% e 25%.">
                             Peso na divisão
@@ -531,6 +555,13 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
           <span className="text-black/50"> · tem </span>
           <b className="font-mono">{fmtTrucks(a.trucksAllocated)}</b>
         </p>
+        {a.loader && (
+          <p className="text-sm">
+            <span className="text-black/50">Caçambadas </span>
+            <b className="font-mono">{a.loader.passes}</b>
+            <span className="text-black/40"> ({n1(a.loader.loadMin)} min de carga)</span>
+          </p>
+        )}
         <p className="text-sm">
           <span className="text-black/50">Capacidade </span>
           <b className="font-mono">{t0(a.capacityWetT)} t</b>

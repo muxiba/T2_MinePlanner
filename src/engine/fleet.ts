@@ -19,7 +19,7 @@
  *
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
-import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
 
 /** Tempo de troca de caminhão sob o equipamento de carga (posicionamento), em minutos. */
@@ -32,30 +32,44 @@ export const TARGET_DF = 90;
 export const TARGET_UF = 90;
 export const DEFAULT_LOOSE_DENSITY = 2.0;
 
+/** Valores econômicos típicos (genéricos, sem marca): ponto de partida editável no catálogo. */
+const eco = (price: number, maint: number, diesel: number, tires: number, lifeYears = 5, hoursPerYear = 5000) => ({ price, lifeYears, hoursPerYear, residualPct: 20, maintPerH: maint, maintEscPctYear: 8, dieselLph: diesel, tiresPerH: tires });
+
 export const DEFAULT_CATALOG: EquipmentCatalog = {
   trucks: [
-    { id: 'rod-40', name: 'Basculante rodoviário 8x4 (40 t)', payloadT: 40, volumeM3: 22 },
-    { id: 'rod-30', name: 'Basculante rodoviário 6x4 (~30 t)', payloadT: 30, volumeM3: 18 },
-    { id: 'art-40', name: 'Articulado 6x6 (~38 t)', payloadT: 38, volumeM3: 23 },
-    { id: 'rig-60', name: 'Rígido fora de estrada (~60 t)', payloadT: 60, volumeM3: 38 },
-    { id: 'rig-90', name: 'Rígido fora de estrada (~90 t)', payloadT: 90, volumeM3: 58 },
+    { id: 'rod-40', name: 'Basculante rodoviário 8x4 (40 t)', payloadT: 40, volumeM3: 22, vehicle: 'rodoviario', ...eco(1_600_000, 70, 28, 25) },
+    { id: 'rod-30', name: 'Basculante rodoviário 6x4 (~30 t)', payloadT: 30, volumeM3: 18, vehicle: 'rodoviario', ...eco(1_250_000, 58, 23, 20) },
+    { id: 'art-40', name: 'Articulado 6x6 (~38 t)', payloadT: 38, volumeM3: 23, vehicle: 'mina', ...eco(3_400_000, 110, 30, 45, 7) },
+    { id: 'rig-60', name: 'Rígido fora de estrada (~60 t)', payloadT: 60, volumeM3: 38, vehicle: 'mina', ...eco(5_500_000, 160, 45, 60, 8) },
+    { id: 'rig-90', name: 'Rígido fora de estrada (~90 t)', payloadT: 90, volumeM3: 58, vehicle: 'mina', ...eco(8_000_000, 220, 65, 85, 8) },
   ],
   loaders: [
-    { id: 'esc-20', name: 'Escavadeira ~20 t (1,2 m³)', bucketM3: 1.2, cycleSec: 20 },
-    { id: 'esc-35', name: 'Escavadeira ~35 t (2,0 m³)', bucketM3: 2.0, cycleSec: 22 },
-    { id: 'esc-50', name: 'Escavadeira ~50 t (3,0 m³)', bucketM3: 3.0, cycleSec: 24 },
-    { id: 'esc-75', name: 'Escavadeira ~75 t (4,5 m³)', bucketM3: 4.5, cycleSec: 26 },
-    { id: 'pa-35', name: 'Pá carregadeira (3,5 m³)', bucketM3: 3.5, cycleSec: 35 },
-    { id: 'pa-55', name: 'Pá carregadeira grande (5,5 m³)', bucketM3: 5.5, cycleSec: 40 },
+    { id: 'esc-20', name: 'Escavadeira ~20 t (1,2 m³)', bucketM3: 1.2, cycleSec: 20, ...eco(900_000, 70, 16, 8) },
+    { id: 'esc-35', name: 'Escavadeira ~35 t (2,0 m³)', bucketM3: 2.0, cycleSec: 22, ...eco(1_500_000, 95, 24, 10) },
+    { id: 'esc-50', name: 'Escavadeira ~50 t (3,0 m³)', bucketM3: 3.0, cycleSec: 24, ...eco(2_400_000, 130, 34, 12, 7) },
+    { id: 'esc-75', name: 'Escavadeira ~75 t (4,5 m³)', bucketM3: 4.5, cycleSec: 26, ...eco(3_800_000, 180, 48, 15, 8) },
+    { id: 'pa-35', name: 'Pá carregadeira (3,5 m³)', bucketM3: 3.5, cycleSec: 35, ...eco(2_140_000, 110, 30, 15) },
+    { id: 'pa-55', name: 'Pá carregadeira grande (5,5 m³)', bucketM3: 5.5, cycleSec: 40, ...eco(3_300_000, 150, 42, 22, 7) },
   ],
 };
 
-/** Catálogo do plano, com as classes padrão que faltarem (planos antigos ganham as novas). */
+/** Catálogo do plano, com as classes padrão que faltarem (planos antigos ganham as novas e os dados econômicos). */
 export function catalogOf(premises: DetailedPremises): EquipmentCatalog {
   const c = premises.equipmentCatalog;
   if (!c) return DEFAULT_CATALOG;
-  const missing = DEFAULT_CATALOG.trucks.filter((t) => !c.trucks.some((x) => x.id === t.id));
-  return missing.length ? { ...c, trucks: [...missing, ...c.trucks] } : c;
+  const fill = <T extends { id: string }>(list: T[], defs: T[]) => [
+    ...defs.filter((d) => !list.some((x) => x.id === d.id)),
+    ...list.map((x) => {
+      const d = defs.find((y) => y.id === x.id);
+      return d ? { ...d, ...Object.fromEntries(Object.entries(x).filter(([, v]) => v !== undefined)) } as T : x;
+    }),
+  ];
+  return { trucks: fill(c.trucks, DEFAULT_CATALOG.trucks), loaders: fill(c.loaders, DEFAULT_CATALOG.loaders) };
+}
+
+/** Equipamento de carga de uma rota a partir de um modelo do catálogo. */
+export function loaderFromCatalog(l: LoaderClass, premises: DetailedPremises, count = 1): LoaderSetup {
+  return { name: l.name, count, bucketM3: l.bucketM3, fillFactor: 90, cycleSec: l.cycleSec, availability: premises.dfMina || 85 };
 }
 
 export const KIND_LABELS: Record<RouteKind, string> = {
@@ -706,7 +720,7 @@ function buildActions(
 ): Action[] {
   const actions: Action[] = [];
   const byId = new Map(routes.map((r) => [r.id, r]));
-  const catalog = premises.equipmentCatalog ?? DEFAULT_CATALOG;
+  const catalog = catalogOf(premises);
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : DEFAULT_LOOSE_DENSITY;
 
   // 1. Planta como gargalo

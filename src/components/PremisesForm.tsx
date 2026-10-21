@@ -1,3 +1,4 @@
+import CatalogEditor from './CatalogEditor';
 import React, { useMemo } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -278,7 +279,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       fields: [
         { label: "Velocidade Vazio (km/h)", key: "velocidadeVazio" },
         { label: "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
-        { label: "Classe do Caminhão", key: "truckClassId", type: "select", options: [...catalogOf(premises).trucks.map((t) => ({ label: t.name, value: t.id })), { label: "Outra (informar abaixo)", value: "" }] },
+        { label: "Classe do Caminhão", key: "truckClassId", type: "select", options: [...catalogOf(premises).trucks.map((t) => ({ label: `${t.manufacturer ? `${t.manufacturer} – ` : ''}${t.name}`, value: t.id })), { label: "Outra (informar abaixo)", value: "" }] },
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
         { label: "Número de Caminhões", key: "truckCount" },
         { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
@@ -453,6 +454,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           </div>
         ))}
       </div>
+
+      {/* Catálogo de equipamentos */}
+      <details className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+        <summary className="cursor-pointer text-sm font-bold uppercase tracking-widest text-black/40">Catálogo de equipamentos (fabricantes, modelos, custos e vida útil)</summary>
+        <div className="mt-4">
+          <CatalogEditor premises={premises} setPremises={setPremises as (p: DetailedPremises) => void} />
+        </div>
+      </details>
 
       {/* Perdas operacionais detalhadas */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
