@@ -217,7 +217,11 @@ export function premisesSpeed(model: SimModel, premises: DetailedPremises): Spee
 export function premisesConfig(model: SimModel, premises: DetailedPremises, prev?: TruckConfig): TruckConfig {
   return {
     id: PREMISES_CONFIG_ID,
-    name: `Premissas: ${catalogOf(premises).trucks.find((t) => t.id === premises.truckClassId)?.name ?? 'caminhão'} (${premises.truckCapacity || 0} t${premises.truckVolumeM3 ? `, ${premises.truckVolumeM3} m³` : ''})`,
+    name: (() => {
+      const cls = catalogOf(premises).trucks.find((t) => t.id === premises.truckClassId);
+      const cap = `${premises.truckCapacity || 0} t${premises.truckVolumeM3 ? `, ${premises.truckVolumeM3} m³` : ''}`;
+      return cls ? `Premissas: ${cls.manufacturer ? `${cls.manufacturer} ` : ''}${cls.name}${premises.truckVolumeM3 ? ` · ${premises.truckVolumeM3} m³` : ''}` : `Premissas: caminhão ${cap}`;
+    })(),
     vehicle: prev?.vehicle,
     speedLimitLoadedKmh: prev?.speedLimitLoadedKmh,
     speedLimitEmptyKmh: prev?.speedLimitEmptyKmh,

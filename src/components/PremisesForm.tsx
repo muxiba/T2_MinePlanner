@@ -324,7 +324,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
             <p className="text-xl font-mono font-bold text-emerald-600">{stats.horasEfetivasMina.toFixed(2)}h</p>
           </div>
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-black/5">
-            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Dias Trabalho (Mina)</p>
+            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Dias equivalentes (Mina) · h efetivas ÷ 24</p>
             <p className="text-xl font-mono font-bold text-purple-600">{stats.diasTrabalhoMina.toFixed(2)}d</p>
           </div>
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-black/5">
@@ -342,7 +342,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
             <p className="text-xl font-mono font-bold text-emerald-600">{stats.horasEfetivasPlanta.toFixed(2)}h</p>
           </div>
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-black/5">
-            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Dias Trabalho (Planta)</p>
+            <p className="text-[10px] font-bold text-black/40 uppercase tracking-widest mb-1">Dias equivalentes (Planta) · h efetivas ÷ 24</p>
             <p className="text-xl font-mono font-bold text-purple-600">{stats.diasTrabalhoPlanta.toFixed(2)}d</p>
           </div>
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-black/5">

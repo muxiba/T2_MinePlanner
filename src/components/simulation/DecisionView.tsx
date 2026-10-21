@@ -473,7 +473,8 @@ const CostBars: React.FC<{ evals: Evaluation[]; name: (e: Evaluation) => string 
   const max = Math.max(1e-9, ...rows.map((r) => r.total));
   return (
     <div className="mt-6">
-      <p className="mb-2 text-sm font-medium">De onde vem o custo (R$ por tonelada, sem desconto)</p>
+      <p className="mb-1 text-sm font-medium">De onde vem o custo (R$ por tonelada, sem desconto e antes do crédito da frota que sobra no fim)</p>
+      <p className="mb-2 text-xs text-black/50">Por isso é maior que o custo nivelado da tabela acima, que traz tudo a valor presente e desconta o valor residual da frota no fim do horizonte. Em horizontes curtos (ex.: 1 mês), a compra dos caminhões pesa muito por tonelada.</p>
       <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-black/60">
         {COST_CATS.map((c) => (
           <span key={c.key} className="flex items-center gap-1.5">
@@ -652,7 +653,7 @@ const CashFlowTable: React.FC<{ e: Evaluation; withRevenue: boolean }> = ({ e, w
               <td className={cell} />
             </tr>
             <tr className="text-black/55">
-              <td className="sticky left-0 bg-white py-1 pr-2">Custo por tonelada (R$/t)</td>
+              <td className="sticky left-0 bg-white py-1 pr-2">Custo por tonelada (R$/t, sem desconto; total já com o residual)</td>
               {cf.rows.map((r, i) => (
                 <td key={r.label} className={cell}>{e.periods[i].tonnes ? brl2(r.cost / e.periods[i].tonnes) : '—'}</td>
               ))}
@@ -730,9 +731,9 @@ const Steps: React.FC<{ model: SimModel; plan: ReturnType<typeof emptyPlan>; gen
       text: (
         <>
           {generic
-            ? <>Modo simples: {model.circuits.length} circuitos da aba Circuito (rota, carga e basculamento fixos) em {plan.periods.length} períodos; a massa de cada período = ROM do período × participação de cada circuito, somando {t0(chosen.tonnes / 1e3)} mil t transportadas.</>
+            ? <>Modo simples: {model.circuits.length} circuitos da aba Circuito (rota, carga e basculamento fixos) em {chosen.periods.length} período(s) ({chosen.periods[0]?.label}{chosen.periods.length > 1 ? ` a ${chosen.periods[chosen.periods.length - 1].label}` : ''}); a massa de cada período = ROM do período × participação de cada circuito, somando {t0(chosen.tonnes / 1e3)} mil t transportadas. Operação de {model.scenarios[0]?.hoursPerDay ?? 24} h por dia (premissas).</>
             : <>{model.routes.length} rotas formam a malha de vias; {plan.places.length} lugares de carga e descarga; {plan.movements.length} movimentações em {plan.periods.length} períodos, somando {t0(tonnes / 1e3)} mil t.</>}
-          Calendário de {calendarWorkDays(plan.calendar)} dias trabalháveis por ano e {plan.hoursPerDay} h de operação por dia.
+          {!generic && <>Calendário de {calendarWorkDays(plan.calendar)} dias trabalháveis por ano e {plan.hoursPerDay} h de operação por dia.</>}
         </>
       ),
     },

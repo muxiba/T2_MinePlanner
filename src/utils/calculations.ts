@@ -94,13 +94,15 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   const rates = routeRates(route, premises, area);
   const truckEO = (rates.df / 100) * (rates.uf / 100);
   
-  // tripsPerHour here is the AVERAGE trips per hour of the site being open
-  const tripsPerHour = (60 / cycleTime) * route.truckCount * truckEO;
-  const hourlyProduction = tripsPerHour * truckCapacity;
-  
-  // dailyProduction = Average Hourly Production * 24 hours
-  // (Since hourlyProduction already accounts for DF/UF, we just multiply by the full day)
-  const dailyProduction = hourlyProduction * 24;
+  // Produção da rota pelo mesmo motor do Dimensionamento (fonte única):
+  // por HORA EFETIVA (já descontados DF e UF), em massa SECA entregue, limitada pela carga quando houver.
+  // Dia = hora efetiva × jornada efetiva (24 h × DF × UF); mês = hora efetiva × horas efetivas do mês.
+  const wetK = wetFromDry(1, premises.umidadeNatural || 0, premises.perdaMaterial || 0, premises.moistureMode);
+  const vCap = analyzeRoute(route, premises, route.targetMass || 0);
+  const ownCapWet = Math.max(0, vCap.capacityWetT - vCap.extraCapacityWetT);
+  const tripsPerHour = (60 / cycleTime) * route.truckCount;
+  const hourlyProduction = vCap.hours.effective > 0 ? ownCapWet / vCap.hours.effective / wetK : 0;
+  const dailyProduction = hourlyProduction * vCap.hours.effective / Math.max(1, premises.dailyCalendar?.length || premises.calendarDays || 30);
 
   // Suggested Fleet Dimensioning
   // To meet the target in the available calendar time, we need:
@@ -116,9 +118,9 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   return {
     hourlyProduction,
     dailyProduction,
-    monthlyProduction: hourlyProduction * (premises.calendarDays * 24), 
+    monthlyProduction: hourlyProduction * vCap.hours.effective,
     tripsPerHour,
-    tripsPerDay: tripsPerHour * 24,
+    tripsPerDay: tripsPerHour * (vCap.hours.effective / Math.max(1, premises.dailyCalendar?.length || premises.calendarDays || 30)),
     targetMass: baseSeca,
     equipmentUtilization: truckEO * 100,
     plantLimited: false,
@@ -520,8 +522,7 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const fleetOverload = Math.max(0, rawFleetUtilization - 100);
 
   if (isPlantOverloaded) {
-    suggestions.push(`ALERTA CRÍTICO: Produção da Mina (${totalHourlyROM.toFixed(1)} t/h) excede Capacidade da Planta (${plantCapacityTPH} t/h).`);
-    suggestions.push(`O sistema não permite expansão de frota real além deste limite.`);
+    suggestions.push(`AVISO: a frota de ROM consegue entregar ${totalHourlyROM.toFixed(1)} t/h (seca, por hora efetiva), acima da capacidade da planta (${plantCapacityTPH} t/h). O excedente vira pilha pulmão ou caminhões ociosos: avalie reduzir a frota de ROM em 2. Dimensionamento de Frota.`);
   }
 
   // Original Daily Targets (Fixed)

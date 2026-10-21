@@ -12,7 +12,7 @@ type Logs = Record<string, DailyLog[]>;
 const AUTOSAVE_DELAY_MS = 1200;
 
 /** Mescla premissas salvas com os padrões atuais, para planos antigos ganharem campos novos. */
-function withDefaults(p: DetailedPremises | null): DetailedPremises {
+export function withDefaults(p: DetailedPremises | null): DetailedPremises {
   const out = { ...DEFAULT_PREMISES, ...(p ?? {}) };
   // volume da caçamba vazio: usa a classe do catálogo com a mesma capacidade (ex.: 8x4 40 t)
   if (!(out.truckVolumeM3 && out.truckVolumeM3 > 0)) {

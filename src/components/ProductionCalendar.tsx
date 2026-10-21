@@ -336,7 +336,7 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
               </span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Taxa Horária Total</span>
+              <span className="text-sm text-white/60">Capacidade da frota de ROM (seca, por hora efetiva)</span>
               <span className={`font-mono font-bold ${results.isPlantOverloaded ? 'text-red-400' : 'text-emerald-400'}`}>
                 {results.totalHourlyROM.toFixed(2)} t/h
               </span>
@@ -369,8 +369,8 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
               <AlertCircle size={20} />
             </div>
             <div>
-              <p className="font-bold text-red-400">ALERTA DE PROCESSO: Capacidade da Planta Excedida</p>
-              <p className="text-sm text-white/60">A produção total das rotas ({results.totalHourlyROM.toFixed(1)} t/h) ultrapassa o limite da planta ({premises.plantFeedRateTPH} t/h). O sistema limitou o planejamento automático à capacidade física.</p>
+              <p className="font-bold text-red-400">A frota de ROM entrega mais que a planta processa</p>
+              <p className="text-sm text-white/60">A frota de ROM consegue {results.totalHourlyROM.toFixed(1)} t/h (seca, por hora efetiva), acima do limite da planta ({premises.plantFeedRateTPH} t/h). O plano diário fica limitado à planta; o excedente vira pilha pulmão ou caminhões ociosos.</p>
             </div>
           </div>
         )}

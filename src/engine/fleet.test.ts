@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { checkFlows, ensureFlowRoutes, routeKind, adjustFleetToTarget, analyzeFleet, analyzeRoute, cascade, fitExtraAllocations, loaderLoading, syncAutoFleet, optimizeFleet, routeTargets, sumCalendarHours, trucksWithoutRoute, wetFromDry } from './fleet';
-import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
+import { DEFAULT_PREMISES, INITIAL_ROUTES as DEFAULT_ROUTES } from '../constants';
 import type { Route } from '../types';
 
 const P = { ...DEFAULT_PREMISES };
+/** rotas do plano de exemplo antigo (8, 4 e 4 caminhões, frota manual): base fixa destes testes */
+const INITIAL_ROUTES: Route[] = DEFAULT_ROUTES.map((r, i) => ({ ...r, truckCount: [8, 4, 4][i] ?? r.truckCount, fleetMode: undefined }));
 const mine = INITIAL_ROUTES.find((r) => r.name.includes('Mina'))!;
 
 describe('fundamentos', () => {
