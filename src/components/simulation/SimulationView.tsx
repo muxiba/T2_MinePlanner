@@ -279,6 +279,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
 
   /* ------------------------------- animação ------------------------------ */
   const [periodResults, setPeriodResultsState] = useState<PeriodResult[] | null>(null);
+  const [periodResultsKey, setPeriodResultsKey] = useState<string | null>(null);
   const setPeriodResults = (r: PeriodResult[] | null) => {
     setPeriodResultsState(r);
     void (r ? saveLocal(`${storageKey}:periods`, r) : removeLocal(`${storageKey}:periods`));
@@ -857,7 +858,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       )}
 
       {tab === 'financeiro' && <FinanceView premises={premises} model={model} setModel={setModel} canEdit={canEdit} />}
-      {tab === 'decisao' && <DecisionView model={model} premises={premises} calc={calc} romT={per.romT} results={periodResults} setResults={setPeriodResults} onError={setError} />}
+      {tab === 'decisao' && <DecisionView model={model} premises={premises} calc={calc} romT={per.romT} horizon={per} resultsKey={periodResultsKey} setResultsKey={setPeriodResultsKey} results={periodResults} setResults={setPeriodResults} onError={setError} />}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
       {tab === 'config' && (

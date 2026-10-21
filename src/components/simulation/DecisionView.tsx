@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Award, Download, FileText, Play } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
 import type { DetailedPremises } from '@/types';
-import { FLOW_LABELS, suggestedRomT, type CircuitCalc } from '@/sim/link';
+import { FLOW_LABELS, type CircuitCalc, type PeriodKind } from '@/sim/link';
 import { calendarWorkDays, emptyPlan, type PeriodResult } from '@/sim/plan';
 import { CASH_ITEMS, CRITERIA, economicLife, financeFor, DRIVER_CATS, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
 import { downloadMemo } from '@/sim/memo';
@@ -33,12 +33,16 @@ interface Props {
   premises?: DetailedPremises;
   calc?: CircuitCalc[];
   romT?: number;
+  /** período da aba Circuito (horizonte do modo simples) */
+  resultsKey?: string | null;
+  setResultsKey?: (k: string | null) => void;
+  horizon?: { kind: PeriodKind; qty: number; days?: number; workDays: number; calendarDays: number; romT: number };
   results: PeriodResult[] | null;
   setResults: (r: PeriodResult[] | null) => void;
   onError: (m: string | null) => void;
 }
 
-const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, results, setResults, onError }) => {
+const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, horizon, resultsKey, setResultsKey, results, setResults, onError }) => {
   const plan = model.plan ?? emptyPlan();
   const fin = model.finance ?? defaultFinance(model.configs);
   const [criterion, setCriterion] = useState<Criterion>('equilibrado');
@@ -128,12 +132,28 @@ const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, results, s
     }
   };
 
-  const genericPeriods = () =>
-    plan.periods.map((p) => ({
-      label: p.label,
-      workDays: p.workDays,
-      romT: p.romT ?? (premises ? suggestedRomT(premises, p.kind ?? 'ano', p.days, p.qty ?? 1) : 0),
-    }));
+  /**
+   * Horizonte do modo simples = período da aba Circuito, dividido em anos (anos e quinquênios) ou meses.
+   * A massa de cada ano = ROM do período ÷ nº de anos; se o Plano de lavra tiver o mesmo nº de períodos
+   * com ROM definido (curva de produção), usa a curva.
+   */
+  const genericPeriods = () => {
+    const h = horizon;
+    const yearWork = calendarWorkDays(plan.calendar) || 300;
+    if (!h) return plan.periods.map((p) => ({ label: p.label, workDays: p.workDays, romT: p.romT ?? 0 }));
+    if (h.kind === 'ano' || h.kind === 'quinquenio') {
+      const n = Math.max(1, Math.round(h.qty * (h.kind === 'quinquenio' ? 5 : 1)));
+      const curve = plan.periods.length === n && plan.periods.every((p) => (p.romT ?? 0) > 0) ? plan.periods.map((p) => p.romT!) : null;
+      return Array.from({ length: n }, (_, i) => ({ label: `Ano ${i + 1}`, workDays: yearWork, romT: curve ? curve[i] : h.romT / n }));
+    }
+    if (h.kind === 'mes' && h.qty > 1) {
+      const n = Math.max(1, Math.round(h.qty));
+      return Array.from({ length: n }, (_, i) => ({ label: `Mês ${i + 1}`, workDays: h.workDays / n, romT: h.romT / n }));
+    }
+    return [{ label: h.kind === 'mes' ? 'Mês 1' : `${Math.round(h.calendarDays)} dias`, workDays: h.workDays, romT: h.romT }];
+  };
+  const horizonKey = basisMode === 'circuito' ? JSON.stringify(genericPeriods().map((p) => [p.label, Math.round(p.romT)])) : JSON.stringify(plan.periods.map((p) => [p.label, p.workDays]));
+  const stale = !!results && !!resultsKey && resultsKey !== horizonKey;
   const runAll = async () => {
     onError(null);
     setBusy({ f: 0 });
@@ -159,6 +179,7 @@ const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, results, s
             )
           : await runInWorker<PeriodResult[]>({ kind: 'periods', model: { ...model, plan }, configIds, scenarioIds, aging: true }, (f, stage) => setBusy({ f, stage }));
       setResults(res);
+      setResultsKey?.(horizonKey);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -197,6 +218,20 @@ const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, results, s
           ? 'Usa as rotas e os circuitos da aba Circuito (carga e basculamento) e os períodos e o calendário do plano (estação chuvosa). A massa de cada período vem do ROM do período (Plano de lavra → Calendário e períodos, ou meta das premissas).'
           : 'Usa frentes, polígonos de lavra, pontos de basculamento e rotas de cada período do Plano de lavra.'}
       </span>
+      <span className="w-full text-xs font-medium text-black/70">
+        Horizonte do fluxo de caixa:{' '}
+        {basisMode === 'circuito'
+          ? (() => {
+              const g = genericPeriods();
+              return `${g.length} período(s) (${g[0]?.label}${g.length > 1 ? ` a ${g[g.length - 1].label}` : ''}), da duração em Circuito → Período simulado.`;
+            })()
+          : `${plan.periods.length} período(s) do Plano de lavra (${plan.periods[0]?.label ?? ''}${plan.periods.length > 1 ? ` a ${plan.periods[plan.periods.length - 1].label}` : ''}); mude em Plano de lavra → Calendário e períodos.`}
+      </span>
+      {stale && (
+        <span className="w-full rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+          O horizonte mudou depois da última simulação: os resultados abaixo são do horizonte anterior. Clique em “Simular de novo”.
+        </span>
+      )}
     </div>
   );
 
