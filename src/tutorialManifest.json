@@ -11,7 +11,7 @@
         "end": 21.629478458049885
       },
       {
-        "title": "Escolher per�odo e jornadas",
+        "title": "Escolher período e jornadas",
         "start": 21.629478458049885,
         "end": 42.99768707482993
       },
@@ -26,12 +26,12 @@
         "end": 91.11537414965986
       },
       {
-        "title": "Configurar caminh�es e tempos",
+        "title": "Configurar caminhões e tempos",
         "start": 91.11537414965986,
         "end": 116.57614512471655
       },
       {
-        "title": "Cat�logo e perdas detalhadas",
+        "title": "Catálogo e perdas detalhadas",
         "start": 116.57614512471655,
         "end": 142.81478458049887
       },
@@ -49,7 +49,7 @@
         "chapter": null
       },
       {
-        "title": "Escolher per�odo e jornadas",
+        "title": "Escolher período e jornadas",
         "start": 21.629478458049885,
         "end": 42.99768707482993,
         "chapter": null
@@ -67,13 +67,13 @@
         "chapter": null
       },
       {
-        "title": "Configurar caminh�es e tempos",
+        "title": "Configurar caminhões e tempos",
         "start": 91.11537414965986,
         "end": 116.57614512471655,
         "chapter": null
       },
       {
-        "title": "Cat�logo e perdas detalhadas",
+        "title": "Catálogo e perdas detalhadas",
         "start": 116.57614512471655,
         "end": 142.81478458049887,
         "chapter": null
@@ -103,7 +103,7 @@
         "end": 45.499591836734695
       },
       {
-        "title": "Usar par�metros pr�prios e ativar rota",
+        "title": "Usar parâmetros próprios e ativar rota",
         "start": 45.499591836734695,
         "end": 70.51333333333334
       },
@@ -113,7 +113,7 @@
         "end": 93.92489795918367
       },
       {
-        "title": "Alocar caminh�es por horas",
+        "title": "Alocar caminhões por horas",
         "start": 93.92489795918367,
         "end": 118.398820861678
       }
@@ -132,7 +132,7 @@
         "chapter": null
       },
       {
-        "title": "Usar par�metros pr�prios e ativar rota",
+        "title": "Usar parâmetros próprios e ativar rota",
         "start": 45.499591836734695,
         "end": 70.51333333333334,
         "chapter": null
@@ -144,7 +144,7 @@
         "chapter": null
       },
       {
-        "title": "Alocar caminh�es por horas",
+        "title": "Alocar caminhões por horas",
         "start": 93.92489795918367,
         "end": 118.398820861678,
         "chapter": null
@@ -168,7 +168,7 @@
         "end": 41.81922902494331
       },
       {
-        "title": "Ajustar e comparar na pr�pria tela",
+        "title": "Ajustar e comparar na própria tela",
         "start": 41.81922902494331,
         "end": 67.35541950113378
       }
@@ -187,7 +187,7 @@
         "chapter": null
       },
       {
-        "title": "Ajustar e comparar na pr�pria tela",
+        "title": "Ajustar e comparar na própria tela",
         "start": 41.81922902494331,
         "end": 67.35541950113378,
         "chapter": null
@@ -196,12 +196,12 @@
   },
   {
     "id": "04",
-    "title": "Lan�amento de Produ��o",
+    "title": "Lançamento de Produção",
     "file": "04-tutorial.mp4",
     "duration": 93.8146485260771,
     "chapters": [
       {
-        "title": "Escolher lan�amento manual",
+        "title": "Escolher lançamento manual",
         "start": 0.0,
         "end": 22.465396825396827
       },
@@ -211,7 +211,7 @@
         "end": 47.03795918367347
       },
       {
-        "title": "Informar produ��o acumulada",
+        "title": "Informar produção acumulada",
         "start": 47.03795918367347,
         "end": 71.43637188208616
       },
@@ -223,7 +223,7 @@
     ],
     "scenes": [
       {
-        "title": "Escolher lan�amento manual",
+        "title": "Escolher lançamento manual",
         "start": 0.0,
         "end": 22.465396825396827,
         "chapter": null
@@ -235,7 +235,7 @@
         "chapter": null
       },
       {
-        "title": "Informar produ��o acumulada",
+        "title": "Informar produção acumulada",
         "start": 47.03795918367347,
         "end": 71.43637188208616,
         "chapter": null
@@ -260,12 +260,12 @@
         "end": 21.681678004535147
       },
       {
-        "title": "Consultar gr�fico e resumo",
+        "title": "Consultar gráfico e resumo",
         "start": 21.681678004535147,
         "end": 43.50267573696145
       },
       {
-        "title": "Expandir diagn�stico e exportar",
+        "title": "Expandir diagnóstico e exportar",
         "start": 43.50267573696145,
         "end": 66.90263038548753
       }
@@ -278,13 +278,13 @@
         "chapter": null
       },
       {
-        "title": "Consultar gr�fico e resumo",
+        "title": "Consultar gráfico e resumo",
         "start": 21.681678004535147,
         "end": 43.50267573696145,
         "chapter": null
       },
       {
-        "title": "Expandir diagn�stico e exportar",
+        "title": "Expandir diagnóstico e exportar",
         "start": 43.50267573696145,
         "end": 66.90263038548753,
         "chapter": null
@@ -293,17 +293,17 @@
   },
   {
     "id": "06",
-    "title": "Calend�rio",
+    "title": "Calendário",
     "file": "06-tutorial.mp4",
     "duration": 68.36548752834467,
     "chapters": [
       {
-        "title": "Consultar o calend�rio mensal",
+        "title": "Consultar o calendário mensal",
         "start": 0.0,
         "end": 20.834149659863947
       },
       {
-        "title": "Alternar para tabela di�ria",
+        "title": "Alternar para tabela diária",
         "start": 20.834149659863947,
         "end": 44.199274376417236
       },
@@ -315,13 +315,13 @@
     ],
     "scenes": [
       {
-        "title": "Consultar o calend�rio mensal",
+        "title": "Consultar o calendário mensal",
         "start": 0.0,
         "end": 20.834149659863947,
         "chapter": null
       },
       {
-        "title": "Alternar para tabela di�ria",
+        "title": "Alternar para tabela diária",
         "start": 20.834149659863947,
         "end": 44.199274376417236,
         "chapter": null
@@ -336,41 +336,41 @@
   },
   {
     "id": "07",
-    "title": "Cen�rios",
+    "title": "Cenários",
     "file": "07-tutorial.mp4",
     "duration": 67.581768707483,
     "chapters": [
       {
-        "title": "Abrir a �rea de cen�rios",
+        "title": "Abrir a área de cenários",
         "start": 0.0,
         "end": 18.634013605442178
       },
       {
-        "title": "Nomear e salvar uma configura��o",
+        "title": "Nomear e salvar uma configuração",
         "start": 18.634013605442178,
         "end": 42.080408163265304
       },
       {
-        "title": "Exportar e importar cen�rios",
+        "title": "Exportar e importar cenários",
         "start": 42.080408163265304,
         "end": 67.581768707483
       }
     ],
     "scenes": [
       {
-        "title": "Abrir a �rea de cen�rios",
+        "title": "Abrir a área de cenários",
         "start": 0.0,
         "end": 18.634013605442178,
         "chapter": null
       },
       {
-        "title": "Nomear e salvar uma configura��o",
+        "title": "Nomear e salvar uma configuração",
         "start": 18.634013605442178,
         "end": 42.080408163265304,
         "chapter": null
       },
       {
-        "title": "Exportar e importar cen�rios",
+        "title": "Exportar e importar cenários",
         "start": 42.080408163265304,
         "end": 67.581768707483,
         "chapter": null
@@ -379,7 +379,7 @@
   },
   {
     "id": "08",
-    "title": "Detalhes de c�lculo",
+    "title": "Detalhes de cálculo",
     "file": "08-tutorial.mp4",
     "duration": 64.76054421768707,
     "chapters": [
@@ -422,7 +422,7 @@
   },
   {
     "id": "09",
-    "title": "Simula��o",
+    "title": "Simulação",
     "file": "09-tutorial.mp4",
     "duration": 702.4166893424036,
     "chapters": [
@@ -437,7 +437,7 @@
         "end": 277.7578231292517
       },
       {
-        "title": "3. Configura��es e cen�rios",
+        "title": "3. Configurações e cenários",
         "start": 277.7578231292517,
         "end": 348.10861678004534
       },
@@ -452,12 +452,12 @@
         "end": 507.2352380952381
       },
       {
-        "title": "6. Resultados e decis�o",
+        "title": "6. Resultados e decisão",
         "start": 507.2352380952381,
         "end": 617.5359637188209
       },
       {
-        "title": "7. Anima��o",
+        "title": "7. Animação",
         "start": 617.5359637188209,
         "end": 702.4166893424036
       }
@@ -470,7 +470,7 @@
         "chapter": "1. Circuito"
       },
       {
-        "title": "Definir per�odo e v�nculo com as premissas",
+        "title": "Definir período e vínculo com as premissas",
         "start": 25.10671201814059,
         "end": 50.01020408163265,
         "chapter": "1. Circuito"
@@ -482,7 +482,7 @@
         "chapter": "1. Circuito"
       },
       {
-        "title": "Associar o ve�culo ao trajeto",
+        "title": "Associar o veículo ao trajeto",
         "start": 71.95891156462585,
         "end": 95.54462585034014,
         "chapter": "1. Circuito"
@@ -494,13 +494,13 @@
         "chapter": "1. Circuito"
       },
       {
-        "title": "Revisar par�metros gerais",
+        "title": "Revisar parâmetros gerais",
         "start": 117.93451247165532,
         "end": 140.26634920634922,
         "chapter": "1. Circuito"
       },
       {
-        "title": "Escolher per�odo e vista do plano",
+        "title": "Escolher período e vista do plano",
         "start": 140.26634920634922,
         "end": 161.4894784580499,
         "chapter": "2. Plano de lavra"
@@ -512,46 +512,46 @@
         "chapter": "2. Plano de lavra"
       },
       {
-        "title": "Importar frentes e s�lidos por per�odo",
+        "title": "Importar frentes e sólidos por período",
         "start": 184.45401360544219,
         "end": 207.20380952380953,
         "chapter": "2. Plano de lavra"
       },
       {
-        "title": "Configurar calend�rio e per�odos",
+        "title": "Configurar calendário e períodos",
         "start": 207.20380952380953,
         "end": 228.72294784580498,
         "chapter": "2. Plano de lavra"
       },
       {
-        "title": "Preencher as movimenta��es",
+        "title": "Preencher as movimentações",
         "start": 228.72294784580498,
         "end": 253.66702947845806,
         "chapter": "2. Plano de lavra"
       },
       {
-        "title": "Executar e consultar a frota por per�odo",
+        "title": "Executar e consultar a frota por período",
         "start": 253.66702947845806,
         "end": 277.7578231292517,
         "chapter": "2. Plano de lavra"
       },
       {
-        "title": "Adicionar uma configura��o de transporte",
+        "title": "Adicionar uma configuração de transporte",
         "start": 277.7578231292517,
         "end": 301.9704761904762,
-        "chapter": "3. Configura��es e cen�rios"
+        "chapter": "3. Configurações e cenários"
       },
       {
         "title": "Consultar velocidades e tempos por rota",
         "start": 301.9704761904762,
         "end": 325.47492063492064,
-        "chapter": "3. Configura��es e cen�rios"
+        "chapter": "3. Configurações e cenários"
       },
       {
-        "title": "Organizar os cen�rios operacionais",
+        "title": "Organizar os cenários operacionais",
         "start": 325.47492063492064,
         "end": 348.10861678004534,
-        "chapter": "3. Configura��es e cen�rios"
+        "chapter": "3. Configurações e cenários"
       },
       {
         "title": "Preencher os custos gerais",
@@ -566,7 +566,7 @@
         "chapter": "4. Financeiro"
       },
       {
-        "title": "Conferir consumos e manuten��o",
+        "title": "Conferir consumos e manutenção",
         "start": 393.52108843537417,
         "end": 415.6380952380952,
         "chapter": "4. Financeiro"
@@ -578,7 +578,7 @@
         "chapter": "5. Resultados do circuito"
       },
       {
-        "title": "Selecionar uma c�lula de resultado",
+        "title": "Selecionar uma célula de resultado",
         "start": 438.06866213151926,
         "end": 460.65015873015875,
         "chapter": "5. Resultados do circuito"
@@ -596,58 +596,58 @@
         "chapter": "5. Resultados do circuito"
       },
       {
-        "title": "Escolher a base e o crit�rio",
+        "title": "Escolher a base e o critério",
         "start": 507.2352380952381,
         "end": 531.3492517006803,
-        "chapter": "6. Resultados e decis�o"
+        "chapter": "6. Resultados e decisão"
       },
       {
-        "title": "Selecionar uma op��o na tabela",
+        "title": "Selecionar uma opção na tabela",
         "start": 531.3492517006803,
         "end": 552.7812698412698,
-        "chapter": "6. Resultados e decis�o"
+        "chapter": "6. Resultados e decisão"
       },
       {
-        "title": "Consultar equipamentos e custos por per�odo",
+        "title": "Consultar equipamentos e custos por período",
         "start": 552.7812698412698,
         "end": 573.3193197278912,
-        "chapter": "6. Resultados e decis�o"
+        "chapter": "6. Resultados e decisão"
       },
       {
         "title": "Abrir a sensibilidade e os custos",
         "start": 573.3193197278912,
         "end": 593.6251700680272,
-        "chapter": "6. Resultados e decis�o"
+        "chapter": "6. Resultados e decisão"
       },
       {
         "title": "Consultar fluxo de caixa e baixar memorial",
         "start": 593.6251700680272,
         "end": 617.5359637188209,
-        "chapter": "6. Resultados e decis�o"
+        "chapter": "6. Resultados e decisão"
       },
       {
-        "title": "Selecionar e gerar a anima��o",
+        "title": "Selecionar e gerar a animação",
         "start": 617.5359637188209,
         "end": 635.9552380952381,
-        "chapter": "7. Anima��o"
+        "chapter": "7. Animação"
       },
       {
         "title": "Reproduzir, pausar e navegar no tempo",
         "start": 635.9552380952381,
         "end": 656.4178684807256,
-        "chapter": "7. Anima��o"
+        "chapter": "7. Animação"
       },
       {
-        "title": "Consultar as tabelas da anima��o",
+        "title": "Consultar as tabelas da animação",
         "start": 656.4178684807256,
         "end": 677.6931972789116,
-        "chapter": "7. Anima��o"
+        "chapter": "7. Animação"
       },
       {
         "title": "Alternar vistas e encerrar a consulta",
         "start": 677.6931972789116,
         "end": 702.4166893424036,
-        "chapter": "7. Anima��o"
+        "chapter": "7. Animação"
       }
     ]
   }

@@ -1,34 +1,34 @@
 1
 00:00:00,000 --> 00:00:01,765
-Clique em Cen�rios no menu lateral.
+Clique em Cenários no menu lateral.
 
 2
 00:00:01,945 --> 00:00:06,565
-Nesta �rea voc� guarda uma configura��o de premissas e rotas para consultar depois.
+Nesta área você guarda uma configuração de premissas e rotas para consultar depois.
 
 3
 00:00:06,745 --> 00:00:10,658
-Os cen�rios salvos aparecem em cart�es, com nome, data e resumo.
+Os cenários salvos aparecem em cartões, com nome, data e resumo.
 
 4
 00:00:10,838 --> 00:00:17,804
-Antes de experimentar outra frota ou carregar uma alternativa, guarde a configura��o de refer�ncia com um nome f�cil de reconhecer.
+Antes de experimentar outra frota ou carregar uma alternativa, guarde a configuração de referência com um nome fácil de reconhecer.
 
 5
 00:00:18,634 --> 00:00:25,020
-No campo Nome do cen�rio, digite uma identifica��o que descreva a alternativa, como configura��o de frota ou per�odo.
+No campo Nome do cenário, digite uma identificação que descreva a alternativa, como configuração de frota ou período.
 
 6
 00:00:25,200 --> 00:00:28,450
-Depois clique em Salvar e aguarde o cart�o aparecer na lista.
+Depois clique em Salvar e aguarde o cartão aparecer na lista.
 
 7
 00:00:28,630 --> 00:00:33,356
-O nome mostrado aqui � apenas uma demonstra��o de preenchimento, sem salvar um novo cen�rio.
+O nome mostrado aqui é apenas uma demonstração de preenchimento, sem salvar um novo cenário.
 
 8
 00:00:33,536 --> 00:00:38,121
-Para recuperar uma configura��o guardada, encontre o cart�o correto e clique em Carregar.
+Para recuperar uma configuração guardada, encontre o cartão correto e clique em Carregar.
 
 9
 00:00:38,301 --> 00:00:41,250
@@ -36,20 +36,20 @@ Isso substitui as premissas e rotas do plano ativo.
 
 10
 00:00:42,080 --> 00:00:46,097
-No cart�o de um cen�rio, utilize Exportar como JSON para guardar seu arquivo.
+No cartão de um cenário, utilize Exportar como JSON para guardar seu arquivo.
 
 11
 00:00:46,277 --> 00:00:51,630
-Para trazer um cen�rio compat�vel, clique em Importar JSON e selecione o arquivo correspondente.
+Para trazer um cenário compatível, clique em Importar JSON e selecione o arquivo correspondente.
 
 12
 00:00:51,810 --> 00:00:55,119
-Confira o nome e o conte�do antes de carregar a configura��o.
+Confira o nome e o conteúdo antes de carregar a configuração.
 
 13
 00:00:55,299 --> 00:00:58,956
-Excluir cen�rio remove o item escolhido e deve ser usado com aten��o.
+Excluir cenário remove o item escolhido e deve ser usado com atenção.
 
 14
 00:00:59,136 --> 00:01:06,752
-Os cen�rios desta �rea s�o configura��es salvas do planejamento; a Simula��o possui seus pr�prios cen�rios operacionais em outra aba.
+Os cenários desta área são configurações salvas do planejamento; a Simulação possui seus próprios cenários operacionais em outra aba.

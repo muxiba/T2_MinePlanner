@@ -1,55 +1,55 @@
 1
 00:00:00,000 --> 00:00:01,405
-Clique em Detalhes de c�lculo.
+Clique em Detalhes de cálculo.
 
 2
 00:00:01,585 --> 00:00:06,786
-Nesta aula vamos usar a tela para consultar e exportar o relat�rio, sem desenvolver a metodologia.
+Nesta aula vamos usar a tela para consultar e exportar o relatório, sem desenvolver a metodologia.
 
 3
 00:00:06,966 --> 00:00:13,444
-No alto aparecem os indicadores do plano e os bot�es Imprimir ou PDF, Excel e Relat�rio port�til em HTML.
+No alto aparecem os indicadores do plano e os botões Imprimir ou PDF, Excel e Relatório portátil em HTML.
 
 4
 00:00:13,624 --> 00:00:19,813
-Escolha PDF quando precisar de uma c�pia para impress�o; HTML gera um relat�rio que pode ser aberto no navegador.
+Escolha PDF quando precisar de uma cópia para impressão; HTML gera um relatório que pode ser aberto no navegador.
 
 5
 00:00:20,643 --> 00:00:22,848
-Role a p�gina pelas se��es numeradas.
+Role a página pelas seções numeradas.
 
 6
 00:00:23,028 --> 00:00:28,021
-Para localizar uma rota, encontre Frota necess�ria por rota e consulte sua linha na tabela.
+Para localizar uma rota, encontre Frota necessária por rota e consulte sua linha na tabela.
 
 7
 00:00:28,201 --> 00:00:33,042
-As demais se��es organizam massas, horas, ciclo, etapas e acompanhamento do m�s.
+As demais seções organizam massas, horas, ciclo, etapas e acompanhamento do mês.
 
 8
 00:00:33,222 --> 00:00:38,365
-Se precisar alterar um cadastro, volte � �rea de origem, como Premissas ou Dimensionamento de Frota.
+Se precisar alterar um cadastro, volte à área de origem, como Premissas ou Dimensionamento de Frota.
 
 9
 00:00:38,545 --> 00:00:41,425
-Depois retorne aos detalhes para conferir a atualiza��o.
+Depois retorne aos detalhes para conferir a atualização.
 
 10
 00:00:42,255 --> 00:00:48,895
-Na se��o E se, utilize os controles de meta, frota, planta e dist�ncia para explorar uma alternativa na pr�pria tela.
+Na seção E se, utilize os controles de meta, frota, planta e distância para explorar uma alternativa na própria tela.
 
 11
 00:00:49,075 --> 00:00:51,165
-Essa se��o informa que n�o altera o plano.
+Essa seção informa que não altera o plano.
 
 12
 00:00:51,345 --> 00:00:55,130
-O bot�o Voltar ao plano retorna a compara��o � refer�ncia carregada.
+O botão Voltar ao plano retorna a comparação à referência carregada.
 
 13
 00:00:55,310 --> 00:00:58,851
-N�o confunda esses controles com uma altera��o salva nas premissas.
+Não confunda esses controles com uma alteração salva nas premissas.
 
 14
 00:00:59,031 --> 00:01:03,931
-Ao terminar a consulta, gere o relat�rio correspondente ao estado que voc� deseja apresentar.
+Ao terminar a consulta, gere o relatório correspondente ao estado que você deseja apresentar.
