@@ -384,8 +384,8 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
             <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
               <span className="text-xs font-bold text-white/40 uppercase tracking-widest block mb-2">Frota Mina</span>
               <div className="flex justify-between items-end">
-                <span className="text-2xl font-mono font-bold">{premises.fleetCapacityMinaTPH} t/h</span>
-                <span className="text-[10px] text-white/40">Disponível</span>
+                <span className="text-2xl font-mono font-bold">{Math.round(results.transportTph?.rom ?? premises.fleetCapacityMinaTPH).toLocaleString('pt-BR')} t/h</span>
+                <span className="text-[10px] text-white/40">Necessário (úmida)</span>
               </div>
             </div>
             <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
@@ -394,9 +394,9 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
               </span>
               <div className="flex justify-between items-end">
                 <span className="text-2xl font-mono font-bold">
-                  {(premises.processType === 'umido' ? premises.fleetCapacityBaiaTPH : 0) + premises.fleetCapacityTerminalTPH} t/h
+                  {Math.round(results.transportTph ? (premises.processType === 'umido' ? results.transportTph.tailings : 0) + results.transportTph.product : (premises.processType === 'umido' ? premises.fleetCapacityBaiaTPH : 0) + premises.fleetCapacityTerminalTPH).toLocaleString('pt-BR')} t/h
                 </span>
-                <span className="text-[10px] text-white/40">Disponível</span>
+                <span className="text-[10px] text-white/40">Necessário (úmida)</span>
               </div>
             </div>
             <div className="p-4 bg-white/5 rounded-2xl border border-white/5">

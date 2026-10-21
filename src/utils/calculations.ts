@@ -1,5 +1,5 @@
 import { DetailedPremises, Route, ProductionData, DailyLog, OperationalDiagnostic } from "../types";
-import { analyzeRoute, routeKind, routeRates } from "../engine/fleet";
+import { analyzeRoute, routeKind, routeRates, wetFromDry } from "../engine/fleet";
 
 export function calculateRouteProduction(route: Route, premises: DetailedPremises, effectiveHoursPerMonth: number): ProductionData {
   if (!route.active) {
@@ -347,6 +347,16 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const plannedHourlyRejeito = effectiveHoursPerMonthPlanta > 0 ? plannedMonthlyRejeito/ effectiveHoursPerMonthPlanta : 0;
   const plannedHourlyWaste   = (premises.hasWasteRock && effectiveHoursPerMonthMina > 0) ? plannedMonthlyWaste / effectiveHoursPerMonthMina : 0;
   const plannedHourlyTotalFrota = plannedHourlyROM + plannedHourlyPlanta + plannedHourlyRejeito + plannedHourlyWaste;
+  // O que a frota precisa transportar (massa úmida: seca convertida pela premissa “Conversão seca → úmida”)
+  const wetK = wetFromDry(1, premises.umidadeNatural || 0, premises.perdaMaterial || 0, premises.moistureMode);
+  const transportTph = {
+    factor: wetK,
+    rom: plannedHourlyROM * wetK,
+    product: plannedHourlyPlanta * wetK,
+    tailings: plannedHourlyRejeito * wetK,
+    waste: plannedHourlyWaste * wetK,
+    total: plannedHourlyTotalFrota * wetK,
+  };
 
   // Daily plan (× effective hours/day)
   const plannedDailyROM     = plannedHourlyROM     * jornadaEfetivaMina;
@@ -603,6 +613,8 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     plannedHourlyPlanta,
     plannedHourlyRejeito,
     plannedHourlyTotalFrota,
+    plannedHourlyWaste,
+    transportTph,
     plannedDailyROM,
     plannedDailyPlanta,
     plannedDailyRejeito,

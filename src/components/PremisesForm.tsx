@@ -19,39 +19,15 @@ const months = [
 ];
 
 const years = [2024, 2025, 2026, 2027, 2028];
+const fmt2 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt3 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
 
 const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setRoutes, results }) => {
-  // Initialize fleet capacities if they are zero (e.g. on first load or after reset)
-  React.useEffect(() => {
-    if (premises.fleetCapacityMinaTPH === 0 && premises.plantFeedRateTPH > 0) {
-      const mina = premises.plantFeedRateTPH;
-      const terminal = premises.plantFeedRateTPH * (premises.rmGlobal / 100);
-      const baia = premises.plantFeedRateTPH * (premises.rejeitoTotal / 100);
-      const total = mina + terminal + baia;
-      
-      setPremises(prev => ({
-        ...prev,
-        fleetCapacityMinaTPH: mina,
-        fleetCapacityTerminalTPH: terminal,
-        fleetCapacityBaiaTPH: baia,
-        maxTotalFleetCapacityTPH: total
-      }));
-    }
-  }, []);
-
   const handleChange = (field: keyof DetailedPremises, value: any) => {
     const newPremises = { ...premises, [field]: value };
 
     // Automatically calculate fleet capacities based on Plant Capacity
     if (field === "plantFeedRateTPH" || field === "rmGlobal" || field === "rejeitoTotal" || field === "processType" || field === "dfMina" || field === "ufMina" || field === "dfPlanta" || field === "ufPlanta") {
-      const currentRM = field === "processType" && value === "seco" ? 100 : (field === "rmGlobal" ? value : newPremises.rmGlobal);
-      const currentRejeito = field === "processType" && value === "seco" ? 0 : (field === "rejeitoTotal" ? value : newPremises.rejeitoTotal);
-      
-      newPremises.fleetCapacityMinaTPH = newPremises.plantFeedRateTPH;
-      newPremises.fleetCapacityTerminalTPH = newPremises.plantFeedRateTPH * (currentRM / 100);
-      newPremises.fleetCapacityBaiaTPH = newPremises.plantFeedRateTPH * (currentRejeito / 100);
-      newPremises.maxTotalFleetCapacityTPH = newPremises.fleetCapacityMinaTPH + newPremises.fleetCapacityTerminalTPH + newPremises.fleetCapacityBaiaTPH;
-
       // Calculate EO as DF * UF
       newPremises.eoMina = (newPremises.dfMina / 100) * (newPremises.ufMina / 100) * 100;
       newPremises.eoPlanta = (newPremises.dfPlanta / 100) * (newPremises.ufPlanta / 100) * 100;
@@ -224,6 +200,21 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     };
   }, [premises, results]);
 
+  // taxas de transporte necessárias: mesma base da Produção Planejada (seca ÷ horas efetivas) convertida para úmida
+  const tr = results.transportTph;
+  const derivedTph: Record<string, number> = {
+    fleetCapacityMinaTPH: tr.rom,
+    fleetCapacityBaiaTPH: tr.tailings,
+    fleetCapacityTerminalTPH: tr.product,
+    maxTotalFleetCapacityTPH: tr.total,
+  };
+  // mantém os campos guardados iguais aos calculados (usados em outras telas)
+  React.useEffect(() => {
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const next = { fleetCapacityMinaTPH: r2(tr.rom), fleetCapacityBaiaTPH: r2(tr.tailings), fleetCapacityTerminalTPH: r2(tr.product), maxTotalFleetCapacityTPH: r2(tr.total) };
+    if ((Object.keys(next) as (keyof typeof next)[]).some((k) => Math.abs((premises[k] ?? 0) - next[k]) > 0.005)) setPremises((prev) => ({ ...prev, ...next }));
+  }, [tr.rom, tr.tailings, tr.product, tr.total]);
+
   const sections = [
     {
       title: "Período de Simulação",
@@ -241,7 +232,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "DF Equipamentos (%)", key: "dfMina" },
         { label: premises.losses?.enabled ? "UF Equipamentos (%) — calculada pelas perdas" : "UF Equipamentos (%)", key: "ufMina", readOnly: !!premises.losses?.enabled },
         { label: "Rendimento DF × UF (%)", key: "eoMina", readOnly: true },
-        { label: "Capacidade Frota Mina (t/h)", key: "fleetCapacityMinaTPH", readOnly: true },
+        { label: "Transporte Mina → Planta necessário (t/h úmida)", key: "fleetCapacityMinaTPH", readOnly: true },
       ]
     },
     {
@@ -291,9 +282,9 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
         { label: "Número de Caminhões", key: "truckCount" },
         { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
-        { label: "Frota Baia (t/h)", key: "fleetCapacityBaiaTPH", readOnly: true },
-        { label: "Frota Terminal (t/h)", key: "fleetCapacityTerminalTPH", readOnly: true },
-        { label: "Capacidade Total Frota (t/h)", key: "maxTotalFleetCapacityTPH", readOnly: true },
+        { label: "Transporte de rejeito necessário (t/h úmida)", key: "fleetCapacityBaiaTPH", readOnly: true },
+        { label: "Transporte de produto necessário (t/h úmida)", key: "fleetCapacityTerminalTPH", readOnly: true },
+        { label: "Transporte total necessário (t/h úmida)", key: "maxTotalFleetCapacityTPH", readOnly: true },
       ]
     },
     {
@@ -362,59 +353,53 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
 
       {/* Planned Production Summary */}
       <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-emerald-400 mb-6">Produção Planejada Detalhada</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="space-y-4">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Taxa Horária (t/h)</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">ROM</span>
-              <span className="font-mono font-bold">{results.plannedHourlyROM.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Planta</span>
-              <span className="font-mono font-bold">{results.plannedHourlyPlanta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Rejeito</span>
-              <span className="font-mono font-bold">{results.plannedHourlyRejeito.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5 text-emerald-400">
-              <span className="text-xs font-bold">Total Frota</span>
-              <span className="font-mono font-bold">{results.plannedHourlyTotalFrota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Produção Diária (t/dia)</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5 text-emerald-400">
-              <span className="text-xs font-bold">Mina (ROM)</span>
-              <span className="font-mono font-bold">{results.plannedDailyROM.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Planta</span>
-              <span className="font-mono font-bold">{results.plannedDailyPlanta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Rejeito</span>
-              <span className="font-mono font-bold">{results.plannedDailyRejeito.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Produção Mensal (t/mês)</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5 text-emerald-400">
-              <span className="text-xs font-bold">Mina (ROM)</span>
-              <span className="font-mono font-bold">{results.plannedMonthlyROM.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Planta</span>
-              <span className="font-mono font-bold">{results.plannedMonthlyPlanta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-xs text-white/60">Rejeito Filtrado</span>
-              <span className="font-mono font-bold">{results.plannedMonthlyRejeito.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            </div>
-          </div>
+        <h3 className="text-sm font-bold uppercase tracking-widest text-emerald-400 mb-2">Produção Planejada Detalhada</h3>
+        <p className="mb-5 text-xs text-white/50">
+          Massa seca: ROM = consumo da planta; produto = ROM × RM {fmt2(premises.processType === 'seco' ? 100 : premises.rmGlobal)}%; rejeito = ROM × {fmt2(premises.processType === 'seco' ? 0 : premises.rejeitoTotal)}%.
+          t/h = massa do mês ÷ horas efetivas (mina para ROM e estéril, planta para produto e rejeito). A frota transporta a massa úmida: seca × {fmt3(results.transportTph.factor)} ({premises.moistureMode === 'base_umida' ? `÷ (1 − ${fmt2(premises.umidadeNatural)}%) × (1 + ${fmt2(premises.perdaMaterial)}%)` : `1 + ${fmt2(premises.umidadeNatural)}% + ${fmt2(premises.perdaMaterial)}%`}). Os campos de transporte necessário (Mina e Transporte/Frota) são a coluna “t/h úmida”.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className="border-b border-white/10 text-left text-[10px] font-bold uppercase tracking-widest text-white/40">
+                <th className="py-2 pr-3">Fluxo</th>
+                <th className="py-2 pr-3 text-right">t/h seca</th>
+                <th className="py-2 pr-3 text-right">t/h úmida (frota)</th>
+                <th className="py-2 pr-3 text-right">t/dia seca</th>
+                <th className="py-2 pr-3 text-right">t/mês seca</th>
+                <th className="py-2 text-right">t/mês úmida (frota)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {([
+                ["Mina → Planta (ROM)", results.plannedHourlyROM, results.plannedDailyROM, results.plannedMonthlyROM, true],
+                ["Planta → Terminal (produto)", results.plannedHourlyPlanta, results.plannedDailyPlanta, results.plannedMonthlyPlanta, true],
+                ["Planta → Rejeito filtrado", results.plannedHourlyRejeito, results.plannedDailyRejeito, results.plannedMonthlyRejeito, premises.processType !== 'seco'],
+                ["Mina → Estéril", results.plannedHourlyWaste, results.plannedDailyWaste, results.plannedMonthlyWaste, !!premises.hasWasteRock],
+              ] as [string, number, number, number, boolean][])
+                .filter((r) => r[4])
+                .map(([label, h, d, m]) => (
+                  <tr key={label} className="border-b border-white/5">
+                    <td className="py-2 pr-3 text-white/70">{label}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt2(h)}</td>
+                    <td className="py-2 pr-3 text-right font-mono font-bold text-emerald-300">{fmt2(h * results.transportTph.factor)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt2(d)}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{fmt2(m)}</td>
+                    <td className="py-2 text-right font-mono">{fmt2(m * results.transportTph.factor)}</td>
+                  </tr>
+                ))}
+            </tbody>
+            <tfoot>
+              <tr className="font-bold text-emerald-400">
+                <td className="py-2 pr-3">Total transportado pela frota</td>
+                <td className="py-2 pr-3 text-right font-mono">{fmt2(results.plannedHourlyTotalFrota)}</td>
+                <td className="py-2 pr-3 text-right font-mono">{fmt2(results.transportTph.total)}</td>
+                <td className="py-2 pr-3 text-right font-mono">{fmt2(results.plannedDailyTotal)}</td>
+                <td className="py-2 pr-3 text-right font-mono">{fmt2(results.plannedMonthlyTotal)}</td>
+                <td className="py-2 text-right font-mono">{fmt2(results.plannedMonthlyTotal * results.transportTph.factor)}</td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       </div>
 
@@ -451,7 +436,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                     </select>
                   ) : field.readOnly ? (
                     <div className="w-full bg-black/5 border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono text-black/40">
-                      {(premises[field.key as keyof DetailedPremises] as number)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || "0,00"}
+                      {((field.key in derivedTph ? derivedTph[field.key] : (premises[field.key as keyof DetailedPremises] as number)) ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   ) : (
                     <input
