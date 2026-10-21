@@ -232,6 +232,18 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
   };
 
   const downloadCircuitMemo = () => downloadMemo(circuitMemo({ model, premises, calc, per, matrix, sel, sweep }), 'memorial_resultados_circuito.html');
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const downloadCircuitPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { memoToPdf } = await import('@/sim/memoPdf');
+      await memoToPdf(circuitMemo({ model, premises, calc, per, matrix, sel, sweep }), 'memorial_resultados_circuito.pdf');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   const exportCsv = () => {
     if (!matrix) return;
@@ -845,7 +857,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       )}
 
       {tab === 'financeiro' && <FinanceView premises={premises} model={model} setModel={setModel} canEdit={canEdit} />}
-      {tab === 'decisao' && <DecisionView model={model} results={periodResults} setResults={setPeriodResults} onError={setError} />}
+      {tab === 'decisao' && <DecisionView model={model} premises={premises} calc={calc} romT={per.romT} results={periodResults} setResults={setPeriodResults} onError={setError} />}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
       {tab === 'config' && (
@@ -1099,8 +1111,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                 description={`${model.replications} repetições por célula, ${model.scenarios[0]?.days ?? 7} dias simulados cada. Valores em t/dia (média e intervalo de 95%).`}
                 actions={
                   <div className="flex items-center gap-2">
+                    <Btn tone="light" onClick={() => void downloadCircuitPdf()} busy={pdfBusy}>
+                      <FileText size={15} /> Memorial (PDF)
+                    </Btn>
                     <Btn tone="light" onClick={downloadCircuitMemo}>
-                      <FileText size={15} /> Memorial de cálculo
+                      <FileText size={15} /> Memorial (HTML)
                     </Btn>
                     {matrix && (
                       <Btn tone="light" onClick={exportCsv}>
@@ -1328,8 +1343,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                     <Btn onClick={() => void runSweep()} busy={sweepBusy !== null}>
                       <Play size={15} /> Buscar
                     </Btn>
-                    <Btn tone="light" onClick={downloadCircuitMemo}>
-                      <FileText size={15} /> Memorial
+                    <Btn tone="light" onClick={() => void downloadCircuitPdf()} busy={pdfBusy}>
+                      <FileText size={15} /> Memorial (PDF)
                     </Btn>
                   </div>
                 }

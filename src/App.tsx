@@ -29,9 +29,10 @@ const RequireAuth: React.FC = () => {
 
 /** Exige uma empresa liberada (ativa ou em teste válido). */
 const RequireCompany: React.FC = () => {
-  const { current } = useAuth();
+  const { current, isOwner } = useAuth();
   if (!current) return <NoCompanyPage />;
-  if (!isCompanyUsable(current.company)) return <BlockedPage />;
+  // o dono do sistema tem acesso livre a todas as empresas, mesmo em teste vencido ou bloqueadas
+  if (!isOwner && !isCompanyUsable(current.company)) return <BlockedPage />;
   // key: ao trocar de empresa, as telas são remontadas com os dados da nova empresa
   return (
     <React.Fragment key={current.company_id}>
@@ -41,8 +42,8 @@ const RequireCompany: React.FC = () => {
 };
 
 const RequireAdmin: React.FC = () => {
-  const { role } = useAuth();
-  return role === 'admin' ? <Outlet /> : <Navigate to="/" replace />;
+  const { role, isOwner } = useAuth();
+  return role === 'admin' || isOwner ? <Outlet /> : <Navigate to="/" replace />;
 };
 
 const RequireOwner: React.FC = () => {

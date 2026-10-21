@@ -2,6 +2,7 @@
  * Web Worker do simulador: roda simulações e lê DXFs grandes sem travar a tela.
  */
 import { fleetSweep, replicate, simulate, sizeCircuits } from './des';
+import { sizeGenericPeriod, type GenericBasis, type GenericPeriod } from './generic';
 import { contoursFromFile, hillshade, terrainFromFaces } from './terrain';
 import { buildNetwork, sizePeriod, type PeriodResult } from './plan';
 import { demFromContours, demFromGrid } from './dem';
@@ -11,6 +12,7 @@ import type { SimModel } from './types';
 
 export type WorkerRequest =
   | { id: number; kind: 'matrix'; model: SimModel; configIds: string[]; scenarioIds: string[] }
+  | { id: number; kind: 'genericPeriods'; model: SimModel; basis: GenericBasis; periods: GenericPeriod[]; configIds: string[]; scenarioIds: string[]; aging?: boolean }
   | { id: number; kind: 'sizeCircuits'; model: SimModel; configId: string; scenarioId: string; targets: Record<string, number>; start: Record<string, number> }
   | { id: number; kind: 'sweep'; model: SimModel; configId: string; scenarioId: string; circuitId: string; maxTrucks: number; targetTpd?: number }
   | { id: number; kind: 'trace'; model: SimModel; configId: string; scenarioId: string; hours: number }
@@ -37,6 +39,31 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         }
       }
       post({ id: req.id, result: cells });
+    } else if (req.kind === 'genericPeriods') {
+      const fin = req.model.finance ?? defaultFinance(req.model.configs);
+      const out: PeriodResult[] = [];
+      const total = req.periods.length * req.configIds.length * Math.max(1, req.scenarioIds.length);
+      for (const configId of req.configIds) {
+        const config = req.model.configs.find((c) => c.id === configId)!;
+        for (const scenarioId of req.scenarioIds) {
+          const scenario = req.model.scenarios.find((s) => s.id === scenarioId) ?? req.model.scenarios[0];
+          const tf = financeFor(fin, configId, config.payloadT);
+          const ledger = new FleetLedger(tf);
+          let prevN = 0;
+          let start: Record<string, number> = {};
+          for (let i = 0; i < req.periods.length; i++) {
+            const avgAgeH = req.aging === false ? 0 : ledger.previewAge(Math.max(1, prevN));
+            const truckDf = req.aging === false ? scenario.truckDf : agedDf(scenario.truckDf, tf, avgAgeH);
+            const r = sizeGenericPeriod(req.model, req.basis, req.periods[i], i + 1, config, { ...scenario, truckDf }, start, Math.min(req.model.replications, 3));
+            ledger.step(r.trucks, r.hoursPerTruck);
+            if (r.trucks > 0) prevN = r.trucks;
+            start = Object.fromEntries(r.circuits.map((c) => [c.circuitId, c.trucks]));
+            out.push({ ...r, scenarioId: scenario.id, truckDf, avgAgeH });
+            post({ id: req.id, progress: out.length / total, stage: `${config.name} · ${scenario.name} · ${req.periods[i].label}` });
+          }
+        }
+      }
+      post({ id: req.id, result: out });
     } else if (req.kind === 'sizeCircuits') {
       const config = req.model.configs.find((c) => c.id === req.configId)!;
       const scenario = req.model.scenarios.find((s) => s.id === req.scenarioId)!;

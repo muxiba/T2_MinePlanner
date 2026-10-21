@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Award, Download, FileText, Play } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
+import type { DetailedPremises } from '@/types';
+import { FLOW_LABELS, suggestedRomT, type CircuitCalc } from '@/sim/link';
 import { calendarWorkDays, emptyPlan, type PeriodResult } from '@/sim/plan';
 import { CASH_ITEMS, CRITERIA, economicLife, financeFor, DRIVER_CATS, cashFlow, costDrivers, defaultFinance, evaluate, explainDifference, rank, sensitivity, type Criterion, type Evaluation } from '@/sim/econ';
 import { downloadMemo } from '@/sim/memo';
@@ -27,19 +29,25 @@ const COST_CATS = [
 
 interface Props {
   model: SimModel;
+  /** para o modo simples (circuitos da aba Circuito) */
+  premises?: DetailedPremises;
+  calc?: CircuitCalc[];
+  romT?: number;
   results: PeriodResult[] | null;
   setResults: (r: PeriodResult[] | null) => void;
   onError: (m: string | null) => void;
 }
 
-const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) => {
+const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, results, setResults, onError }) => {
   const plan = model.plan ?? emptyPlan();
   const fin = model.finance ?? defaultFinance(model.configs);
   const [criterion, setCriterion] = useState<Criterion>('equilibrado');
   const [busy, setBusy] = useState<{ f: number; stage?: string } | null>(null);
   const [pick, setPick] = useState<string | null>(null);
 
-  const ready = plan.movements.length > 0 && model.routes.length > 0;
+  const [basisMode, setBasisMode] = useState<'circuito' | 'plano'>(plan.movements.length > 0 ? 'plano' : 'circuito');
+  const genericOk = !!calc?.length && (romT ?? 0) > 0 && model.routes.length > 0;
+  const ready = basisMode === 'plano' ? plan.movements.length > 0 && model.routes.length > 0 : genericOk;
   const combos = useMemo(() => {
     if (!results) return [];
     const keys = [...new Set(results.map((r) => `${r.configId}|${r.scenarioId ?? ''}`))];
@@ -105,14 +113,51 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
   const optName = (e: { configId: string; scenarioId: string }) => (e.scenarioId !== '*' && scenIdsRun.length > 1 ? `${cfgName(e.configId)} · ${scName(e.scenarioId)}` : cfgName(e.configId));
   const withRevenue = fin.revenuePerT > 0;
 
+  const buildMemo = () =>
+    decisionMemo({ model, plan, fin, ranked, chosen: chosen!, criterion, sens, optName, compareNote: [compare === 'config' && scenIdsRun.length > 1 ? 'Cada configuração é avaliada em todos os cenários: precisa cumprir a meta no pior deles, e o custo é a média entre eles.' : '', basisMode === 'circuito' ? 'Modo simples: circuitos da aba Circuito com os períodos e o calendário do plano.' : ''].filter(Boolean).join(' ') || undefined });
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const memoPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { memoToPdf } = await import('@/sim/memoPdf');
+      await memoToPdf(buildMemo(), 'memorial_resultados_decisao.pdf');
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const genericPeriods = () =>
+    plan.periods.map((p) => ({
+      label: p.label,
+      workDays: p.workDays,
+      romT: p.romT ?? (premises ? suggestedRomT(premises, p.kind ?? 'ano', p.days, p.qty ?? 1) : 0),
+    }));
   const runAll = async () => {
     onError(null);
     setBusy({ f: 0 });
     try {
-      const res = await runInWorker<PeriodResult[]>(
-        { kind: 'periods', model: { ...model, plan }, configIds: model.configs.map((c) => c.id), scenarioIds: model.scenarios.map((s) => s.id), aging: true },
-        (f, stage) => setBusy({ f, stage }),
-      );
+      const configIds = model.configs.map((c) => c.id);
+      const scenarioIds = model.scenarios.map((s) => s.id);
+      const res =
+        basisMode === 'circuito'
+          ? await runInWorker<PeriodResult[]>(
+              {
+                kind: 'genericPeriods',
+                model,
+                basis: {
+                  ratio: Object.fromEntries((calc ?? []).map((c) => [c.circuitId, (romT ?? 0) > 0 ? c.tonnes / romT! : 0])),
+                  material: Object.fromEntries((calc ?? []).map((c) => [c.circuitId, FLOW_LABELS[c.flow]])),
+                },
+                periods: genericPeriods(),
+                configIds,
+                scenarioIds,
+                aging: true,
+              },
+              (f, stage) => setBusy({ f, stage }),
+            )
+          : await runInWorker<PeriodResult[]>({ kind: 'periods', model: { ...model, plan }, configIds, scenarioIds, aging: true }, (f, stage) => setBusy({ f, stage }));
       setResults(res);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -137,11 +182,34 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
     URL.revokeObjectURL(url);
   };
 
+  const modeSwitch = (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-black/[0.07] bg-white p-4 text-sm">
+      <span className="font-medium">Base da simulação</span>
+      <div className="inline-flex rounded-lg border border-black/10 bg-[#F8F9FA] p-0.5 text-xs" role="tablist">
+        {(['circuito', 'plano'] as const).map((k) => (
+          <button key={k} type="button" role="tab" aria-selected={basisMode === k} onClick={() => { setBasisMode(k); setResults(null); }} className={clsx('rounded-md px-3 py-1.5', basisMode === k ? 'bg-[#151619] text-white' : 'text-black/60')}>
+            {k === 'circuito' ? 'Simples: circuitos + calendário' : 'Detalhado: plano de lavra por período'}
+          </button>
+        ))}
+      </div>
+      <span className="text-xs text-black/50">
+        {basisMode === 'circuito'
+          ? 'Usa as rotas e os circuitos da aba Circuito (carga e basculamento) e os períodos e o calendário do plano (estação chuvosa). A massa de cada período vem do ROM do período (Plano de lavra → Calendário e períodos, ou meta das premissas).'
+          : 'Usa frentes, polígonos de lavra, pontos de basculamento e rotas de cada período do Plano de lavra.'}
+      </span>
+    </div>
+  );
+
   if (!ready)
     return (
-      <p className="rounded-xl border border-black/[0.07] bg-white p-5 text-sm text-black/55">
-        Para a decisão, preencha o Plano de lavra (lugares e movimentações; pode ser um único período) e o Financeiro. As rotas vêm da aba Circuito.
-      </p>
+      <div className="space-y-4">
+        {modeSwitch}
+        <p className="rounded-xl border border-black/[0.07] bg-white p-5 text-sm text-black/55">
+          {basisMode === 'plano'
+            ? 'Para o modo detalhado, preencha o Plano de lavra (lugares e movimentações; pode ser um único período). Ou use o modo simples, que só precisa dos circuitos.'
+            : 'Para o modo simples, importe ao menos uma rota na aba Circuito e confira a meta de ROM do período.'}
+        </p>
+      </div>
     );
 
   const missing = model.configs.length * model.scenarios.length - combos.length;
@@ -149,6 +217,7 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
 
   return (
     <div className="space-y-6">
+      {modeSwitch}
       <Card
         title="Resultados e decisão"
         description="Compara todas as configurações de caminhão em todos os cenários, ao longo dos períodos do plano, por produção e por custo."
@@ -180,17 +249,14 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
               </Btn>
             )}
             {ranked.length > 0 && chosen && (
-              <Btn
-                tone="light"
-                onClick={() =>
-                  downloadMemo(
-                    decisionMemo({ model, plan, fin, ranked, chosen, criterion, sens, optName, compareNote: compare === 'config' && scenIdsRun.length > 1 ? 'Cada configuração é avaliada em todos os cenários: precisa cumprir a meta no pior deles, e o custo é a média entre eles.' : undefined }),
-                    'memorial_resultados_decisao.html',
-                  )
-                }
-              >
-                <FileText size={15} /> Memorial de cálculo
-              </Btn>
+              <>
+                <Btn tone="light" busy={pdfBusy} onClick={() => void memoPdf()}>
+                  <FileText size={15} /> Memorial (PDF)
+                </Btn>
+                <Btn tone="light" onClick={() => downloadMemo(buildMemo(), 'memorial_resultados_decisao.html')}>
+                  <FileText size={15} /> Memorial (HTML)
+                </Btn>
+              </>
             )}
           </div>
         }
@@ -323,7 +389,7 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
                         <td className="py-1 pr-2 text-right tabular-nums">{t0(p.avgAgeH)} h</td>
                         <td className="py-1 pr-2 text-right tabular-nums">{mi(p.total)}</td>
                         <td className="py-1 pr-2 text-right tabular-nums">{p.tonnes ? brl2(p.total / p.tonnes) : '—'}</td>
-                        <td className="py-1 text-xs">{ecoAge && p.avgAgeH + p.truckHours / Math.max(1, p.trucks) > ecoAge ? <span className="font-semibold text-amber-800">passa da idade ideal ({t0(ecoAge)} h)</span> : ''}</td>
+                        <td className="py-1 text-xs">{ecoAge && p.avgAgeH + p.truckHours / Math.max(1, p.trucks) > ecoAge ? <span className="font-semibold whitespace-nowrap text-amber-800" title={`Passa da idade ideal de troca ({t0(ecoAge)} h)`}>trocar ({t0(ecoAge)} h)</span> : ''}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -351,7 +417,7 @@ const DecisionView: React.FC<Props> = ({ model, results, setResults, onError }) 
 
           {/* --------------------------- como a simulação chegou aqui --------------------------- */}
           <Card title="Como a simulação chegou a este resultado" description="As etapas, com os números deste estudo.">
-            <Steps model={model} chosen={chosen} evals={evals} criterion={criterion} />
+            <Steps model={model} plan={plan} generic={basisMode === 'circuito'} chosen={chosen} evals={evals} criterion={criterion} />
           </Card>
         </>
       )}
@@ -617,8 +683,7 @@ const Tornado: React.FC<{ rows: ReturnType<typeof sensitivity>; base: number; mo
 /* Etapas explicadas                                                           */
 /* -------------------------------------------------------------------------- */
 
-const Steps: React.FC<{ model: SimModel; chosen: Evaluation; evals: Evaluation[]; criterion: Criterion }> = ({ model, chosen, evals, criterion }) => {
-  const plan = model.plan!;
+const Steps: React.FC<{ model: SimModel; plan: ReturnType<typeof emptyPlan>; generic: boolean; chosen: Evaluation; evals: Evaluation[]; criterion: Criterion }> = ({ model, plan, generic, chosen, evals, criterion }) => {
   const fin = model.finance ?? defaultFinance(model.configs);
   const sc = model.scenarios.find((s) => s.id === chosen.scenarioId);
   const cfg = model.configs.find((c) => c.id === chosen.configId);
@@ -629,14 +694,16 @@ const Steps: React.FC<{ model: SimModel; chosen: Evaluation; evals: Evaluation[]
       title: 'Dados de entrada',
       text: (
         <>
-          {model.routes.length} rotas formam a malha de vias; {plan.places.length} lugares de carga e descarga; {plan.movements.length} movimentações em {plan.periods.length} períodos, somando {t0(tonnes / 1e3)} mil t.
+          {generic
+            ? <>Modo simples: {model.circuits.length} circuitos da aba Circuito (rota, carga e basculamento fixos) em {plan.periods.length} períodos; a massa de cada período = ROM do período × participação de cada circuito, somando {t0(chosen.tonnes / 1e3)} mil t transportadas.</>
+            : <>{model.routes.length} rotas formam a malha de vias; {plan.places.length} lugares de carga e descarga; {plan.movements.length} movimentações em {plan.periods.length} períodos, somando {t0(tonnes / 1e3)} mil t.</>}
           Calendário de {calendarWorkDays(plan.calendar)} dias trabalháveis por ano e {plan.hoursPerDay} h de operação por dia.
         </>
       ),
     },
     {
       title: 'Trajetos de cada período',
-      text: <>Para cada movimentação, o ponto de carga fica dentro da área da frente daquele período (ou no ponto fixo). O trajeto = acesso interno com rampa até {plan.rampMaxGrade}% + caminho mais curto pela malha + acesso no destino. Distância, subidas e descidas viram tempo de viagem pela tabela de velocidade × rampa de cada caminhão.</>,
+      text: generic ? <>No modo simples cada circuito usa a própria rota importada na aba Circuito, igual em todos os períodos. Distância, subidas e descidas viram tempo de viagem pela tabela de velocidade × rampa de cada caminhão. Para frentes e rotas que mudam por período, use o modo detalhado.</> : <>Para cada movimentação, o ponto de carga fica dentro da área da frente daquele período (ou no ponto fixo). O trajeto = acesso interno com rampa até {plan.rampMaxGrade}% + caminho mais curto pela malha + acesso no destino. Distância, subidas e descidas viram tempo de viagem pela tabela de velocidade × rampa de cada caminhão.</>,
     },
     {
       title: 'Ciclo, filas e quebras (simulação de eventos discretos)',

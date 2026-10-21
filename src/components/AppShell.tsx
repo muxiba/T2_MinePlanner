@@ -24,8 +24,9 @@ export const AppShell: React.FC<{
       isActive ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/5 hover:text-white',
     );
 
-  const trialBadge =
-    current?.company.status === 'trial' && isCompanyUsable(current.company)
+  const trialBadge = isOwner
+    ? 'Acesso total'
+    : current?.company.status === 'trial' && isCompanyUsable(current.company)
       ? `Teste: ${trialDaysLeft(current.company)} dia(s)`
       : current
         ? STATUS_LABELS[current.company.status]
@@ -69,8 +70,8 @@ export const AppShell: React.FC<{
                 )}
               </div>
               <p className="mt-1.5 flex justify-between text-[11px] text-white/40">
-                <span>{role ? ROLE_LABELS[role] : ''}</span>
-                <span className={current.company.status === 'trial' ? 'text-amber-300/80' : undefined}>{trialBadge}</span>
+                <span>{isOwner ? 'Dono do sistema' : role ? ROLE_LABELS[role] : ''}{' '}</span>
+                <span className={!isOwner && current.company.status === 'trial' ? 'text-amber-300/80' : undefined}>{trialBadge}</span>
               </p>
             </div>
           )}

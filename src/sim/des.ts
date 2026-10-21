@@ -759,7 +759,11 @@ export function fleetSweep(
  * parte da estimativa dada, soma caminhões nos circuitos abaixo da meta até atender
  * ou saturar (ganho < 1,5%), e depois retira o que sobrou.
  */
-export function sizeCircuits(
+export function sizeCircuits(...args: Parameters<typeof sizeCircuitsFull>) {
+  return sizeCircuitsFull(...args).rows;
+}
+
+export function sizeCircuitsFull(
   model: SimModel,
   opt: Omit<RunOptions, 'seed' | 'trucks'>,
   targets: Record<string, number>,
@@ -803,7 +807,7 @@ export function sizeCircuits(
     }
   });
   onStep?.(1);
-  return circuits.map((c, i) => ({
+  const rows = circuits.map((c, i) => ({
     circuitId: c.id,
     trucks: trucks[c.id],
     targetTpd: targets[c.id] ?? 0,
@@ -811,6 +815,7 @@ export function sizeCircuits(
     cycleMin: agg.perCircuit[i]?.cycleMin ?? 0,
     saturated: saturated.has(c.id) && !ok(agg, i, c.id),
   }));
+  return { rows, agg };
 }
 
 export type SizedCircuit = ReturnType<typeof sizeCircuits>[number];

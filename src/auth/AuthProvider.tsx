@@ -152,7 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     memberships,
     current,
     role,
-    canEdit: (role === 'admin' || role === 'planner') && !!current && isCompanyUsable(current.company),
+    canEdit: Boolean(profile?.is_platform_owner) ? !!current : (role === 'admin' || role === 'planner') && !!current && isCompanyUsable(current.company),
     isOwner: Boolean(profile?.is_platform_owner),
     switchCompany,
     refresh: load,

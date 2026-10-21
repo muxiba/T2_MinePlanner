@@ -132,8 +132,9 @@ $$;
 
 create or replace function public.can_edit(p_company uuid)
 returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(public.member_role(p_company) in ('admin', 'planner'), false)
-     and public.company_is_usable(p_company);
+  select public.is_platform_owner()
+      or (coalesce(public.member_role(p_company) in ('admin', 'planner'), false)
+          and public.company_is_usable(p_company));
 $$;
 
 -- -----------------------------------------------------------------------------
@@ -338,7 +339,7 @@ create policy plans_update on public.plans for update
   using (public.can_edit(company_id)) with check (public.can_edit(company_id));
 drop policy if exists plans_delete on public.plans;
 create policy plans_delete on public.plans for delete
-  using (public.member_role(company_id) = 'admin' and public.company_is_usable(company_id));
+  using (public.is_platform_owner() or (public.member_role(company_id) = 'admin' and public.company_is_usable(company_id)));
 
 -- scenarios
 drop policy if exists scenarios_select on public.scenarios;
