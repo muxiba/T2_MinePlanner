@@ -45,3 +45,19 @@ describe('frota mista', () => {
     expect(s.every((r) => !r.mix)).toBe(true);
   });
 });
+
+describe('frota mista estatística', () => {
+  it('frações de caminhão por rota; frota do tipo = soma arredondada para cima', async () => {
+    const { typeTotals } = await import('./mix');
+    const p = { ...P, fleetTypes: [{ classId: 'rod-40', count: 8 }, { classId: 'rod-30', count: 1 }], mixMode: 'estatistico' as const };
+    let routes = INITIAL_ROUTES.map((r) => ({ ...r }));
+    for (let i = 0; i < 4; i++) routes = syncAutoFleet(routes, p) ?? routes;
+    const fa = analyzeFleet(routes, p);
+    for (const a of fa.routes) {
+      expect(a.ratio).toBeGreaterThanOrEqual(0.999);
+      expect(Math.abs(a.trucksAllocated - a.trucksNeededExact)).toBeLessThan(0.02);
+    }
+    const sum = routes.reduce((s, r) => s + (r.mix?.['rod-40'] ?? 0), 0);
+    expect(typeTotals(routes, p).get('rod-40')).toBe(Math.ceil(sum - 1e-6));
+  });
+});

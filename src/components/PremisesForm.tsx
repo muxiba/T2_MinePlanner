@@ -1,6 +1,7 @@
 import CatalogEditor from './CatalogEditor';
 import NetworkEditor from './NetworkEditor';
 import FlowDiagram from './FlowDiagram';
+import { LoaderNeedsTable, LoaderTimesEditor } from './LoaderSetupEditor';
 import FleetTypesEditor from './FleetTypesEditor';
 import { processPct } from '@/engine/process';
 import React, { useMemo, useState } from "react";
@@ -241,6 +242,16 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
   const [netView, setNetView] = useState<'desenho' | 'tabela'>('desenho');
   const show = (n: number) => step === 0 || step === n;
   const mixedFleet = (premises.fleetTypes ?? []).filter((t) => t.count > 0).length > 1;
+  /** começa a frota por tipo (caminhão atual + outro modelo) e leva até o card “Frota por tipo de caminhão” */
+  const addFleetType = () => {
+    if (!mixedFleet) {
+      const cat = catalogOf(premises).trucks;
+      const base = cat.find((c) => c.id === premises.truckClassId) ?? cat[0];
+      const other = cat.find((c) => c.id !== base.id && (c.vehicle ?? 'mina') === (base.vehicle ?? 'mina')) ?? cat.find((c) => c.id !== base.id)!;
+      setPremises((p) => ({ ...p, truckClassId: base.id, fleetTypes: [{ classId: base.id, count: p.truckCount || 1 }, { classId: other.id, count: 1 }], truckCount: (p.truckCount || 1) + 1 }));
+    }
+    setTimeout(() => document.getElementById('frota-por-tipo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   const sections = [
     {
@@ -509,9 +520,33 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                 </div>
               ))}
             </div>
+            {section.title === "Transporte / Frota" && (
+              <div className="mt-4 rounded-xl bg-black/[0.03] p-3 text-xs text-black/60">
+                {mixedFleet ? (
+                  <>Frota mista: {(premises.fleetTypes ?? []).filter((t) => t.count > 0).map((t) => `${t.count}× ${catalogOf(premises).trucks.find((c) => c.id === t.classId)?.name ?? t.classId}`).join(' + ')}. A classe e a capacidade acima valem só para quem não está na frota por tipo.</>
+                ) : (
+                  <>Um tipo de caminhão. Para ter caminhões de modelos diferentes, adicione outro tipo.</>
+                )}
+                <button type="button" onClick={addFleetType} className="mt-2 block rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-semibold text-black/70 hover:bg-black/5">
+                  + {mixedFleet ? 'Configurar frota por tipo' : 'Adicionar outro tipo de caminhão'}
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {/* Equipamentos de carga: tempos e quantidade por local */}
+      {show(5) && routes && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5 space-y-6">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-black/40">Equipamentos de carga — tempos e caçambadas</h3>
+          <LoaderTimesEditor premises={premises} setPremises={(fn) => setPremises(fn)} />
+          <div>
+            <p className="mb-2 text-sm font-semibold text-black/70">Equipamentos por local de carregamento e por movimentação</p>
+            <LoaderNeedsTable premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} />
+          </div>
+        </div>
+      )}
 
       {show(3) && (
         <>
@@ -543,7 +578,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         <>
       {/* Frota por tipo (frota mista) */}
       {routes && (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+        <div id="frota-por-tipo" className="bg-white p-6 rounded-2xl shadow-sm border border-black/5 scroll-mt-20">
           <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-3">Frota por tipo de caminhão</h3>
           <FleetTypesEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
         </div>

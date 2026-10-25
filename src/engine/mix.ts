@@ -61,7 +61,7 @@ export function typeOnRoute(route: Route, premises: DetailedPremises, targetDryT
  * Distribuição automática: rotas com mais horas de caminhão primeiro; em cada rota, o tipo de menor custo por tonelada
  * que cabe na via, até a meta; se o tipo acabar, o próximo. Retorna a frota de cada rota por tipo.
  */
-export function autoMix(routes: Route[], premises: DetailedPremises): Map<string, Record<string, number>> {
+export function autoMix(routes: Route[], premises: DetailedPremises, fractional = (premises.mixMode ?? 'auto') === 'estatistico'): Map<string, Record<string, number>> {
   const types = fleetTypesOf(premises);
   const left = new Map(types.map((t) => [t.classId, t.count]));
   const targets = routeTargets(routes, premises);
@@ -74,6 +74,8 @@ export function autoMix(routes: Route[], premises: DetailedPremises): Map<string
     return { r, cells: cells.sort((a, b) => a.costPerT - b.costPerT), wet, demand: wet / best };
   });
   rows.sort((a, b) => b.demand - a.demand);
+  // estatístico: caminhões compartilhados entre as rotas (fração de caminhão por rota); senão, caminhões inteiros por rota
+  const need = (x: number) => (fractional ? Math.ceil(x * 100 - 1e-6) / 100 : Math.ceil(x - 1e-6));
   const out = new Map<string, Record<string, number>>();
   for (const row of rows) {
     let remaining = row.wet;
@@ -82,7 +84,7 @@ export function autoMix(routes: Route[], premises: DetailedPremises): Map<string
       if (remaining <= 1e-6) break;
       const avail = left.get(c.classId) ?? 0;
       if (avail <= 0 || c.truckMonthT <= 0) continue;
-      const n = Math.min(avail, Math.ceil(remaining / c.truckMonthT - 1e-6));
+      const n = Math.min(avail, need(remaining / c.truckMonthT));
       if (n > 0) {
         m[c.classId] = n;
         left.set(c.classId, avail - n);
@@ -94,8 +96,8 @@ export function autoMix(routes: Route[], premises: DetailedPremises): Map<string
       for (const c of [...row.cells].sort((a, b) => b.truckMonthT - a.truckMonthT)) {
         const avail = left.get(c.classId) ?? 0;
         if (avail <= 0 || remaining <= 1e-6) continue;
-        const n = Math.min(avail, Math.ceil(remaining / c.truckMonthT - 1e-6));
-        m[c.classId] = (m[c.classId] ?? 0) + n;
+        const n = Math.min(avail, need(remaining / c.truckMonthT));
+        m[c.classId] = Math.round(((m[c.classId] ?? 0) + n) * 100) / 100;
         left.set(c.classId, avail - n);
         remaining -= n * c.truckMonthT;
       }
@@ -128,10 +130,17 @@ export function syncMix(routes: Route[], premises: DetailedPremises): Route[] | 
   const next = routes.map((r) => {
     if (!r.active) return r.mix ? ((changed = true), { ...r, mix: undefined, truckCount: 0 }) : r;
     const m = alloc.get(r.id) ?? {};
-    const total = Object.values(m).reduce((a, b) => a + b, 0);
+    const total = Math.round(Object.values(m).reduce((a, b) => a + b, 0) * 100) / 100;
     if (JSON.stringify(m) === JSON.stringify(r.mix ?? {}) && total === r.truckCount) return r;
     changed = true;
     return { ...r, mix: m, truckCount: total, fleetMode: 'manual' as const };
   });
   return changed ? next : null;
+}
+
+/** Caminhões de cada tipo que a operação precisa: inteiros por rota ou, no modo estatístico, a soma das frações arredondada para cima. */
+export function typeTotals(routes: Route[], premises: DetailedPremises) {
+  const sum = new Map<string, number>();
+  for (const r of routes) if (r.active) for (const [k, v] of Object.entries(r.mix ?? {})) sum.set(k, (sum.get(k) ?? 0) + v);
+  return new Map([...sum].map(([k, v]) => [k, (premises.mixMode ?? 'auto') === 'estatistico' ? Math.max(0, Math.ceil(v - 1e-6)) : v]));
 }

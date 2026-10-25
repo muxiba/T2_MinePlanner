@@ -92,6 +92,8 @@ export interface LoaderSetup {
   cycleSec: number;
   /** Disponibilidade física do equipamento de carga (%). */
   availability: number;
+  /** posicionamento / troca do caminhão (min), quando vem do catálogo */
+  spotMin?: number;
 }
 
 /** Dados econômicos de um modelo do catálogo (opcionais; alimentam o Financeiro da simulação). */
@@ -129,7 +131,19 @@ export interface LoaderClass extends CatalogEconomics {
   id: string;
   name: string;
   bucketM3: number;
+  /** ciclo de uma caçambada (s): carregar + giro carregado + descarga + giro vazio; se as partes forem informadas, é a soma delas */
   cycleSec: number;
+  /** fator de enchimento da caçamba (%), padrão 90 */
+  fillFactor?: number;
+  /** partes do ciclo (s) */
+  digSec?: number;
+  swingLoadedSec?: number;
+  dumpSec?: number;
+  swingEmptySec?: number;
+  /** posicionamento / troca do caminhão sob o equipamento (min); vazio = o das premissas */
+  spotMin?: number;
+  /** disponibilidade física (%); vazio = DF da mina */
+  dfPct?: number;
 }
 
 export interface EquipmentCatalog {
@@ -207,7 +221,7 @@ export interface DetailedPremises {
   /** frota por tipo de caminhão (frota mista); vazio = um tipo só (classe e número de caminhões das premissas) */
   fleetTypes?: FleetType[];
   /** frota mista: o sistema distribui os tipos pelo menor custo por tonelada ('auto') ou o usuário define por rota ('manual') */
-  mixMode?: 'auto' | 'manual';
+  mixMode?: 'auto' | 'manual' | 'estatistico';
   /** posicionamento do caminhão sob o equipamento de carga do local (min), somado às caçambadas */
   loaderSpotMin?: number;
   /** rede de fluxos: locais (as rotas são as movimentações entre eles) */

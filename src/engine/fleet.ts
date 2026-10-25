@@ -71,16 +71,23 @@ export function catalogOf(premises: DetailedPremises): EquipmentCatalog {
 }
 
 /** Equipamento de carga do local de origem da rota (rede de fluxos), quando é um modelo do catálogo. */
+/** Ciclo de uma caçambada (s): a soma das partes, quando informadas, ou o ciclo total do catálogo. */
+export function loaderCycleSec(l: Pick<LoaderClass, 'cycleSec' | 'digSec' | 'swingLoadedSec' | 'dumpSec' | 'swingEmptySec'>) {
+  const parts = [l.digSec, l.swingLoadedSec, l.dumpSec, l.swingEmptySec];
+  const sum = parts.reduce<number>((a, v) => a + (v && v > 0 ? v : 0), 0);
+  return parts.some((v) => v && v > 0) ? sum : l.cycleSec;
+}
+
 export function nodeLoaderOf(route: Route, premises: DetailedPremises): LoaderSetup | null {
   const n = premises.nodes?.find((x) => x.id === route.fromId);
   if (!n?.loaderClassId || n.loaderClassId === 'silo') return null;
   const l = catalogOf(premises).loaders.find((x) => x.id === n.loaderClassId);
-  return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: n.loaderCount ?? 1, bucketM3: l.bucketM3, fillFactor: 90, cycleSec: l.cycleSec, availability: n.loaderDf ?? premises.dfMina ?? 85 } : null;
+  return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: n.loaderCount ?? 1, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85, spotMin: l.spotMin } : null;
 }
 
 /** Equipamento de carga de uma rota a partir de um modelo do catálogo. */
 export function loaderFromCatalog(l: LoaderClass, premises: DetailedPremises, count = 1): LoaderSetup {
-  return { name: l.name, count, bucketM3: l.bucketM3, fillFactor: 90, cycleSec: l.cycleSec, availability: premises.dfMina || 85 };
+  return { name: l.name, count, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: l.dfPct ?? (premises.dfMina || 85) };
 }
 
 export const KIND_LABELS: Record<RouteKind, string> = {
@@ -145,6 +152,9 @@ export interface MixPart {
   cycleMin: number;
   truckMonthT: number;
   capacityWetT: number;
+  /** caçambadas e tempo de carga deste tipo (equipamento do local ou da rota) */
+  passes?: number;
+  loadMin?: number;
 }
 
 export interface RouteAnalysis {
@@ -516,10 +526,10 @@ export function analyzeRoute(
       const nTot = parts.reduce((a, p) => a + p.n, 0);
       const base = [...parts].sort((x, y) => y.n - x.n)[0].a;
       const transportCapacityWetT = parts.reduce((a, p) => a + p.a.transportCapacityWetT, 0) - parts.slice(1).reduce((a, p) => a + p.a.extraCapacityWetT, 0);
-      const truckMonthT = parts.reduce((a, p) => a + p.n * p.a.truckMonthT, 0) / Math.max(1, nTot);
-      const truckRateTph = parts.reduce((a, p) => a + p.n * p.a.truckRateTph, 0) / Math.max(1, nTot);
-      const payloadT = parts.reduce((a, p) => a + p.n * p.a.payloadT, 0) / Math.max(1, nTot);
-      const cycleAvg = parts.reduce((a, p) => a + p.n * p.a.cycle.totalMin, 0) / Math.max(1, nTot);
+      const truckMonthT = parts.reduce((a, p) => a + p.n * p.a.truckMonthT, 0) / (nTot || 1);
+      const truckRateTph = parts.reduce((a, p) => a + p.n * p.a.truckRateTph, 0) / (nTot || 1);
+      const payloadT = parts.reduce((a, p) => a + p.n * p.a.payloadT, 0) / (nTot || 1);
+      const cycleAvg = parts.reduce((a, p) => a + p.n * p.a.cycle.totalMin, 0) / (nTot || 1);
       const trucksNeededExact = truckMonthT > 0 ? base.targetWetT / truckMonthT : 0;
       const loaderCap = base.loader ? base.loader.capacityWetT : Infinity;
       const capacityWetT = Math.min(transportCapacityWetT, loaderCap);
@@ -537,7 +547,7 @@ export function analyzeRoute(
         ratio: base.targetWetT > 0 ? capacityWetT / base.targetWetT : capacityWetT > 0 ? Infinity : 1,
         cycle: { ...base.cycle, totalMin: cycleAvg },
         idleTrucks: Math.max(0, nTot - Math.ceil(trucksNeededExact - 1e-6)),
-        mix: parts.map((p) => ({ classId: p.cls.id, name: `${p.cls.manufacturer ? `${p.cls.manufacturer} ` : ''}${p.cls.name}`, count: p.n, payloadT: p.a.payloadT, cycleMin: p.a.cycle.totalMin, truckMonthT: p.a.truckMonthT, capacityWetT: p.n * p.a.truckMonthT })),
+        mix: parts.map((p) => ({ classId: p.cls.id, name: `${p.cls.manufacturer ? `${p.cls.manufacturer} ` : ''}${p.cls.name}`, count: p.n, payloadT: p.a.payloadT, cycleMin: p.a.cycle.totalMin, truckMonthT: p.a.truckMonthT, capacityWetT: p.n * p.a.truckMonthT, passes: p.a.loading?.passes, loadMin: p.a.loading?.loadMin })),
       };
     }
   }
@@ -556,7 +566,7 @@ export function analyzeRoute(
   // equipamento de carga: o da rota (dedicado) ou o do local de origem na rede (compartilhado; só define o tempo de carga)
   const nodeL = route.loader ? null : nodeLoaderOf(route, premises);
   const loading = route.loader ? loaderLoading(route.loader, payloadT, density) : nodeL ? loaderLoading(nodeL, payloadT, density) : null;
-  const loadMin = loading ? loading.loadMin + (nodeL ? Math.max(0, premises.loaderSpotMin ?? 0.5) : 0) : Math.max(premises.loadingTime, 0);
+  const loadMin = loading ? loading.loadMin + (nodeL ? Math.max(0, nodeL.spotMin ?? premises.loaderSpotMin ?? 0.5) : 0) : Math.max(premises.loadingTime, 0);
 
   const speedFactor = overrides.speedFactor ?? 1;
   const effPremises = speedFactor === 1 ? premises : { ...premises, velocidadeCheio: premises.velocidadeCheio * speedFactor, velocidadeVazio: premises.velocidadeVazio * speedFactor };
@@ -758,6 +768,8 @@ export interface LoaderNeed {
   source: 'local' | 'rota';
   nodeId?: string;
   routeIds: string[];
+  /** parte de cada movimentação que sai do local */
+  perRoute?: { routeId: string; name: string; trucksLoaded: number; busyH: number; neededExact: number }[];
   loaderName: string;
   /** caçambadas por caminhão (média ponderada) */
   passes: number;
@@ -794,23 +806,41 @@ export function loaderSizing(routes: Route[], premises: DetailedPremises, analys
     let trucks = 0;
     let busyMin = 0;
     let passesW = 0;
+    const perRoute: LoaderNeed['perRoute'] = [];
     for (const r of rs) {
       const a = byId.get(r.id)!;
-      const t = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
-      trucks += t;
-      busyMin += t * (a.loading?.loadMin ?? 0);
-      passesW += t * (a.loading?.passes ?? 0);
+      let tR = 0;
+      let bR = 0;
+      if (a.mix?.length) {
+        // frota mista: cada tipo carrega a sua parte da meta com as suas caçambadas
+        const cap = a.mix.reduce((s, m) => s + m.capacityWetT, 0) || 1;
+        for (const m of a.mix) {
+          const t = m.payloadT > 0 ? (a.targetWetT * (m.capacityWetT / cap)) / m.payloadT : 0;
+          tR += t;
+          bR += t * (m.loadMin ?? a.loading?.loadMin ?? 0);
+          passesW += t * (m.passes ?? a.loading?.passes ?? 0);
+        }
+      } else {
+        tR = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
+        bR = tR * (a.loading?.loadMin ?? 0);
+        passesW += tR * (a.loading?.passes ?? 0);
+      }
+      trucks += tR;
+      busyMin += bR;
+      perRoute.push({ routeId: r.id, name: r.name, trucksLoaded: tR, busyH: bR / 60, neededExact: 0 });
     }
     const area = areaOf(routeKind(rs[0]));
-    const effH = sumCalendarHours(premises, area) * ((n.loaderDf ?? premises.dfMina ?? 85) / 100) * (uf(area) / 100);
+    const effH = sumCalendarHours(premises, area) * ((n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85) / 100) * (uf(area) / 100);
     const busyH = busyMin / 60;
     const neededExact = effH > 0 ? busyH / effH : 0;
+    for (const pr of perRoute) pr.neededExact = effH > 0 ? pr.busyH / effH : 0;
     const available = n.loaderCount ?? null;
     out.push({
       where: n.name,
       source: 'local',
       nodeId: n.id,
       routeIds: rs.map((r) => r.id),
+      perRoute,
       loaderName: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`,
       passes: trucks ? passesW / trucks : 0,
       loadMin: trucks ? busyMin / trucks : 0,

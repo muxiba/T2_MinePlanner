@@ -86,6 +86,8 @@ export interface Circuit {
   share?: number;
   /** frota mista: proporção de cada configuração de caminhão (id → quantidade ou peso); vazio = uma configuração só */
   mix?: Record<string, number>;
+  /** despacho dinâmico: peso do circuito na divisão das viagens (meta do período, t) */
+  dispatchWeight?: number;
   /** t secas no período quando o fluxo é 'outro' */
   tonnesManual?: number;
   /** meta do circuito digitada (t secas no período); vazio = calculada pelo fluxo */
@@ -140,6 +142,8 @@ export interface Scenario {
 export interface SimModel {
   /** frota mista: composição fixa (proporções) ou sorteio do tipo de cada caminhão a cada réplica */
   mixDraw?: 'fixo' | 'sorteio';
+  /** despacho: cada caminhão fica no seu circuito ('fixo') ou, a cada viagem, vai para o circuito mais atrasado na meta ('dinamico') */
+  dispatch?: 'fixo' | 'dinamico';
   routes: SimRoute[];
   configs: TruckConfig[];
   circuits: Circuit[];

@@ -13,6 +13,7 @@ import { routeTargets } from '@/engine/fleet';
 
 const cell = 'w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm';
 const box = 'rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm text-right font-mono';
+const fmtN = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 const t0 = (n: number) => Math.round(n).toLocaleString('pt-BR');
 const n2 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -51,7 +52,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
 
   const targets = useMemo(() => routeTargets(routes, premises), [routes, premises]);
   const analysis = useMemo(() => (mixed ? analyzeFleet(routes, premises) : null), [mixed, routes, premises]);
-  const preview = useMemo(() => (mixed && mode === 'auto' ? autoMix(routes, premises) : null), [mixed, mode, routes, premises]);
+  const preview = useMemo(() => (mixed && mode !== 'manual' ? autoMix(routes, premises) : null), [mixed, mode, routes, premises]);
   const types = fleetTypesOf(premises);
   const used = new Map<string, number>();
   for (const r of routes) if (r.active) for (const [k, v] of Object.entries(r.mix ?? {})) used.set(k, (used.get(k) ?? 0) + v);
@@ -99,7 +100,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                       <td className="px-1 py-1 text-right tabular-nums">{c ? c.payloadT : '—'}</td>
                       <td className="px-1 py-1 text-right">{c?.vehicle === 'rodoviario' ? 'Rodoviário' : 'Fora de estrada'}</td>
                       <td className="px-1 py-1 text-right tabular-nums">{c ? t0(hourlyCost(c, premises)) : '—'}</td>
-                      <td className={`px-1 py-1 text-right tabular-nums ${(used.get(t.classId) ?? 0) > t.count ? 'font-semibold text-red-700' : ''}`}>{mixed ? `${used.get(t.classId) ?? 0} de ${t.count}` : '—'}</td>
+                      <td className={`px-1 py-1 text-right tabular-nums ${(used.get(t.classId) ?? 0) > t.count + 1e-6 ? 'font-semibold text-red-700' : ''}`}>{mixed ? `${fmtN(mode === 'estatistico' ? Math.max(0, Math.ceil((used.get(t.classId) ?? 0) - 1e-6)) : used.get(t.classId) ?? 0)} de ${t.count}` : '—'}</td>
                       <td className="px-1 py-1 text-right">
                         <button type="button" aria-label="Remover tipo" className="rounded p-1 text-black/40 hover:bg-red-50 hover:text-red-600" onClick={() => save(list.filter((_, k) => k !== i))}><Trash2 size={14} /></button>
                       </td>
@@ -124,6 +125,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
             <select className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm" value={mode} aria-label="Modo de distribuição" onChange={(e) => setPremises((p) => ({ ...p, mixMode: e.target.value as 'auto' | 'manual' }))}>
               <option value="auto">Automática (menor custo por tonelada)</option>
               <option value="manual">Manual (eu defino por movimentação)</option>
+              <option value="estatistico">Estatística (caminhões circulam entre as movimentações)</option>
             </select>
           </div>
 
@@ -157,7 +159,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                               ) : mode === 'manual' ? (
                                 <input type="number" min={0} className={`${box} w-16`} value={n} aria-label={`${label(t.classId)} em ${r.name}`} onChange={(e) => setMix(r.id, t.classId, Math.round(Number(e.target.value) || 0))} />
                               ) : (
-                                <b>{preview?.get(r.id)?.[t.classId] ?? n}</b>
+                                <b>{fmtN(preview?.get(r.id)?.[t.classId] ?? n)}</b>
                               )}
                               {perT !== null && Number.isFinite(perT) && <span className="ml-1 text-xs text-black/45">· {n2(perT)}</span>}
                             </td>
@@ -170,6 +172,11 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                   })}
                 </tbody>
               </table>
+              {mode === 'estatistico' && (
+                <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                  Estatística: os caminhões não ficam presos a uma rota. Cada movimentação recebe a fração de caminhão de que precisa (ex.: 2,4 caminhões), e a frota de cada tipo é a soma das frações arredondada para cima. Na simulação, use “Despacho dinâmico”: cada caminhão, ao terminar a viagem, vai para o circuito que está mais atrasado na meta.
+                </p>
+              )}
               <p className="mt-1 text-xs text-black/50">
                 R$/t = custo por hora do modelo (propriedade, manutenção média na vida, diesel, pneus e operadores) ÷ toneladas por hora que ele faz nesta rota (carga útil própria e ciclo próprio). “Necessários (média)” usa a média ponderada dos tipos alocados.
               </p>

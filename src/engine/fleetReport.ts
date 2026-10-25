@@ -6,6 +6,8 @@ import type { DetailedPremises, Route } from '../types';
 import { KIND_LABELS, analyzeFleet, catalogOf, type LoaderNeed } from './fleet';
 import { fleetTypesOf, hourlyCost, mixedOn } from './mix';
 
+const r2 = (x: number) => Math.round(x * 100) / 100;
+
 export interface ReportType {
   classId: string;
   name: string;
@@ -33,6 +35,8 @@ export interface ReportMovement {
 
 export interface FleetReport {
   mixed: boolean;
+  /** caminhões compartilhados entre as rotas (modo estatístico) */
+  shared?: boolean;
   movements: ReportMovement[];
   byType: { classId: string; name: string; required: number; available: number }[];
   loaders: LoaderNeed[];
@@ -61,7 +65,7 @@ export function buildFleetReport(routes: Route[], premises: DetailedPremises): F
       const c = clsOf(t.classId);
       return acc + (c ? t.count * hourlyCost(c, premises) * hEff : 0);
     }, 0);
-    const needed = Math.max(0, a.mix?.length ? list.reduce((s, t) => s + t.count, 0) : a.trucksNeeded);
+    const needed = Math.max(0, a.mix?.length ? r2(list.reduce((s, t) => s + t.count, 0)) : a.trucksNeeded);
     return {
       id: a.id,
       name: a.name,
@@ -80,8 +84,11 @@ export function buildFleetReport(routes: Route[], premises: DetailedPremises): F
       costPerT: a.targetWetT > 0 ? costMonth / a.targetWetT : 0,
     };
   });
+  const shared = mixed && (premises.mixMode ?? 'auto') === 'estatistico';
   const req = new Map<string, number>();
   for (const m of movements) for (const t of m.types) req.set(t.classId, (req.get(t.classId) ?? 0) + t.count);
+  // estatístico: os caminhões circulam entre as rotas; a frota de cada tipo é a soma das frações, arredondada para cima
+  if (shared) for (const [k, v] of req) req.set(k, Math.max(0, Math.ceil(v - 1e-6)));
   const byType = [...new Set([...types.map((t) => t.classId), ...req.keys()])].map((id) => ({
     classId: id,
     name: nameOf(id),
@@ -90,11 +97,12 @@ export function buildFleetReport(routes: Route[], premises: DetailedPremises): F
   }));
   return {
     mixed,
+    shared,
     movements,
     byType,
     loaders: fa.loaderNeeds,
     totals: {
-      trucksRequired: movements.reduce((s, m) => s + m.needed, 0),
+      trucksRequired: shared ? [...req.values()].reduce((s, v) => s + v, 0) : movements.reduce((s, m) => s + m.needed, 0),
       trucksAvailable: premises.truckCount || 0,
       truckHours: movements.reduce((s, m) => s + m.truckHours, 0),
       costMonth: movements.reduce((s, m) => s + m.costMonth, 0),

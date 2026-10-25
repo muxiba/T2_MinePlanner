@@ -157,3 +157,19 @@ describe('frota mista na simulação', () => {
     expect(Math.abs(d.filter((x) => x === 0).length - 500)).toBeLessThan(60);
   });
 });
+
+describe('despacho dinâmico', () => {
+  it('caminhões vão para o circuito mais atrasado: viagens na proporção das metas', () => {
+    const r1 = { id: 'r1', name: 'A', points: [{ x: 0, y: 0, z: 0 }, { x: 2000, y: 0, z: 0 }] };
+    const r2 = { id: 'r2', name: 'B', points: [{ x: 0, y: 0, z: 0 }, { x: 2000, y: 0, z: 0 }] };
+    const m0 = emptyModel();
+    const base: SimModel = { ...m0, routes: [r1, r2], circuits: [{ ...defaultCircuit(r1, 0), destination: 'D1', trucks: 3, dispatchWeight: 3 }, { ...defaultCircuit(r2, 1), destination: 'D2', trucks: 3, dispatchWeight: 1 }] };
+    const m: SimModel = { ...base, dispatch: 'dinamico' };
+    const res = simulate(m, { scenario: m.scenarios[0], config: m.configs[0], seed: 5 });
+    const [a, b] = res.stats.perCircuit;
+    expect(a.trips / Math.max(1, b.trips)).toBeGreaterThan(2.3);
+    expect(a.trips / Math.max(1, b.trips)).toBeLessThan(3.7);
+    const fixed = simulate(base, { scenario: base.scenarios[0], config: base.configs[0], seed: 5 });
+    expect(Math.abs(fixed.stats.perCircuit[0].trips - fixed.stats.perCircuit[1].trips)).toBeLessThan(fixed.stats.perCircuit[0].trips * 0.2);
+  });
+});

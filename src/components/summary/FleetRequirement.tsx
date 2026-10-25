@@ -10,7 +10,7 @@ import { downloadMemo, f0, f1, f2, fbrl, fp, kv, memoDocument, note, p, table, t
 const t0 = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString('pt-BR') : '—');
 const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
-const typesTxt = (m: FleetReport['movements'][number]) => m.types.filter((x) => x.count > 0).map((x) => `${x.count}× ${x.name}`).join(' + ') || '—';
+const typesTxt = (m: FleetReport['movements'][number]) => m.types.filter((x) => x.count > 0).map((x) => `${x.count.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}× ${x.name}`).join(' + ') || '—';
 
 export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises, routes: Route[] = []) {
   const fig = flowSvg(routes, premises);
@@ -129,7 +129,7 @@ const FleetRequirement: React.FC<{ routes: Route[]; premises: DetailedPremises }
                 <td className="py-1.5 pr-2 text-black/60">{m.material}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{t0(m.massWetT)}</td>
                 <td className="py-1.5 pr-2">{typesTxt(m)}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums"><b>{m.needed}</b> <span className="text-black/45">({m.neededExact.toLocaleString('pt-BR', { maximumFractionDigits: 2 })})</span></td>
+                <td className="py-1.5 pr-2 text-right tabular-nums"><b>{m.needed.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</b> <span className="text-black/45">({m.neededExact.toLocaleString('pt-BR', { maximumFractionDigits: 2 })})</span></td>
                 <td className={`py-1.5 pr-2 text-right tabular-nums ${m.ratio < 1 ? 'font-semibold text-red-700' : ''}`}>{Math.round(m.ratio * 100)}%</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{t0(m.truckHours)}</td>
                 <td className="py-1.5 text-right tabular-nums">{brl(m.costMonth)}</td>
@@ -138,6 +138,11 @@ const FleetRequirement: React.FC<{ routes: Route[]; premises: DetailedPremises }
           </tbody>
         </table>
       </div>
+      {rep.shared && (
+        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          Distribuição estatística: os caminhões circulam entre as movimentações (frações de caminhão por rota). A frota de cada tipo é a soma das frações, arredondada para cima.
+        </p>
+      )}
       {rep.byType.length > 1 && (
         <p className="mt-3 text-sm text-black/65">
           Por tipo: {rep.byType.map((b) => `${b.name} ${b.required} de ${b.available}`).join(' · ')}

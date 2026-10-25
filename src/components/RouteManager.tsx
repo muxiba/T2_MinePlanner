@@ -1,3 +1,4 @@
+import { LoaderNeedsTable } from './LoaderSetupEditor';
 import React, { useMemo } from 'react';
 import { processPct } from '@/engine/process';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
@@ -246,53 +247,10 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
         <div className="mb-3">
           <h4 className="font-bold text-black/80">Equipamentos de carga necessários</h4>
           <p className="text-xs text-black/50">
-            Por local de carregamento (escolha o equipamento em 1. Premissas → Locais e movimentações) ou por rota com equipamento próprio. Necessários = horas de carga no mês (caminhões carregados × tempo de carga) ÷ horas efetivas de um equipamento (calendário × DF do equipamento × UF).
+            Escolha o equipamento de cada local de carregamento e quantos existem; o sistema calcula quantos são necessários no local e em cada movimentação que sai dele. Os tempos de cada equipamento (carregar, giro, descarga, posicionamento) ficam em 1. Premissas → Carga e ciclo.
           </p>
         </div>
-        {analysis.loaderNeeds.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead>
-                <tr className="border-b border-black/10 text-left text-xs text-black/45">
-                  <th className="py-1.5 pr-2 font-medium">Local / rota</th>
-                  <th className="py-1.5 pr-2 font-medium">Equipamento</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Caçambadas por caminhão</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Carga (min)</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Caminhões / mês</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Horas de carga / mês</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">h efetivas por equip.</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Necessários</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Disponíveis</th>
-                  <th className="py-1.5 text-right font-medium">Ocupação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {analysis.loaderNeeds.map((l) => {
-                  const short = l.available !== null && l.available < l.needed;
-                  return (
-                    <tr key={`${l.source}-${l.where}`} className="border-b border-black/5">
-                      <td className="py-1.5 pr-2 font-medium">{l.where}<span className="block text-[11px] font-normal text-black/45">{l.source === 'local' ? `local · ${l.routeIds.length} movimentação(ões)` : 'equipamento próprio da rota'}</span></td>
-                      <td className="py-1.5 pr-2">{l.loaderName}</td>
-                      <td className={`py-1.5 pr-2 text-right font-mono tabular-nums ${l.passes > 6.5 || l.passes < 2.5 ? 'text-amber-700' : ''}`}>{n1(l.passes)}</td>
-                      <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{n1(l.loadMin)}</td>
-                      <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(l.trucksLoaded)}</td>
-                      <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(l.busyH)}</td>
-                      <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(l.effHPerUnit)}</td>
-                      <td className="py-1.5 pr-2 text-right font-mono font-bold tabular-nums">{l.needed} <span className="font-normal text-black/40">({n2(l.neededExact)})</span></td>
-                      <td className={`py-1.5 pr-2 text-right font-mono tabular-nums ${short ? 'font-bold text-red-600' : ''}`}>{l.available ?? '—'}</td>
-                      <td className={`py-1.5 text-right font-mono tabular-nums ${l.utilization > 0.85 ? 'text-amber-700' : ''}`}>{pc(l.utilization)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p className="mt-2 text-[11px] text-black/45">
-              Ideal de 3 a 6 caçambadas por caminhão (em âmbar fora disso). Ocupação acima de ~85% forma fila de caminhões na carga: a simulação mede essa fila. Disponíveis em vermelho: faltam equipamentos.
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-black/50">Nenhum equipamento de carga informado. Escolha o equipamento de cada local em 1. Premissas → Locais e movimentações (coluna “Carregamento dos caminhões”); sem ele, vale o tempo de carga das premissas.</p>
-        )}
+        <LoaderNeedsTable premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} />
       </section>
 
       {/* ------------------------------ fluxos ------------------------------ */}

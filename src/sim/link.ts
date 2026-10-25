@@ -334,9 +334,23 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
   const calc = circuitTargets(out, premises, edges);
   out = {
     ...out,
-    circuits: out.circuits.map((c, i) => (c.autoTrucks === false || !calc[i] ? c : { ...c, trucks: Math.max(1, calc[i].trucks) })),
+    circuits: out.circuits.map((c, i) => {
+      const w = calc[i] ? { dispatchWeight: calc[i].tonnes } : {};
+      return c.autoTrucks === false || !calc[i] ? { ...c, ...w } : { ...c, ...w, trucks: Math.max(1, calc[i].trucks) };
+    }),
+    dispatch: model.dispatch ?? (typeCfgs.length && premises.mixMode === 'estatistico' ? 'dinamico' : undefined),
     targetTpd: calc.length ? Math.round(calc.reduce((a, x) => a + x.tonnes, 0) / Math.max(1, calc[0].workDays)) : model.targetTpd,
   };
+  // despacho dinâmico: a frota é uma só; total = soma das frações arredondada para cima, repartida pelos circuitos
+  if (out.dispatch === 'dinamico' && calc.length > 1) {
+    const auto = out.circuits.map((c, i) => c.autoTrucks !== false && !!calc[i]);
+    const ex = calc.map((x, i) => (auto[i] ? x.trucksExact : 0));
+    const N = Math.max(1, Math.ceil(ex.reduce((a, b) => a + b, 0) - 1e-6));
+    const base = ex.map((e) => Math.floor(e));
+    let left = N - base.reduce((a, b) => a + b, 0);
+    ex.map((e, i) => ({ i, f: e - Math.floor(e) })).filter((o) => auto[o.i]).sort((a, b) => b.f - a.f).forEach((o) => { if (left-- > 0) base[o.i]++; });
+    out = { ...out, circuits: out.circuits.map((c, i) => (auto[i] ? { ...c, trucks: base[i] } : c)) };
+  }
   if (model.plan) out.plan = planWithPremises(model.plan, premises, density);
   return out;
 }

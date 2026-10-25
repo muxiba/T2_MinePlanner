@@ -753,8 +753,17 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                       <span className="text-black/55">Todas as movimentações das Premissas têm circuito.</span>
                     );
                   })()}
+                  {model.circuits.length > 1 && (
+                    <label className="ml-auto flex items-center gap-2" title="Dinâmico: ao terminar cada viagem, o caminhão vai para o circuito mais atrasado em relação à meta (entre os que aceitam o tipo dele). Fixo: cada caminhão fica no seu circuito.">
+                      <span className="text-black/60">Despacho</span>
+                      <select className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm" value={model.dispatch ?? 'fixo'} disabled={!canEdit} aria-label="Despacho dos caminhões" onChange={(e) => setModel({ ...model, dispatch: e.target.value as 'fixo' | 'dinamico' })}>
+                        <option value="fixo">Fixo por circuito</option>
+                        <option value="dinamico">Dinâmico (vai onde a meta está atrasada)</option>
+                      </select>
+                    </label>
+                  )}
                   {model.circuits.some((c) => c.mix) && (
-                    <label className="ml-auto flex items-center gap-2">
+                    <label className="flex items-center gap-2">
                       <span className="text-black/60">Frota mista na simulação</span>
                       <select className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm" value={model.mixDraw ?? 'fixo'} disabled={!canEdit} aria-label="Frota mista na simulação" onChange={(e) => setModel({ ...model, mixDraw: e.target.value as 'fixo' | 'sorteio' })}>
                         <option value="fixo">Composição fixa (proporções)</option>

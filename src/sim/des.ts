@@ -413,6 +413,8 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     cycleStart: number;
     /** tipo de caminhão (variante do circuito, frota mista) */
     vi: number;
+    /** configuração do caminhão (tipo), para o despacho dinâmico */
+    cfgId: string;
     /** minutos trabalhados (custo variável) */
     worked: number;
   };
@@ -496,6 +498,32 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     k.since = t;
   };
 
+  // despacho dinâmico: a cada viagem o caminhão vai para o circuito mais atrasado (t despachadas ÷ meta do circuito),
+  // entre os circuitos que aceitam o tipo dele (frota mista: o tipo precisa estar na composição do circuito)
+  const dynamic = model.dispatch === 'dinamico' && ctx.length > 1;
+  const sentT = ctx.map(() => 0);
+  const weightOf = ctx.map((x) => Math.max(1e-6, x.c.dispatchWeight ?? x.c.trucks ?? 1));
+  const dispatch = (k: Truck) => {
+    let best = -1;
+    let bestVi = 0;
+    let score = Infinity;
+    for (const x of ctx) {
+      const hasMix = x.variants.length > 1 || Object.keys(x.c.mix ?? {}).length > 0;
+      const vi = hasMix ? x.variants.findIndex((v) => v.cfg.id === k.cfgId) : 0;
+      if (vi < 0) continue;
+      const sc = sentT[x.ci] / weightOf[x.ci];
+      if (sc < score - 1e-9) {
+        score = sc;
+        best = x.ci;
+        bestVi = vi;
+      }
+    }
+    if (best < 0) return;
+    k.ci = best;
+    k.vi = bestVi;
+    sentT[best] += ctx[best].variants[bestVi].payload;
+  };
+
   const inShift = (t: number) => t % 1440 < shiftMin;
   const nextShiftStart = (t: number) => Math.floor(t / 1440) * 1440 + 1440;
 
@@ -528,6 +556,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       }
       k.stopUntil = t;
     }
+    if (dynamic) dispatch(k);
     const x = ctx[k.ci];
     k.cycleStart = t;
     setState(k, 'fila_carga', t);
@@ -656,7 +685,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     const n = Math.max(0, Math.round(opt.trucks?.[x.c.id] ?? x.c.trucks));
     const types = assignTypes(n, x.variants.map((v) => v.weight), model.mixDraw === 'sorteio' ? r : null);
     for (let i = 0; i < n; i++) {
-      const k: Truck = { id: id++, ci: x.ci, state: 'fora_turno', since: 0, opMin: 0, nextFail: exp(r, truckMtbf), cycleStart: 0, vi: types[i], worked: 0 };
+      const k: Truck = { id: id++, ci: x.ci, state: 'fora_turno', since: 0, opMin: 0, nextFail: exp(r, truckMtbf), cycleStart: 0, vi: types[i], cfgId: x.variants[types[i]].cfg.id, worked: 0 };
       truckCount++;
       trucksByC[x.ci]++;
       const t0 = i * (x.loadMean / Math.max(1, x.c.loaders));
