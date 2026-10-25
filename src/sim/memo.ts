@@ -5,7 +5,7 @@
  */
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-export const f0 = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString('pt-BR') : '—');
+export const f0 = (n: number) => (Number.isFinite(n) ? (Math.round(n) || 0).toLocaleString('pt-BR') : '—');
 export const f1 = (n: number) => (Number.isFinite(n) ? n.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—');
 export const f2 = (n: number) => (Number.isFinite(n) ? n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—');
 export const fp = (n: number) => (Number.isFinite(n) ? `${Math.round(n * 100)}%` : '—');
@@ -61,6 +61,7 @@ export function memoDocument(opts: { title: string; subtitle: string; sections: 
 <style>
 :root{--ink:#151619;--muted:#5f6168;--line:#e3e5e8;--soft:#f5f7f8;--accent:#047857;--accent2:#2a78d6;}
 *{box-sizing:border-box}
+figure.fig{margin:8px 0;overflow-x:auto}figure.fig svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px}
 body{margin:0;background:#eef0f2;color:var(--ink);font:13px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .page{max-width:900px;margin:24px auto;background:#fff;padding:40px 48px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 header.cover{border-bottom:3px solid var(--accent);padding-bottom:16px;margin-bottom:20px}

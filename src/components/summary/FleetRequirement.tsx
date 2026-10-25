@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FileDown, FileText } from 'lucide-react';
 import type { DetailedPremises, Route } from '@/types';
 import { buildFleetReport, type FleetReport } from '@/engine/fleetReport';
+import { flowSvg } from '@/components/FlowDiagram';
 import { downloadMemo, f0, f1, f2, fbrl, fp, kv, memoDocument, note, p, table, t } from '@/sim/memo';
 
 /** Frota necessária: o resultado consolidado do planejamento (caminhões por tipo e movimentação, carga por local, horas e custo). */
@@ -11,7 +12,8 @@ const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const typesTxt = (m: FleetReport['movements'][number]) => m.types.filter((x) => x.count > 0).map((x) => `${x.count}× ${x.name}`).join(' + ') || '—';
 
-export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises) {
+export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises, routes: Route[] = []) {
+  const fig = flowSvg(routes, premises);
   const T = rep.totals;
   return memoDocument({
     title: 'Frota necessária',
@@ -31,6 +33,9 @@ export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises) {
           ['Custo do transporte no mês (estimado)', fbrl(T.costMonth)],
         ]),
       },
+      ...(fig
+        ? [{ title: 'Rede de fluxos', body: `<figure class="fig">${fig}</figure>` + note('Massas em t seca por mês, pelo balanço das Premissas Fundamentais. Azul: ROM; verde: produto; vermelho: rejeito; cinza: estéril.') }]
+        : []),
       {
         title: 'Caminhões por movimentação',
         body:
@@ -65,7 +70,7 @@ const FleetRequirement: React.FC<{ routes: Route[]; premises: DetailedPremises }
     setBusy(true);
     try {
       const { memoToPdf } = await import('@/sim/memoPdf');
-      await memoToPdf(fleetReportHtml(rep, premises), 'frota-necessaria.pdf');
+      await memoToPdf(fleetReportHtml(rep, premises, routes), 'frota-necessaria.pdf');
     } finally {
       setBusy(false);
     }
@@ -83,7 +88,7 @@ const FleetRequirement: React.FC<{ routes: Route[]; premises: DetailedPremises }
           <button type="button" disabled={busy} onClick={() => void pdf()} className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 px-3 py-1.5 text-sm font-medium hover:bg-black/5 disabled:opacity-50">
             <FileDown size={15} /> PDF
           </button>
-          <button type="button" onClick={() => downloadMemo(fleetReportHtml(rep, premises), 'frota-necessaria.html')} className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 px-3 py-1.5 text-sm font-medium hover:bg-black/5">
+          <button type="button" onClick={() => downloadMemo(fleetReportHtml(rep, premises, routes), 'frota-necessaria.html')} className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 px-3 py-1.5 text-sm font-medium hover:bg-black/5">
             <FileText size={15} /> HTML
           </button>
         </div>

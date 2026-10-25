@@ -51,6 +51,19 @@ export async function memoToPdf(html: string, filename: string) {
   const M = 14;
   const CW = W - 2 * M;
   let y = M;
+  // figuras SVG (desenho da rede) viram imagem PNG para o PDF
+  const figs = new Map<Element, { url: string; w: number; h: number }>();
+  for (const f of dom.querySelectorAll('figure.fig')) {
+    const svg = f.querySelector('svg');
+    if (!svg) continue;
+    const w = Number(svg.getAttribute('width')) || 1000;
+    const h = Number(svg.getAttribute('height')) || 600;
+    try {
+      figs.set(f, { url: await svgToPng(new XMLSerializer().serializeToString(svg), w * 2, h * 2), w, h });
+    } catch {
+      /* sem a figura, o resto do memorial sai normalmente */
+    }
+  }
   const lastY = () => (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y;
   const need = (h: number) => {
     if (y + h > H - 16) {
@@ -232,7 +245,19 @@ export async function memoToPdf(html: string, filename: string) {
       y += 1;
       para(text(el), 10, INK, 'bold');
     } else if (tag === 'p') para(text(el), el.classList.contains('note') ? 8 : 9, el.classList.contains('note') ? MUTED : INK);
-    else if (tag === 'table') table(el as HTMLTableElement);
+    else if (tag === 'figure' && figs.has(el)) {
+      const f = figs.get(el)!;
+      let wmm = CW;
+      let hmm = (CW * f.h) / f.w;
+      const maxH = H - 16 - M - 4;
+      if (hmm > maxH) {
+        wmm = (wmm * maxH) / hmm;
+        hmm = maxH;
+      }
+      need(hmm + 2);
+      doc.addImage(f.url, 'PNG', M + (CW - wmm) / 2, y, wmm, hmm);
+      y += hmm + 3;
+    } else if (tag === 'table') table(el as HTMLTableElement);
     else if (tag === 'dl') kv(el);
     else if (tag === 'ul' || tag === 'ol') list(el);
     else if (el.classList.contains('formula')) formula(el);
@@ -264,4 +289,23 @@ export async function memoToPdf(html: string, filename: string) {
     doc.text(`Página ${i} de ${n}`, W - M, H - 7, { align: 'right' });
   }
   doc.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
+}
+
+function svgToPng(xml: string, w: number, h: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      if (!ctx) return reject(new Error('sem canvas'));
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('figura inválida'));
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  });
 }

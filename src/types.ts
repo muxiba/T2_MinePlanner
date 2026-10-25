@@ -74,6 +74,8 @@ export interface FlowNode {
   loaderCount?: number;
   /** disponibilidade física do equipamento de carga (%) */
   loaderDf?: number;
+  /** estoque: bloco do desenho em que fica (mina = pilha de ROM, produto, rejeito ou estéril) */
+  group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril';
 }
 
 export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';

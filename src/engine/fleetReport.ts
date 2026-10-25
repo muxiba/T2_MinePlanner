@@ -55,13 +55,13 @@ export function buildFleetReport(routes: Route[], premises: DetailedPremises): F
     // por tipo: composição da frota mista ou o caminhão das premissas com os caminhões necessários
     const list: ReportType[] = a.mix?.length
       ? a.mix.map((m) => ({ classId: m.classId, name: m.name, count: m.count }))
-      : [{ classId: single.classId, name: nameOf(single.classId), count: a.trucksNeeded }];
+      : [{ classId: single.classId, name: nameOf(single.classId), count: Math.max(0, a.trucksNeeded) }];
     const hEff = a.hours.effective;
     const costMonth = list.reduce((acc, t) => {
       const c = clsOf(t.classId);
       return acc + (c ? t.count * hourlyCost(c, premises) * hEff : 0);
     }, 0);
-    const needed = a.mix?.length ? list.reduce((s, t) => s + t.count, 0) : a.trucksNeeded;
+    const needed = Math.max(0, a.mix?.length ? list.reduce((s, t) => s + t.count, 0) : a.trucksNeeded);
     return {
       id: a.id,
       name: a.name,

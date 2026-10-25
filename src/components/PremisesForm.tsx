@@ -1,5 +1,6 @@
 import CatalogEditor from './CatalogEditor';
 import NetworkEditor from './NetworkEditor';
+import FlowDiagram from './FlowDiagram';
 import FleetTypesEditor from './FleetTypesEditor';
 import { processPct } from '@/engine/process';
 import React, { useMemo, useState } from "react";
@@ -237,6 +238,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
   }, [tr.rom, tr.tailings, tr.product, tr.total]);
 
   const [step, setStep] = useState(0);
+  const [netView, setNetView] = useState<'desenho' | 'tabela'>('desenho');
   const show = (n: number) => step === 0 || step === n;
   const mixedFleet = (premises.fleetTypes ?? []).filter((t) => t.count > 0).length > 1;
 
@@ -516,8 +518,21 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       {/* Locais e movimentações */}
       {routes && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
-          <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-3">Locais e movimentações (rede de fluxos)</h3>
-          <NetworkEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-bold uppercase tracking-widest text-black/40">Locais e movimentações (rede de fluxos)</h3>
+            <div className="inline-flex rounded-lg border border-black/10 p-0.5 text-sm" role="tablist" aria-label="Forma de edição da rede">
+              {(['desenho', 'tabela'] as const).map((v) => (
+                <button key={v} type="button" role="tab" aria-selected={netView === v} onClick={() => setNetView(v)} className={`rounded-md px-3 py-1 font-medium ${netView === v ? 'bg-[#151619] text-white' : 'text-black/60 hover:bg-black/5'}`}>
+                  {v === 'desenho' ? 'Desenho' : 'Tabela'}
+                </button>
+              ))}
+            </div>
+          </div>
+          {netView === 'desenho' ? (
+            <FlowDiagram premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+          ) : (
+            <NetworkEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+          )}
         </div>
       )}
 
