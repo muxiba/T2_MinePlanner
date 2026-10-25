@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useRouteError } from 'react-router';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { isDbConfigured } from '@/lib/db';
 import { isCompanyUsable } from '@/lib/db-types';
@@ -59,9 +59,42 @@ const Root: React.FC = () => (
   </AuthProvider>
 );
 
+/** Erro de rota: versão nova publicada (arquivo antigo sumiu) recarrega sozinho; outros erros mostram uma tela amigável. */
+const RouteError: React.FC = () => {
+  const err = useRouteError();
+  const text = err instanceof Error ? err.message : String((err as { statusText?: string })?.statusText ?? err ?? '');
+  const stale = /dynamically imported module|Importing a module script failed|error loading dynamically imported module|Failed to fetch/i.test(text);
+  React.useEffect(() => {
+    if (!stale) return;
+    try {
+      const last = Number(sessionStorage.getItem('t2-reload-at') || 0);
+      if (Date.now() - last < 15000) return;
+      sessionStorage.setItem('t2-reload-at', String(Date.now()));
+    } catch {
+      /* segue */
+    }
+    window.location.reload();
+  }, [stale]);
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#F4F5F7] p-6">
+      <div className="max-w-md rounded-2xl border border-black/5 bg-white p-6 text-center shadow-sm">
+        <h1 className="text-lg font-bold text-black/80">{stale ? 'Há uma versão nova do T2 Mine Planner' : 'Algo deu errado nesta tela'}</h1>
+        <p className="mt-2 text-sm text-black/55">
+          {stale ? 'O sistema foi atualizado enquanto esta aba estava aberta. Recarregue para usar a versão nova — seus dados ficam salvos.' : 'Recarregue a página. Se o erro continuar, avise o suporte com a mensagem abaixo.'}
+        </p>
+        {!stale && <p className="mt-3 rounded-lg bg-black/[0.04] px-3 py-2 text-left font-mono text-xs text-black/60">{text}</p>}
+        <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-[#151619] px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+          Recarregar
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const router = createBrowserRouter([
   {
     element: <Root />,
+    errorElement: <RouteError />,
     children: [
       { path: '/entrar', element: <LoginPage /> },
       { path: '/cadastro', element: <SignUpPage /> },
