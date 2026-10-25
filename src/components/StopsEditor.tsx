@@ -4,7 +4,7 @@ import type { Route, RouteStop } from '@/types';
 
 /** Paradas no trajeto de uma movimentação: pesagem, inspeção, abastecimento ou outra, com distância da origem, tempo e sentido. */
 
-const KIND: Record<RouteStop['kind'], string> = { pesagem: 'Pesagem', inspecao: 'Inspeção', abastecimento: 'Abastecimento', outro: 'Outra parada' };
+const KIND: Record<RouteStop['kind'], string> = { pesagem: 'Pesagem', inspecao: 'Inspeção', abastecimento: 'Abastecimento', outro: 'Outra (pedágio, portaria…)' };
 const cell = 'w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm';
 const num = 'rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-right font-mono';
 

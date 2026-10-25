@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Trash2, X } from 'lucide-react';
-import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
+import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind, RouteStop } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportMode } from '@/engine/network';
 import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
 import TransportTable from './TransportTable';
@@ -99,7 +99,17 @@ interface Props {
   setRoutes: (fn: (prev: Route[]) => Route[]) => void;
 }
 
-type Sel = { kind: 'node'; id: string } | { kind: 'route'; id: string } | null;
+type Sel = { kind: 'node'; id: string } | { kind: 'route'; id: string } | { kind: 'stop'; id: string; routeId: string } | null;
+
+export interface StopBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  stopId: string;
+  name: string;
+  sub: string;
+}
 
 
 export interface FlowLayout {
@@ -107,7 +117,9 @@ export interface FlowLayout {
   box: Partial<Record<Group, { x: number; y: number; w: number; h: number }>>;
   pos: Map<string, { x: number; y: number; w: number; h: number; g: Group }>;
   H: number;
-  edges: { r: Route; d: string; lx: number; ly: number; k: RouteKind; bad: boolean; mass: number; stops: { x: number; y: number; name: string; kind: string }[] }[];
+  /** largura do desenho */
+  Wd: number;
+  edges: { r: Route; d: string; lx: number; ly: number; k: RouteKind; bad: boolean; mass: number; stops: { x: number; y: number; name: string; kind: string }[]; segs?: string[]; boxes?: StopBox[] }[];
 }
 
 /** Posição dos blocos, dos locais e das setas (usada no desenho da tela e no do PDF). */
@@ -121,10 +133,17 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
     const box: Partial<Record<Group, { x: number; y: number; w: number; h: number }>> = {};
     const top = 20;
     let yMina = top;
+    let Wd = 1090;
     if (transport) {
+      // paradas no trajeto ficam em caixas entre a origem e o destino; o bloco de passagem só aparece se houver ponto de passagem
+      const maxStops = Math.max(0, ...routes.filter((r) => r.active).map((r) => r.stops?.length ?? 0));
+      const hasPass = by.passagem.length > 0;
+      const start = hasPass ? COL.planta + W + 20 : COL.mina + W + 20;
+      const rightX = Math.max(hasPass ? COL.right : 560, start + 60 + maxStops * 170);
       box.origem = { x: COL.mina, y: top, w: W + 20, h: h('origem') };
-      box.passagem = { x: COL.planta, y: top, w: W + 20, h: h('passagem') };
-      box.destino = { x: COL.right, y: top, w: W + 20, h: h('destino') };
+      if (hasPass) box.passagem = { x: COL.planta, y: top, w: W + 20, h: h('passagem') };
+      box.destino = { x: rightX, y: top, w: W + 20, h: h('destino') };
+      Wd = rightX + W + 20 + 60;
     } else {
     if (showWaste) {
       box.esteril = { x: 300, y: top, w: W + 20, h: h('esteril') };
@@ -141,7 +160,7 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
       by[g].forEach((n, i) => pos.set(n.id, { x: b.x + 10, y: b.y + HEAD + i * (IH + GAP), w: W, h: IH, g }));
     }
     const H = Math.max(...Object.values(box).map((b) => b!.y + b!.h)) + 20;
-    const layout = { by, box, pos, H };
+    const layout = { by, box, pos, H: Math.max(H, transport ? 0 : 0), Wd };
   const edges = routes
     .filter((r) => r.fromId && r.toId && layout.pos.has(r.fromId) && layout.pos.has(r.toId))
     .map((r) => {
@@ -180,15 +199,47 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
         const f = Math.min(0.97, Math.max(0.03, (st.distM || 0) / Math.max(1, r.distance || 1)));
         return { x: bz(f, 0), y: bz(f, 1), name: st.name, kind: st.kind };
       });
+      // só transporte: cada parada é uma caixa no caminho — origem → parada 1 → parada 2 → … → destino
+      if (transport && r.stops?.length && b.x > a.x + a.w / 2) {
+        const ord = [...r.stops].map((st, i) => ({ st, i })).sort((u, v) => (u.st.distM || 0) - (v.st.distM || 0) || u.i - v.i).map((u) => u.st);
+        const x1 = a.x + a.w;
+        const x2 = b.x - 2;
+        const y2 = b.y + b.h / 2;
+        const n = ord.length;
+        const BW = 130;
+        const BH = 38;
+        const boxes: StopBox[] = ord.map((st, i) => {
+          const f = (i + 1) / (n + 1);
+          const cx = x1 + (x2 - x1) * f;
+          const cy = y1 + (y2 - y1) * f;
+          const km = (st.distM || 0) >= 1000 ? `${((st.distM || 0) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : `${Math.round(st.distM || 0)} m`;
+          return { x: cx - BW / 2, y: cy - BH / 2, w: BW, h: BH, stopId: st.id, name: st.name, sub: `${km} · ${(st.stopMin || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} min ${st.dir === 'ambos' ? '↔' : st.dir === 'ida' ? '→' : '←'}` };
+        });
+        const pts: [number, number, number, number][] = [];
+        let px = x1;
+        let py = y1;
+        for (const bx of boxes) {
+          pts.push([px, py, bx.x - 2, bx.y + bx.h / 2]);
+          px = bx.x + bx.w;
+          py = bx.y + bx.h / 2;
+        }
+        pts.push([px, py, x2, y2]);
+        const segs = pts.map(([sx, sy, ex, ey]) => {
+          const c = Math.max(20, (ex - sx) / 2);
+          return `M${sx},${sy} C${sx + c},${sy} ${ex - c},${ey} ${ex},${ey}`;
+        });
+        const [sx, sy, ex, ey] = pts[0];
+        return { r, d: segs.join(' '), lx: (sx + ex) / 2, ly: (sy + ey) / 2 - 16, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops: [], segs, boxes };
+      }
       return { r, d, lx, ly, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops };
     });
 
   // rótulos de massa não se sobrepõem: desce o que bater em outro já colocado
   const placed: { x: number; y: number }[] = [];
-  const marks = edges.flatMap((e) => e.stops);
+  const marks = [...edges.flatMap((e) => e.stops), ...edges.flatMap((e) => (e.boxes ?? []).map((b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 })))];
   for (const e of edges) {
     let tries = 0;
-    while (tries++ < 8 && (placed.some((q) => Math.abs(q.x - e.lx) < 84 && Math.abs(q.y - e.ly) < 22) || marks.some((m) => Math.abs(m.x - e.lx) < 50 && Math.abs(m.y - e.ly) < 18))) e.ly += 22;
+    while (tries++ < 8 && (placed.some((q) => Math.abs(q.x - e.lx) < 84 && Math.abs(q.y - e.ly) < 22) || marks.some((m) => Math.abs(m.x - e.lx) < (e.boxes ? 105 : 50) && Math.abs(m.y - e.ly) < (e.boxes ? 30 : 18)))) e.ly += 22;
     placed.push({ x: e.lx, y: e.ly });
   }
 
@@ -223,8 +274,8 @@ export function flowSvg(routes: Route[], premises: DetailedPremises): string {
     return inT > 0.5 ? `recebe ${t0(inT)} t` : 'sem entrada';
   };
   const out: string[] = [];
-  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1090 ${L.H}" width="1090" height="${L.H}" font-family="Helvetica, Arial, sans-serif">`);
-  out.push(`<rect width="1090" height="${L.H}" fill="#FAFAF8"/>`);
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L.Wd} ${L.H}" width="${L.Wd}" height="${L.H}" font-family="Helvetica, Arial, sans-serif">`);
+  out.push(`<rect width="${L.Wd}" height="${L.H}" fill="#FAFAF8"/>`);
   out.push('<defs>' + (Object.keys(MAT_COLOR) as RouteKind[]).map((k) => `<marker id="m-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${MAT_COLOR[k]}"/></marker>`).join('') + '</defs>');
   for (const g of Object.keys(L.box) as Group[]) {
     const b = L.box[g]!;
@@ -234,7 +285,8 @@ export function flowSvg(routes: Route[], premises: DetailedPremises): string {
   }
   for (const e of L.edges) {
     const c = MAT_COLOR[e.k];
-    out.push(`<path d="${e.d}" fill="none" stroke="${c}" stroke-width="2" ${e.r.active ? '' : 'stroke-dasharray="6 5" opacity="0.5"'} marker-end="url(#m-${e.k})"/>`);
+    for (const d of e.segs ?? [e.d]) out.push(`<path d="${d}" fill="none" stroke="${c}" stroke-width="2" ${e.r.active ? '' : 'stroke-dasharray="6 5" opacity="0.5"'} marker-end="url(#m-${e.k})"/>`);
+    for (const b of e.boxes ?? []) out.push(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="7" fill="#FFF8EC" stroke="#BA7517"/><text x="${b.x + 8}" y="${b.y + 15}" font-size="12" font-weight="bold" fill="#633806">${esc(cut(b.name, 17))}</text><text x="${b.x + 8}" y="${b.y + 29}" font-size="10" fill="#854F0B">${esc(cut(b.sub, 24))}</text>`);
   }
   for (const n of nodes) {
     const p = L.pos.get(n.id);
@@ -403,6 +455,9 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
 
   const selNode = sel?.kind === 'node' ? nodes.find((n) => n.id === sel.id) : undefined;
   const selRoute = sel?.kind === 'route' ? routes.find((r) => r.id === sel.id) : undefined;
+  const stopRoute = sel?.kind === 'stop' ? routes.find((r) => r.id === sel.routeId) : undefined;
+  const selStop = sel?.kind === 'stop' ? stopRoute?.stops?.find((x) => x.id === sel.id) : undefined;
+  const setStop = (patch: Partial<RouteStop>) => stopRoute && selStop && setRoute(stopRoute.id, { stops: (stopRoute.stops ?? []).map((x) => (x.id === selStop.id ? { ...x, ...patch } : x)) });
   const linkFrom = link ? nodes.find((n) => n.id === link.from) : undefined;
   const total = edges.reduce((s, e) => s + e.mass, 0);
 
@@ -416,6 +471,11 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
             </button>
           ))}
         </div>
+        {tm && !layout.box.passagem && (
+          <button type="button" onClick={() => addNode('passagem', 'estoque', 'Pátio')} className="rounded-lg border border-black/10 px-3 py-1 text-sm text-black/65 hover:bg-black/5" title="Local intermediário com estoque (recebe e despacha massa). Pesagem, pedágio e inspeção são paradas no trajeto da movimentação.">
+            + ponto de passagem (estoque)
+          </button>
+        )}
         {nodes.some((n) => !routes.some((r) => r.fromId === n.id || r.toId === n.id)) && (
           <button type="button" onClick={cleanup} className="rounded-lg border border-black/10 px-3 py-1 text-sm text-black/65 hover:bg-black/5" title="Apaga do desenho os locais que não têm nenhuma movimentação">
             Remover locais sem movimentação
@@ -466,7 +526,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
         <div className="overflow-x-auto rounded-xl border border-black/[0.06] bg-[#FAFAF8]">
           <svg
             ref={svgRef}
-            viewBox={`0 0 1090 ${layout.H}`}
+            viewBox={`0 0 ${layout.Wd} ${layout.H}`}
             className="block w-full min-w-[760px] select-none"
             role="img"
             aria-label="Desenho da rede de fluxos"
@@ -520,7 +580,19 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
               return (
                 <g key={e.r.id} className="cursor-pointer" onClick={(ev) => { ev.stopPropagation(); setSel({ kind: 'route', id: e.r.id }); }}>
                   <path d={e.d} fill="none" stroke="transparent" strokeWidth={14} />
-                  <path d={e.d} fill="none" stroke={color} strokeWidth={on ? 3.2 : 2} strokeDasharray={e.r.active ? undefined : '6 5'} markerEnd={`url(#ar-${e.k})`} opacity={e.r.active ? 1 : 0.5} />
+                  {(e.segs ?? [e.d]).map((d, i) => (
+                    <path key={i} d={d} fill="none" stroke={color} strokeWidth={on ? 3.2 : 2} strokeDasharray={e.r.active ? undefined : '6 5'} markerEnd={`url(#ar-${e.k})`} opacity={e.r.active ? 1 : 0.5} />
+                  ))}
+                  {(e.boxes ?? []).map((bx) => {
+                    const onS = sel?.kind === 'stop' && sel.id === bx.stopId;
+                    return (
+                      <g key={bx.stopId} role="button" tabIndex={0} aria-label={`Parada ${bx.name}`} onClick={(ev) => { ev.stopPropagation(); setSel({ kind: 'stop', id: bx.stopId, routeId: e.r.id }); }}>
+                        <rect x={bx.x} y={bx.y} width={bx.w} height={bx.h} rx={7} fill="#FFF8EC" stroke={onS ? '#854F0B' : '#BA7517'} strokeWidth={onS ? 2.2 : 1.3} />
+                        <text x={bx.x + 8} y={bx.y + 15} fontSize={12} fontWeight={600} fill="#633806">{cut(bx.name, 17)}</text>
+                        <text x={bx.x + 8} y={bx.y + 29} fontSize={10} fill="#854F0B">{cut(bx.sub, 24)}</text>
+                      </g>
+                    );
+                  })}
                   <g transform={`translate(${e.lx},${e.ly})`}>
                     <rect x={-40} y={-10} width={80} height={20} rx={5} fill="#fff" stroke={color} strokeOpacity={on ? 1 : 0.45} />
                     <text y={4} textAnchor="middle" fontSize={11.5} fontWeight={600} fill={color}>{e.r.active ? `${t0(e.mass)} t` : 'inativa'}</text>
@@ -640,6 +712,43 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                   <p key={i} className={`rounded-lg px-2.5 py-1.5 text-xs ${x.level === 'erro' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-900'}`}>{x.text}</p>
                 ))}
                 <button type="button" onClick={() => removeNode(selNode.id)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> Apagar local</button>
+              </div>
+            </div>
+          )}
+
+          {stopRoute && selStop && (
+            <div className="rounded-xl border border-amber-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-800">Parada no trajeto · {stopRoute.name}</p>
+                <button type="button" className="rounded p-1 text-black/40 hover:bg-black/5" aria-label="Fechar" onClick={() => setSel(null)}><X size={14} /></button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="col-span-2 block text-xs text-black/55">Nome<input className={`${cell} mt-1`} value={selStop.name} aria-label="Nome da parada" onChange={(e) => setStop({ name: e.target.value })} /></label>
+                <label className="block text-xs text-black/55">
+                  Tipo
+                  <select className={`${cell} mt-1`} value={selStop.kind} onChange={(e) => setStop({ kind: e.target.value as RouteStop['kind'] })}>
+                    <option value="pesagem">Pesagem</option>
+                    <option value="inspecao">Inspeção</option>
+                    <option value="abastecimento">Abastecimento</option>
+                    <option value="outro">Outra (pedágio, portaria…)</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-black/55">
+                  Sentido
+                  <select className={`${cell} mt-1`} value={selStop.dir} onChange={(e) => setStop({ dir: e.target.value as RouteStop['dir'] })}>
+                    <option value="ida">Na ida (carregado)</option>
+                    <option value="volta">Na volta (vazio)</option>
+                    <option value="ambos">Ida e volta</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-black/55">Distância da origem (m)<input type="number" min={0} step={10} className={`${num} mt-1`} value={selStop.distM} onChange={(e) => setStop({ distM: Math.max(0, Number(e.target.value) || 0) })} /></label>
+                <label className="block text-xs text-black/55">Tempo parado (min)<input type="number" min={0} step={0.1} className={`${num} mt-1`} value={selStop.stopMin} onChange={(e) => setStop({ stopMin: Math.max(0, Number(e.target.value) || 0) })} /></label>
+                <label className="block text-xs text-black/55">Postos de atendimento<input type="number" min={1} step={1} className={`${num} mt-1`} value={selStop.posts ?? 1} onChange={(e) => setStop({ posts: Math.max(1, Math.round(Number(e.target.value) || 1)) })} /></label>
+              </div>
+              <p className="mt-2 text-[11px] text-black/45">A ordem no desenho segue a distância da origem (DMT da movimentação: {t0(stopRoute.distance)} m).</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setSel({ kind: 'route', id: stopRoute.id })} className="rounded-lg border border-black/10 px-2.5 py-1 text-xs hover:bg-black/5">Ver a movimentação</button>
+                <button type="button" onClick={() => { const next = (stopRoute.stops ?? []).filter((x) => x.id !== selStop.id); setRoute(stopRoute.id, { stops: next.length ? next : undefined }); setSel({ kind: 'route', id: stopRoute.id }); }} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> Apagar parada</button>
               </div>
             </div>
           )}
