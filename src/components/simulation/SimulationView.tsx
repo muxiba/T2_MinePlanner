@@ -75,13 +75,13 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
   const edges = useMemo(() => (routes ? routeTargets(routes, premises) : undefined), [routes, premises]);
   // modelo efetivo: DF, UF, horas, velocidades, tempos e caminhão vêm das Premissas Fundamentais
   const model: SimModel = useMemo(() => {
-    let m = withReferenceCosts(withPremises(stored, premises, edges));
+    let m = withReferenceCosts(withPremises(stored, premises, edges, routes));
     // receita e custos fixos de referência aplicados uma vez nos planos que já tinham financeiro
     if (m.finance && !m.finance.refApplied) {
       m = { ...m, finance: { ...m.finance, refApplied: true, revenuePerT: m.finance.revenuePerT || REVENUE_REF_PER_T, revenueMaterial: m.finance.revenueMaterial || 'Produto', overheadPerYear: m.finance.overheadPerYear || 964_000 } };
     }
     return m;
-  }, [stored, premises, edges]);
+  }, [stored, premises, edges, routes]);
   const setModel = (m: SimModel) => setPremises({ ...premises, simulation: m });
   const linked = linkOn(model);
   const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
@@ -165,6 +165,24 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       if (!receiving.some((x) => x.destination === destination)) receiving.push(defaultReceiving(destination));
     }
     setModel(regroupDestinations({ ...model, routes, circuits, receiving }));
+  };
+
+  /** Um circuito por movimentação da rede (rota reta com o DMT), ligado a ela; o destino é o local de chegada. */
+  const circuitsFromNetwork = (list: Route[]) => {
+    const nodes = premises.nodes ?? [];
+    const simRoutes = [...model.routes];
+    const circuits = [...model.circuits];
+    const receiving = [...model.receiving];
+    const kindMap = { rom: 'rom', product: 'produto', tailings: 'rejeito', waste: 'esteril' } as const;
+    for (const r of list) {
+      const len = Math.max(50, r.distance || 0);
+      const route: SimRoute = { id: `r${Date.now().toString(36)}${simRoutes.length}`, name: r.name, points: [{ x: 0, y: simRoutes.length * 60, z: 0 }, { x: len, y: simRoutes.length * 60, z: 0 }] };
+      simRoutes.push(route);
+      const destination = nodes.find((n) => n.id === r.toId)?.name ?? r.name.split('→').pop()?.trim() ?? `Destino ${circuits.length + 1}`;
+      circuits.push({ ...defaultCircuit(route, circuits.length), destination, edgeId: r.id, flow: kindMap[routeKind(r)] });
+      if (!receiving.some((x) => x.destination === destination)) receiving.push(defaultReceiving(destination));
+    }
+    setModel({ ...model, routes: simRoutes, circuits, receiving });
   };
 
   const flipRoute = (id: string) => {
@@ -449,6 +467,11 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                 <RouteIcon size={16} /> Importar rotas (DXF)
                 <input type="file" accept=".dxf" multiple className="sr-only" onChange={(e) => e.target.files && void importRoutes(e.target.files)} />
               </label>
+              {routes && routes.some((r) => r.active && !model.circuits.some((c) => c.edgeId === r.id)) && (
+                <button type="button" disabled={!canEdit} className="ml-2 inline-flex items-center gap-2 rounded-xl border border-black/10 px-4 py-2 text-sm font-semibold hover:bg-black/5 disabled:opacity-40" onClick={() => circuitsFromNetwork(routes.filter((r) => r.active && !model.circuits.some((c) => c.edgeId === r.id)))}>
+                  Criar das movimentações das Premissas
+                </button>
+              )}
               <ul className="mt-4 divide-y divide-black/5">
                 {model.routes.map((r) => {
                   const prof = routeProfile(r.points, 20);
@@ -714,6 +737,33 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   Necessária = t úmida ÷ horas produtivas (dias trabalhados × horas/dia × DF × UF). Ciclo = carga + ida + basculamento + volta + pesagem + fila + interferências na via. Por caminhão = carga útil × 60 ÷ ciclo. Caminhões = necessária ÷ por caminhão, arredondado para cima. A simulação depois mede as filas e esperas reais com esses caminhões.
                 </p>
               </div>
+              {routes && routes.length > 0 && (
+                <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-black/[0.03] px-4 py-3 text-sm">
+                  {(() => {
+                    const free = routes.filter((r) => r.active && !model.circuits.some((c) => c.edgeId === r.id));
+                    return free.length > 0 ? (
+                      <>
+                        <span className="text-black/60">{free.length} movimentaç{free.length > 1 ? 'ões' : 'ão'} das Premissas sem circuito.</span>
+                        <button type="button" disabled={!canEdit} className="rounded-lg border border-black/10 bg-white px-3 py-1.5 font-medium hover:bg-black/5 disabled:opacity-40" onClick={() => circuitsFromNetwork(free)}>
+                          Criar circuitos das movimentações
+                        </button>
+                        <span className="text-[11px] text-black/45">Cria uma rota reta com o DMT de cada movimentação; depois troque pelo traçado real (DXF) para ter rampas e curvas.</span>
+                      </>
+                    ) : (
+                      <span className="text-black/55">Todas as movimentações das Premissas têm circuito.</span>
+                    );
+                  })()}
+                  {model.circuits.some((c) => c.mix) && (
+                    <label className="ml-auto flex items-center gap-2">
+                      <span className="text-black/60">Frota mista na simulação</span>
+                      <select className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm" value={model.mixDraw ?? 'fixo'} disabled={!canEdit} aria-label="Frota mista na simulação" onChange={(e) => setModel({ ...model, mixDraw: e.target.value as 'fixo' | 'sorteio' })}>
+                        <option value="fixo">Composição fixa (proporções)</option>
+                        <option value="sorteio">Sorteio do tipo de cada caminhão a cada réplica</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+              )}
               <div className="space-y-5">
                 {model.circuits.map((c, i) => {
                   const x = calc[i];
@@ -743,6 +793,12 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                               ))}
                             </select>
                             <p className="mt-0.5 text-[11px] text-black/45">Ligado a uma movimentação, o circuito usa a massa dela no balanço da rede.</p>
+                            {c.mix && (
+                              <p className="mt-1 text-[11px] text-black/60">
+                                <b>Frota mista</b>: {Object.entries(c.mix).map(([id, n]) => `${t0(n)}× ${model.configs.find((k) => k.id === id)?.name.replace(/^Premissas: /, '') ?? id}`).join(' + ')}
+                                {c.edgeId && routes.find((r) => r.id === c.edgeId)?.mix ? ' (composição da movimentação)' : ' (proporção da frota toda)'}
+                              </p>
+                            )}
                           </div>
                         )}
                         <div>

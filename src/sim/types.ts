@@ -84,6 +84,8 @@ export interface Circuit {
   flow?: import('./link').Flow;
   /** peso na divisão do fluxo entre circuitos do mesmo fluxo (padrão 1) */
   share?: number;
+  /** frota mista: proporção de cada configuração de caminhão (id → quantidade ou peso); vazio = uma configuração só */
+  mix?: Record<string, number>;
   /** t secas no período quando o fluxo é 'outro' */
   tonnesManual?: number;
   /** meta do circuito digitada (t secas no período); vazio = calculada pelo fluxo */
@@ -136,6 +138,8 @@ export interface Scenario {
 }
 
 export interface SimModel {
+  /** frota mista: composição fixa (proporções) ou sorteio do tipo de cada caminhão a cada réplica */
+  mixDraw?: 'fixo' | 'sorteio';
   routes: SimRoute[];
   configs: TruckConfig[];
   circuits: Circuit[];

@@ -89,3 +89,21 @@ describe('ligação com as premissas', () => {
     expect(s2.wetFactor).toBeCloseTo(1.1, 6);
   });
 });
+
+describe('frota mista na simulação', () => {
+  it('cria uma configuração por tipo, leva a composição da movimentação e simula cada tipo', async () => {
+    const { simulate } = await import('./des');
+    const r1 = route('r1', 'Mina → Planta', 3000);
+    const m: SimModel = { ...emptyModel(), routes: [r1], circuits: [{ ...defaultCircuit(r1, 0), flow: 'rom', edgeId: 'R1' }], link: { enabled: true, speedMode: 'constante' } };
+    const Pm = { ...P, fleetTypes: [{ classId: 'rod-40', count: 3 }, { classId: 'rod-30', count: 2 }] };
+    const e = withPremises(m, Pm, new Map([['R1', 100000]]), [{ id: 'R1', mix: { 'rod-40': 1, 'rod-30': 4 } } as any]);
+    expect(e.configs.some((c) => c.id === 'P:rod-30')).toBe(true);
+    expect(e.circuits[0].mix).toEqual({ 'P:rod-40': 1, 'P:rod-30': 4 });
+    const calc = circuitTargets(e, Pm, new Map([['R1', 100000]]));
+    expect(calc[0].payloadT).toBeCloseTo((40 + 4 * 30) / 5, 1);
+    const res = simulate({ ...e, circuits: [{ ...e.circuits[0], trucks: 5 }] }, { scenario: e.scenarios[0], config: e.configs[0], seed: 3 });
+    expect(res.stats.trips).toBeGreaterThan(0);
+    // sem frota mista: nada muda
+    expect(withPremises(m, P).circuits[0].mix === undefined).toBe(true);
+  });
+});

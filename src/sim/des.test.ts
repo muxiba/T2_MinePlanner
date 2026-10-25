@@ -145,3 +145,15 @@ describe('paradas operacionais detalhadas', () => {
     expect(res.stats.tonnes).toBeLessThan(base.stats.tonnes);
   });
 });
+
+describe('frota mista na simulação', () => {
+  it('composição fixa: proporções exatas e intercaladas', async () => {
+    const { assignTypes } = await import('./des');
+    const t = assignTypes(5, [3, 2], null);
+    expect(t.filter((x) => x === 0).length).toBe(3);
+    expect(t.filter((x) => x === 1).length).toBe(2);
+    expect(t[0] !== t[1] || t[1] !== t[2]).toBe(true);
+    const d = assignTypes(1000, [1, 1], (() => { let i = 0; return () => ((i++ * 0.618) % 1); })());
+    expect(Math.abs(d.filter((x) => x === 0).length - 500)).toBeLessThan(60);
+  });
+});

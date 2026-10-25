@@ -291,6 +291,56 @@ export function configFor(model: Pick<SimModel, 'configs'>, c: Pick<Circuit, 'co
   return (c.configId && model.configs.find((x) => x.id === c.configId)) || compared;
 }
 
+/** Tipos de caminhão do circuito (frota mista) com o peso de cada um; sem mistura, a configuração do circuito. */
+export function mixOf(model: Pick<SimModel, 'configs'>, c: Pick<Circuit, 'mix'>, fallback: TruckConfig): { cfg: TruckConfig; weight: number }[] {
+  const list = Object.entries(c.mix ?? {})
+    .filter(([, w]) => w > 0)
+    .map(([id, w]) => ({ cfg: model.configs.find((x) => x.id === id), weight: w }))
+    .filter((x): x is { cfg: TruckConfig; weight: number } => !!x.cfg);
+  return list.length ? list : [{ cfg: fallback, weight: 1 }];
+}
+
+/**
+ * Tipo de cada um dos n caminhões: composição fixa (maiores restos, na proporção dos pesos, intercalados)
+ * ou sorteio independente de cada caminhão pelos pesos (varia a cada réplica).
+ */
+export function assignTypes(n: number, weights: number[], draw: (() => number) | null): number[] {
+  if (weights.length <= 1) return Array(n).fill(0);
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  if (draw) {
+    return Array.from({ length: n }, () => {
+      let u = draw() * sum;
+      for (let i = 0; i < weights.length; i++) {
+        u -= weights[i];
+        if (u <= 0) return i;
+      }
+      return weights.length - 1;
+    });
+  }
+  const exact = weights.map((w) => (n * w) / sum);
+  const cnt = exact.map(Math.floor);
+  let left = n - cnt.reduce((a, b) => a + b, 0);
+  const order = exact.map((e, i) => ({ i, f: e - Math.floor(e) })).sort((a, b) => b.f - a.f);
+  for (const o of order) if (left-- > 0) cnt[o.i]++;
+  // intercala os tipos para não entrarem todos de um tipo primeiro
+  const out: number[] = [];
+  const used = cnt.map(() => 0);
+  for (let j = 0; j < n; j++) {
+    let best = 0;
+    let gap = -Infinity;
+    for (let i = 0; i < cnt.length; i++) {
+      const g = (cnt[i] * (j + 1)) / Math.max(1, n) - used[i];
+      if (used[i] < cnt[i] && g > gap) {
+        gap = g;
+        best = i;
+      }
+    }
+    used[best]++;
+    out.push(best);
+  }
+  return out;
+}
+
 export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const sc = opt.scenario;
   const r = rng(opt.seed ?? 1);
@@ -361,6 +411,10 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     /** paradas programadas já consideradas até este instante */
     stopUntil?: number;
     cycleStart: number;
+    /** tipo de caminhão (variante do circuito, frota mista) */
+    vi: number;
+    /** minutos trabalhados (custo variável) */
+    worked: number;
   };
   const stateTime: Partial<Record<TruckState, number>> = {};
   let tonnes = 0;
@@ -375,6 +429,20 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     const cfg = configFor(model, c, opt.config);
     const route = routes.get(c.routeId)!;
     const tt = travelTimes(route.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance);
+    // frota mista: cada tipo de caminhão do circuito com carga útil, velocidades, tempos e custos próprios
+    // a mistura vale para a frota das premissas; ao comparar outra configuração (inclusive um tipo só da frota), o circuito usa só ela
+    const useMix = !c.configId && opt.config.id === 'P';
+    const variants = mixOf(model, useMix ? c : {}, cfg).map(({ cfg: vc, weight }) => {
+      const vt = vc === cfg ? tt : travelTimes(route.points, vc.speed, limitsOf(model, vc), vc.rollingResistance ?? model.rollingResistance);
+      return {
+        cfg: vc,
+        weight,
+        tt: { loaded: vt.loaded * (sc.travelFactor || 1), empty: vt.empty * (sc.travelFactor || 1) },
+        payload: payloadFor(vc, c),
+        loadMean: loadTime(vc, c),
+        interf: (interfBase + Math.max(0, vc.trafficDelayMin ?? 0)) / 2,
+      };
+    });
     geometry.push({
       circuitId: c.id,
       points: route.points,
@@ -408,6 +476,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       cfg,
       /** média de cada espera (metade na ida, metade na volta) */
       interf: (interfBase + Math.max(0, cfg.trafficDelayMin ?? 0)) / 2,
+      variants,
     };
   });
 
@@ -421,6 +490,7 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     if (k.state !== 'manutencao' && k.state !== 'fora_turno' && k.state !== 'troca_turno' && k.state !== 'refeicao' && b > a) {
       workedMin += b - a;
       workedByC[k.ci] += b - a;
+      k.worked += b - a;
     }
     k.state = s;
     k.since = t;
@@ -484,16 +554,17 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
 
   const beginLoad2 = (k: Truck, t: number, unit: number) => {
     const x = ctx[k.ci];
+    const v = x.variants[k.vi];
     setState(k, 'carregando', t);
-    const d = lognormal(r, x.loadMean, cv);
+    const d = lognormal(r, v.loadMean, cv);
     x.loaderClock[unit] -= d;
     heap.push(t + d, () => {
       x.loader.release(t + d);
       setState(k, 'carregado', t + d);
-      const tr = lognormal(r, x.tt.loaded, cv * 0.5);
+      const tr = lognormal(r, v.tt.loaded, cv * 0.5);
       const ta = t + d + tr;
       // interferências na via (cruzamentos, equipamentos de apoio, tráfego): espera no trajeto
-      const w = x.interf ? exp(r, x.interf) : 0;
+      const w = v.interf ? exp(r, v.interf) : 0;
       if (w > 0.05) {
         heap.push(ta, () => {
           setState(k, 'interferencia', ta);
@@ -530,31 +601,32 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
 
   const tryDump = (k: Truck, t: number) => {
     const x = ctx[k.ci];
+    const v = x.variants[k.vi];
     if (x.recv.limited) {
       x.recv.advance(t);
-      const w = x.recv.waitFor(x.payload);
+      const w = x.recv.waitFor(v.payload);
       if (w > 0) {
         // ocupa o posto esperando espaço no pulmão
         heap.push(t + w, () => tryDump(k, t + w));
         return;
       }
-      x.recv.add(x.payload);
+      x.recv.add(v.payload);
     }
     setState(k, 'descarregando', t);
-    const d = lognormal(r, x.cfg.maneuverMin + x.cfg.dumpMin, cv);
+    const d = lognormal(r, v.cfg.maneuverMin + v.cfg.dumpMin, cv);
     const t1 = t + d;
     heap.push(t1, () => {
       x.dump.release(t1);
       if (t1 > warm && t1 <= T) {
-        tonnes += x.payload;
+        tonnes += v.payload;
         trips++;
-        perC[k.ci].tonnes += x.payload;
+        perC[k.ci].tonnes += v.payload;
         perC[k.ci].trips++;
       }
       setState(k, 'vazio', t1);
-      const tr = lognormal(r, x.tt.empty, cv * 0.5);
+      const tr = lognormal(r, v.tt.empty, cv * 0.5);
       const t2 = t1 + tr;
-      const wE = x.interf ? exp(r, x.interf) : 0;
+      const wE = v.interf ? exp(r, v.interf) : 0;
       const endEmpty = (t2: number) => {
         const productive = t2 - k.cycleStart;
         k.opMin += productive;
@@ -582,8 +654,9 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   let id = 0;
   for (const x of ctx) {
     const n = Math.max(0, Math.round(opt.trucks?.[x.c.id] ?? x.c.trucks));
+    const types = assignTypes(n, x.variants.map((v) => v.weight), model.mixDraw === 'sorteio' ? r : null);
     for (let i = 0; i < n; i++) {
-      const k: Truck = { id: id++, ci: x.ci, state: 'fora_turno', since: 0, opMin: 0, nextFail: exp(r, truckMtbf), cycleStart: 0 };
+      const k: Truck = { id: id++, ci: x.ci, state: 'fora_turno', since: 0, opMin: 0, nextFail: exp(r, truckMtbf), cycleStart: 0, vi: types[i], worked: 0 };
       truckCount++;
       trucksByC[x.ci]++;
       const t0 = i * (x.loadMean / Math.max(1, x.c.loaders));
@@ -616,7 +689,10 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
   const dumpCap = [...dumps.values()].reduce((a, d) => a + d.cap, 0) * T;
   const recvs = [...receivers.values()];
   const limitedRecv = recvs.filter((x) => x.limited);
-  const costTotal = ctx.reduce((a, x) => a + trucksByC[x.ci] * x.cfg.costFixedPerH * (measured / 60) + (workedByC[x.ci] / 60) * x.cfg.costVarPerH, 0);
+  const costTotal = trucks.reduce((a, k) => {
+    const vc = ctx[k.ci].variants[k.vi].cfg;
+    return a + vc.costFixedPerH * (measured / 60) + (k.worked / 60) * vc.costVarPerH;
+  }, 0);
 
   const stats: RunStats = {
     tonnes,

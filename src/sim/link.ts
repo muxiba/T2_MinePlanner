@@ -6,12 +6,13 @@
  * perdas, recuperação mássica e rejeito. O que muda é a movimentação do período simulado
  * (mês, ano, quinquênio ou n dias), que substitui o "Consumo Planta (t/mês)".
  */
-import type { DetailedPremises } from '@/types';
+import type { DetailedPremises, Route } from '@/types';
+import { fleetTypesOf, mixedOn } from '@/engine/mix';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { interferenceMin, lossesOf } from '@/engine/losses';
 import { processPct } from '@/engine/process';
 import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
-import { configFor, limitsOf, loadTime, payloadFor, travelTimes } from './des';
+import { configFor, limitsOf, loadTime, mixOf, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
 import type { Circuit, Scenario, SimModel, SpeedTable, TruckConfig } from './types';
 
@@ -238,6 +239,33 @@ export function premisesConfig(model: SimModel, premises: DetailedPremises, prev
   };
 }
 
+/** Id da configuração de cada tipo da frota mista (catálogo). */
+export const typeConfigId = (classId: string) => `${PREMISES_CONFIG_ID}:${classId}`;
+
+/** Frota mista: uma configuração por tipo de caminhão das premissas (mesmas velocidades e tempos; carga útil, volume e custos do tipo). */
+export function fleetTypeConfigs(model: SimModel, premises: DetailedPremises, base: TruckConfig): TruckConfig[] {
+  if (!mixedOn(premises)) return [];
+  return fleetTypesOf(premises).map((t) => {
+    const id = typeConfigId(t.classId);
+    const prev = model.configs.find((c) => c.id === id);
+    const road = t.cls.vehicle === 'rodoviario';
+    return {
+      ...base,
+      id,
+      name: `Premissas: ${t.cls.manufacturer ? `${t.cls.manufacturer} ` : ''}${t.cls.name}`,
+      vehicle: t.cls.vehicle ?? base.vehicle,
+      payloadT: t.cls.payloadT,
+      volumeM3: t.cls.volumeM3 || undefined,
+      speedLimitLoadedKmh: prev?.speedLimitLoadedKmh ?? (road ? base.speedLimitLoadedKmh : undefined),
+      speedLimitEmptyKmh: prev?.speedLimitEmptyKmh ?? (road ? base.speedLimitEmptyKmh : undefined),
+      rollingResistance: prev?.rollingResistance ?? base.rollingResistance,
+      trafficDelayMin: prev?.trafficDelayMin ?? base.trafficDelayMin,
+      costFixedPerH: prev?.costFixedPerH ?? 0,
+      costVarPerH: prev?.costVarPerH ?? 0,
+    };
+  });
+}
+
 /** Tira o prefixo de letra antigo (“A – …”): as letras eram só identificadores internos. */
 export function cleanConfigName<T extends { name: string }>(c: T): T {
   const name = c.name.replace(/^[A-Z]\s*[–-]\s+/, '').replace(/^Basculante 6x4 \(frota atual\)$/, 'Basculante 6x4 – 27 t');
@@ -252,11 +280,23 @@ const weighOf = (p: DetailedPremises) => (p.weighingTimeLoaded || 0) + (p.weighi
  * Modelo efetivo: aplica as premissas sobre o modelo salvo. Idempotente.
  * Campos derivados das premissas não são editáveis enquanto a ligação estiver ligada.
  */
-export function withPremises(model: SimModel, premises: DetailedPremises, edges?: EdgeMasses): SimModel {
+export function withPremises(model: SimModel, premises: DetailedPremises, edges?: EdgeMasses, netRoutes?: Route[]): SimModel {
   if (!linkOn(model)) return model;
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : 2.0;
   const prevP = model.configs.find((c) => c.id === PREMISES_CONFIG_ID);
-  const configs = [premisesConfig(model, premises, prevP), ...model.configs.filter((c) => c.id !== PREMISES_CONFIG_ID).map(cleanConfigName)];
+  const pCfg0 = premisesConfig(model, premises, prevP);
+  const typeCfgs = fleetTypeConfigs(model, premises, pCfg0);
+  const pCfg = typeCfgs.length ? { ...pCfg0, name: `Premissas: frota mista (${fleetTypesOf(premises).map((t) => `${t.count}× ${t.cls.name}`).join(' + ')})` } : pCfg0;
+  const isP = (id: string) => id === PREMISES_CONFIG_ID || id.startsWith(`${PREMISES_CONFIG_ID}:`);
+  const configs = [pCfg, ...typeCfgs, ...model.configs.filter((c) => !isP(c.id)).map(cleanConfigName)];
+  // frota mista: a composição vem da movimentação ligada ao circuito; sem movimentação, a proporção da frota toda
+  const fleetMix = typeCfgs.length ? Object.fromEntries(fleetTypesOf(premises).map((t) => [typeConfigId(t.classId), t.count])) : undefined;
+  const mixFor = (c: Circuit) => {
+    if (!fleetMix) return undefined;
+    const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
+    const m = r?.mix ? Object.fromEntries(Object.entries(r.mix).filter(([, n]) => n > 0).map(([k, n]) => [typeConfigId(k), n])) : {};
+    return Object.keys(m).length ? m : fleetMix;
+  };
   const hours = premises.contractedHoursMina || 24;
   // perdas detalhadas: cada parada vira evento na simulação e a eficiência cobre só o que não foi listado (100%)
   const L = premises.losses?.enabled ? lossesOf(premises) : null;
@@ -280,6 +320,7 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
     loaderDf: premises.dfMina,
     weighing: weigh > 0,
     weighMin: weigh,
+    mix: mixFor(c),
   }));
   const dests = [...new Set(model.circuits.map((c) => c.destination))];
   const recList = [...model.receiving, ...dests.filter((d) => !model.receiving.some((r) => r.destination === d)).map((d) => defaultReceiving(d))];
@@ -405,16 +446,27 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises, edge
     const overridden = c.tonnesDryOverride !== undefined && flow !== 'outro';
     const tonnesDry = overridden ? c.tonnesDryOverride! : fromFlow;
     const tonnes = tonnesDry * k;
-    const cfg = configFor(model, c, cfg0);
     const r = model.routes.find((x) => x.id === c.routeId);
-    const tt = r ? travelTimes(r.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance) : { loaded: 0, empty: 0 };
-    const loadMin = loadTime(cfg, c);
-    const dumpMin = cfg.dumpMin + cfg.maneuverMin;
     const weighMin = c.weighing ? c.weighMin : 0;
-    const interfC = interference + Math.max(0, cfg.trafficDelayMin ?? 0);
-    const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interfC;
-    const payloadT = payloadFor(cfg, c);
-    const perTruckTph = cycleMin > 0 ? (payloadT * 60) / cycleMin : 0;
+    // frota mista: média ponderada dos tipos do circuito (cada um com carga útil e ciclo próprios)
+    const perf = mixOf(model, c, configFor(model, c, cfg0)).map(({ cfg, weight }) => {
+      const tt = r ? travelTimes(r.points, cfg.speed, limitsOf(model, cfg), cfg.rollingResistance ?? model.rollingResistance) : { loaded: 0, empty: 0 };
+      const loadMin = loadTime(cfg, c);
+      const dumpMin = cfg.dumpMin + cfg.maneuverMin;
+      const interfC = interference + Math.max(0, cfg.trafficDelayMin ?? 0);
+      const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interfC;
+      const payloadT = payloadFor(cfg, c);
+      return { weight, tt, loadMin, dumpMin, interfC, cycleMin, payloadT, perTruckTph: cycleMin > 0 ? (payloadT * 60) / cycleMin : 0 };
+    });
+    const wSum = perf.reduce((a, p) => a + p.weight, 0) || 1;
+    const avg = (f: (p: (typeof perf)[number]) => number) => perf.reduce((a, p) => a + p.weight * f(p), 0) / wSum;
+    const tt = { loaded: avg((p) => p.tt.loaded), empty: avg((p) => p.tt.empty) };
+    const loadMin = avg((p) => p.loadMin);
+    const dumpMin = avg((p) => p.dumpMin);
+    const interfC = avg((p) => p.interfC);
+    const cycleMin = avg((p) => p.cycleMin);
+    const payloadT = avg((p) => p.payloadT);
+    const perTruckTph = avg((p) => p.perTruckTph);
     const needTph = prodH > 0 ? tonnes / prodH : 0;
     const trucksExact = perTruckTph > 0 ? needTph / perTruckTph : 0;
     return {
