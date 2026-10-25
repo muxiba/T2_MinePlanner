@@ -42,6 +42,9 @@ export interface Route {
   /** rede de fluxos: local de origem e de destino (FlowNode.id) */
   fromId?: string;
   toId?: string;
+  /** tempos próprios desta movimentação (min); vazio = os das premissas / do equipamento do local */
+  loadMin?: number;
+  dumpMin?: number;
   /** modo só transporte: nome livre do material (minério, estéril, areia...) */
   materialName?: string;
   /** desativada porque “possui estéril” foi desmarcado (volta ao marcar de novo) */

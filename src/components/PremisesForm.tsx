@@ -1,6 +1,7 @@
 import CatalogEditor from './CatalogEditor';
 import { analyzeFleet } from '@/engine/fleet';
-import { setWasteOn } from '@/engine/flowMode';
+import { setWasteOn, switchFlowMode } from '@/engine/flowMode';
+import TransportTable from './TransportTable';
 import NetworkEditor from './NetworkEditor';
 import FlowDiagram from './FlowDiagram';
 import { LoaderNeedsTable, LoaderTimesEditor } from './LoaderSetupEditor';
@@ -268,7 +269,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
 
   // modo só transporte: variáveis do processo ficam travadas (não entram no cálculo)
   const tm = premises.flowMode === 'transporte';
-  const TM_LOCKED = new Set(['targetMonthlyROM', 'contractedHoursPlanta', 'dfPlanta', 'ufPlanta', 'eoPlanta', 'plantFeedRateTPH', 'processType', 'rmGlobal', 'rmDry', 'rejeitoTotal', '__perda', 'hasWasteRock', 'targetMonthlyWasteRock', 'fleetCapacityMinaTPH', 'fleetCapacityBaiaTPH', 'fleetCapacityTerminalTPH', 'maxTotalFleetCapacityTPH']);
+  const TM_LOCKED = new Set(['targetMonthlyROM', 'contractedHoursPlanta', 'dfPlanta', 'ufPlanta', 'eoPlanta', 'plantFeedRateTPH', 'rmGlobal', 'rmDry', 'rejeitoTotal', '__perda', 'hasWasteRock', 'targetMonthlyWasteRock', 'fleetCapacityMinaTPH', 'fleetCapacityBaiaTPH', 'fleetCapacityTerminalTPH', 'maxTotalFleetCapacityTPH']);
   const tmLock = <T extends { fields: any[] }>(sec: T): T =>
     tm ? { ...sec, fields: sec.fields.map((f) => (TM_LOCKED.has(f.key) ? { ...f, disabled: true, label: `${f.label} — não usado no modo só transporte` } : f)) } : sec;
 
@@ -314,7 +315,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           type: "select", 
           options: [
             { label: "A Úmido (Com Rejeito)", value: "umido" },
-            { label: "A Seco (Sem Rejeito)", value: "seco" }
+            { label: "A Seco (Sem Rejeito)", value: "seco" },
+            { label: "Só transporte (origem → destino, sem planta)", value: "transporte" }
           ] 
         },
         premises.processType === 'seco'
@@ -399,7 +401,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           </button>
         ))}
       </nav>
-      {step > 0 && <p className="-mt-4 text-xs text-black/50">{STEPS[step].hint}</p>}
+      {step > 0 && <p className="-mt-4 text-xs text-black/50">{tm && step === 2 ? 'Só transporte: informe cada movimentação (origem, destino, material, massa, DMT e tempos). Para voltar ao processo com planta, escolha A úmido ou A seco em Tipo de Processo.' : STEPS[step].hint}</p>}
 
       {/* Header Stats */}
       <div className="space-y-4">
@@ -442,7 +444,12 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       </div>
 
       {show(2) && tm && (
-        <p className="rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4 text-sm text-sky-900">Modo só transporte: a produção planejada da planta não é usada. As massas são as de cada movimentação, em Locais e movimentações.</p>
+        <p className="rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4 text-sm text-sky-900">Modo só transporte: a produção planejada da planta não é usada. Informe abaixo cada movimentação (origem, destino, massa, DMT e tempos); o desenho fica em Locais e movimentações.</p>
+      )}
+      {show(2) && tm && routes && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+          <TransportTable premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+        </div>
       )}
       {show(2) && !tm && (
         <>
@@ -515,7 +522,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                   {field.type === "select" ? (
                     <select
                       disabled={field.disabled}
-                      value={String(premises[field.key as keyof DetailedPremises] ?? (field.key === "moistureMode" ? "somada" : ""))}
+                      value={field.key === "processType" && tm ? "transporte" : String(premises[field.key as keyof DetailedPremises] ?? (field.key === "moistureMode" ? "somada" : ""))}
                       onChange={(e) => {
                         const val =
                           field.key === "processType" || field.key === "moistureMode" || field.key === "truckClassId"
@@ -527,7 +534,13 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                               : parseInt(e.target.value);
                         if (field.key === "month") handleMonthYearChange(val as number, premises.year);
                         else if (field.key === "year") handleMonthYearChange(premises.month, val as number);
-                        else if (field.key === "hasWasteRock" && routes) {
+                        else if (field.key === "processType" && routes && (val === "transporte" || tm)) {
+                          // só transporte é um modo da rede: guarda a rede atual e traz a do outro modo
+                          const x = switchFlowMode(premises, routes, val === "transporte" ? "transporte" : "processo");
+                          const next = x ? x.premises : premises;
+                          setPremises(val === "transporte" ? next : { ...next, processType: val as 'umido' | 'seco' });
+                          if (x) setRoutes(x.routes);
+                        } else if (field.key === "hasWasteRock" && routes) {
                           const x = setWasteOn(premises, routes, !!val);
                           setPremises(x.premises);
                           setRoutes(x.routes);

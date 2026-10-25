@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Trash2, X } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportMode } from '@/engine/network';
 import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
+import TransportTable from './TransportTable';
 import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
 import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
@@ -684,6 +685,8 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
           </div>
         </div>
       </div>
+
+      {tm && <TransportTable premises={premises} setPremises={setPremises} routes={routes} setRoutes={setRoutes} />}
 
       {res.issues.length ? (
         <ul className="space-y-1">

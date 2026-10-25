@@ -186,7 +186,7 @@ export const LoaderNeedsTable: React.FC<Props & { routes: Route[] }> = ({ premis
   const nodes = (premises.nodes ?? []).filter((n) => routes.some((r) => r.active && (r.fromId === n.id || (n.type === 'planta' && r.toId === n.id))));
   const [editing, setEditing] = useState<string | null>(null);
   const own = fa.loaderNeeds.filter((l) => l.source === 'rota');
-  if (!nodes.length && !own.length) return <p className="text-sm text-black/50">Crie as movimentações em 1. Premissas → Locais e movimentações.</p>;
+  if (!nodes.length && !own.length) return <p className="text-sm text-black/50">Nenhuma movimentação ativa. Crie as movimentações em 1. Premissas → Locais e movimentações{premises.flowMode === 'transporte' ? ' (ou na tabela de movimentações de transporte em Processo e massas)' : ''}.</p>;
 
   const setEntries = (nodeId: string, fn: (list: NodeLoader[]) => NodeLoader[]) =>
     setPremises((p) => ({

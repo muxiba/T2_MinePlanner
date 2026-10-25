@@ -490,7 +490,7 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
   const vEmpty = Math.max(premises.velocidadeVazio, 1) * (1000 / 60);
   const travelLoadedMin = Math.max(route.distance, 0) / vLoaded;
   const travelEmptyMin = Math.max(route.distance, 0) / vEmpty;
-  const dumpMin = Math.max(premises.dumpingTime, 0);
+  const dumpMin = Math.max(route.dumpMin ?? premises.dumpingTime, 0);
   const weighMin = Math.max(premises.weighingTimeLoaded, 0) + Math.max(premises.weighingTimeEmpty, 0);
   const queueMin = Math.max(route.queueMin ?? 0, 0);
   const interference = interferenceMin(premises);
@@ -603,7 +603,12 @@ export function analyzeRoute(
   // equipamento de carga: o da rota (dedicado) ou o do local de origem na rede (compartilhado; só define o tempo de carga)
   const nodeL = route.loader ? null : nodeLoaderOf(route, premises);
   const loading = route.loader ? loaderLoading(route.loader, payloadT, density) : nodeL ? loaderLoading(nodeL, payloadT, density) : null;
-  const loadMin = loading ? loading.loadMin + (nodeL ? Math.max(0, nodeL.spotMin ?? premises.loaderSpotMin ?? 0.5) : 0) : Math.max(premises.loadingTime, 0);
+  const loadMin =
+    route.loadMin !== undefined && route.loadMin >= 0 && !route.loader
+      ? route.loadMin
+      : loading
+        ? loading.loadMin + (nodeL ? Math.max(0, nodeL.spotMin ?? premises.loaderSpotMin ?? 0.5) : 0)
+        : Math.max(premises.loadingTime, 0);
 
   const speedFactor = overrides.speedFactor ?? 1;
   const vl = overrides.vLoaded && overrides.vLoaded > 0 ? overrides.vLoaded : premises.velocidadeCheio;

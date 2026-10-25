@@ -323,6 +323,11 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
     weighing: weigh > 0,
     weighMin: weigh,
     mix: mixFor(c),
+    // tempo de carga próprio da movimentação ligada (tabela de transporte): vale como tempo fixo de carga
+    ...((() => {
+      const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
+      return r?.loadMin !== undefined ? { loadSpotMin: r.loadMin, loaderTph: 1e9 } : {};
+    })()),
   }));
   const dests = [...new Set(model.circuits.map((c) => c.destination))];
   const recList = [...model.receiving, ...dests.filter((d) => !model.receiving.some((r) => r.destination === d)).map((d) => defaultReceiving(d))];

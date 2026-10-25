@@ -78,7 +78,8 @@ describe('só transporte, equipamentos por local e estéril', () => {
     const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
     const p0 = { ...P, nodes: net.nodes };
     const sw = switchFlowMode(p0, net.routes, 'transporte')!;
-    expect(sw.routes.length).toBe(0);
+    expect(sw.routes.length).toBe(1);
+    expect(sw.routes[0].targetMass).toBe(Math.round(P.targetMonthlyROM));
     const nodes: FlowNode[] = [
       { id: 'o', name: 'Cava', type: 'frente', group: 'origem' },
       { id: 'pt', name: 'Pátio', type: 'estoque', group: 'passagem' },
