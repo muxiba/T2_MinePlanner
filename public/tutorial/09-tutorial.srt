@@ -1,0 +1,623 @@
+1
+00:00:00,000 --> 00:00:02,752
+Abra Simulação e selecione a aba Circuito.
+
+2
+00:00:02,932 --> 00:00:05,184
+O primeiro passo é conferir as rotas.
+
+3
+00:00:05,364 --> 00:00:09,335
+Clique em Importar rotas, DXF, para selecionar o arquivo das vias.
+
+4
+00:00:09,515 --> 00:00:13,857
+A lista mostra os trajetos importados e o mapa permite conferir sua posição.
+
+5
+00:00:14,037 --> 00:00:16,591
+Utilize Enquadrar para ajustar a visualização.
+
+6
+00:00:16,771 --> 00:00:21,844
+Se o sentido estiver invertido, o controle de inverter troca a orientação entre carga e descarga.
+
+7
+00:00:22,024 --> 00:00:24,277
+Confira o trajeto antes de usar esse comando.
+
+8
+00:00:25,107 --> 00:00:27,522
+Role até Período simulado e premissas.
+
+9
+00:00:27,702 --> 00:00:30,651
+Informe a quantidade e selecione a unidade do período.
+
+10
+00:00:30,831 --> 00:00:35,440
+Com Usar as Premissas Fundamentais ligado, os parâmetros correspondentes vêm do planejamento.
+
+11
+00:00:35,620 --> 00:00:39,149
+Campos identificados como Premissas devem ser revisados na origem.
+
+12
+00:00:39,329 --> 00:00:44,507
+Se optar por uma configuração independente, confira o efeito de desligar o vínculo antes de editar.
+
+13
+00:00:44,687 --> 00:00:49,180
+Nesta área também é possível escolher como a velocidade será considerada nas rotas.
+
+14
+00:00:50,010 --> 00:00:53,412
+Na seção Circuitos, encontre a rota que você deseja configurar.
+
+15
+00:00:53,592 --> 00:00:57,528
+Confira o fluxo, a meta e os campos de operação correspondentes.
+
+16
+00:00:57,708 --> 00:01:00,947
+O nome do circuito ajuda a relacionar a linha ao desenho no mapa.
+
+17
+00:01:01,127 --> 00:01:06,061
+Use a meta individual somente quando desejar definir um valor específico para aquele circuito.
+
+18
+00:01:06,241 --> 00:01:11,129
+Revise origem, destino e parâmetros de carga e descarga antes de avançar para a execução.
+
+19
+00:01:11,959 --> 00:01:16,347
+Abra Caminhão deste circuito para conferir qual configuração será usada no trajeto.
+
+20
+00:01:16,527 --> 00:01:22,321
+A opção A que está em comparação acompanha a configuração escolhida nas consultas de resultados e animação.
+
+21
+00:01:22,501 --> 00:01:25,879
+Uma configuração específica fixa o veículo naquele circuito.
+
+22
+00:01:26,059 --> 00:01:30,088
+Confira a escolha principalmente quando misturar transporte interno e rodoviário.
+
+23
+00:01:30,268 --> 00:01:34,715
+Feche a lista após a revisão e confirme o restante dos campos do mesmo circuito.
+
+24
+00:01:35,545 --> 00:01:40,827
+Na seção Recebimento, confira cada destino e o equipamento que atende a chegada do material.
+
+25
+00:01:41,007 --> 00:01:45,233
+Selecione o modelo de carregadeira ou informe os parâmetros próprios disponíveis.
+
+26
+00:01:45,413 --> 00:01:48,409
+Revise os limites e recursos de descarga apresentados.
+
+27
+00:01:48,589 --> 00:01:55,856
+Os circuitos associados ao mesmo destino compartilham esse recebimento; por isso identifique corretamente os nomes antes de alterar as
+
+28
+00:01:56,036 --> 00:01:57,105
+capacidades.
+
+29
+00:01:57,935 --> 00:02:04,622
+No final da aba, confira os Parâmetros gerais, incluindo os controles de execução, repetições e tempos disponíveis.
+
+30
+00:02:04,802 --> 00:02:07,263
+Utilize as unidades escritas em cada campo.
+
+31
+00:02:07,443 --> 00:02:09,963
+Esta revisão encerra o cadastro do circuito.
+
+32
+00:02:10,143 --> 00:02:18,444
+Antes de simular, confirme se os trajetos, o período, as configurações de veículos e os destinos correspondem ao estudo que você pretende
+
+33
+00:02:18,624 --> 00:02:19,436
+executar.
+
+34
+00:02:20,266 --> 00:02:22,066
+Selecione a aba Plano de lavra.
+
+35
+00:02:22,246 --> 00:02:25,578
+No quadro Plano no mapa, escolha o período que deseja consultar.
+
+36
+00:02:25,758 --> 00:02:28,533
+A lista e o controle de período atualizam a vista.
+
+37
+00:02:28,713 --> 00:02:34,367
+Utilize dois D para a planta e três D para a topografia do período, quando houver dados carregados.
+
+38
+00:02:34,547 --> 00:02:35,917
+Enquadrar ajusta o mapa.
+
+39
+00:02:36,097 --> 00:02:40,660
+A tabela abaixo relaciona as movimentações exibidas ao período selecionado.
+
+40
+00:02:41,489 --> 00:02:46,935
+Na seção Lugares de carga e descarga, confira nome, tipo, coordenadas e cota de cada lugar.
+
+41
+00:02:47,115 --> 00:02:52,676
+O comando Gerar das pontas das rotas ajuda a iniciar esse cadastro a partir dos trajetos importados.
+
+42
+00:02:52,856 --> 00:02:58,266
+Revise os tipos sugeridos, identificando frentes, usinas, pátios, terminais e disposição.
+
+43
+00:02:58,446 --> 00:03:03,624
+O botão Refazer pode reconstruir associações; não o utilize apenas para atualizar a visualização.
+
+44
+00:03:04,454 --> 00:03:08,785
+Em Frentes de lavra por período, selecione os arquivos DXF correspondentes.
+
+45
+00:03:08,965 --> 00:03:12,935
+Confira a relação entre arquivo, camada e período durante a importação.
+
+46
+00:03:13,115 --> 00:03:17,097
+A seção de destinos com sólido por período recebe os dados de disposição.
+
+47
+00:03:17,277 --> 00:03:22,107
+Depois de importar, volte ao mapa e selecione o período para verificar o que foi associado.
+
+48
+00:03:22,287 --> 00:03:26,374
+Use nomes consistentes entre a geometria e os lugares cadastrados.
+
+49
+00:03:27,204 --> 00:03:28,887
+Abra Calendário e períodos.
+
+50
+00:03:29,067 --> 00:03:32,655
+Revise os dias de trabalho e os períodos que compõem o horizonte.
+
+51
+00:03:32,835 --> 00:03:38,965
+Os atalhos de calendário e distribuição permitem preencher valores iniciais; confira o resultado antes de seguir.
+
+52
+00:03:39,145 --> 00:03:42,744
+Escolha a duração de cada período e verifique as metas sugeridas.
+
+53
+00:03:42,924 --> 00:03:47,893
+Ajustes nesta seção devem representar o calendário que você quer utilizar na execução do plano.
+
+54
+00:03:48,723 --> 00:03:53,309
+Na seção Movimentações por período, confira as toneladas e a base selecionada.
+
+55
+00:03:53,489 --> 00:03:58,144
+O botão Calcular pelas premissas preenche as movimentações compatíveis com o cadastro.
+
+56
+00:03:58,324 --> 00:04:03,793
+Para trabalhar por arquivo, use Exportar modelo CSV, preencha o modelo e depois Importar CSV.
+
+57
+00:04:03,973 --> 00:04:09,418
+Abra Origem, destino e equipamento de carga para revisar as associações de cada movimentação.
+
+58
+00:04:09,598 --> 00:04:12,837
+Confira todos os períodos antes de executar o dimensionamento.
+
+59
+00:04:13,667 --> 00:04:17,568
+Em Frota por período, clique em Dimensionar após concluir os cadastros.
+
+60
+00:04:17,748 --> 00:04:19,141
+Aguarde o processamento.
+
+61
+00:04:19,321 --> 00:04:24,046
+Selecione uma combinação de configuração e cenário para consultar seus resultados.
+
+62
+00:04:24,226 --> 00:04:26,792
+O botão Exportar Excel disponibiliza a tabela.
+
+63
+00:04:26,972 --> 00:04:34,681
+Quando um resultado não corresponder ao esperado, revise primeiro o período, as movimentações e os lugares associados, em vez de alterar
+
+64
+00:04:34,861 --> 00:04:36,928
+várias configurações ao mesmo tempo.
+
+65
+00:04:37,758 --> 00:04:39,848
+Abra Configurações e cenários.
+
+66
+00:04:40,028 --> 00:04:47,737
+Em Configurações de transporte, use a lista Adicionar configuração para escolher um modelo do catálogo ou uma cópia da última configuração.
+
+67
+00:04:47,917 --> 00:04:49,205
+Preencha um nome claro.
+
+68
+00:04:49,385 --> 00:04:54,180
+Revise carga útil, volume, manobra, basculamento, custos e tipo de veículo.
+
+69
+00:04:54,360 --> 00:05:01,140
+Os parâmetros marcados como Premissas permanecem vinculados ao planejamento e precisam ser alterados na origem correspondente.
+
+70
+00:05:01,970 --> 00:05:05,976
+Expanda Velocidade por rampa e tempos por rota na configuração desejada.
+
+71
+00:05:06,156 --> 00:05:10,196
+Confira os controles disponíveis e relacione cada linha à rota correta.
+
+72
+00:05:10,376 --> 00:05:16,855
+Revise limites carregado e vazio, resistência ao rolamento e interferências próprias do veículo quando aplicáveis.
+
+73
+00:05:17,035 --> 00:05:22,120
+O botão Remover ao lado do nome exclui a configuração; ele não serve para fechar os detalhes.
+
+74
+00:05:22,300 --> 00:05:24,645
+Feche a seção pelo mesmo título expansível.
+
+75
+00:05:25,475 --> 00:05:26,798
+Role até Cenários.
+
+76
+00:05:26,978 --> 00:05:31,077
+Confira o nome e os parâmetros de cada hipótese operacional que deseja comparar.
+
+77
+00:05:31,257 --> 00:05:35,761
+Mantenha nomes que identifiquem a alteração, como disponibilidade ou tempo de ciclo.
+
+78
+00:05:35,941 --> 00:05:40,748
+As configurações de veículos e os cenários serão combinados na matriz de resultados.
+
+79
+00:05:40,928 --> 00:05:47,279
+Esses cenários pertencem à Simulação; para guardar uma cópia geral do planejamento, utilize Cenários no menu lateral.
+
+80
+00:05:48,109 --> 00:05:50,941
+Na aba Financeiro, comece por Premissas gerais.
+
+81
+00:05:51,121 --> 00:05:57,623
+Informe preço do diesel, taxa de desconto, salário, encargos, turnos, fator de folguistas e custos fixos.
+
+82
+00:05:57,803 --> 00:06:02,714
+Caso utilize receita na comparação, preencha o valor e identifique o material correspondente.
+
+83
+00:06:02,894 --> 00:06:08,014
+Confira as unidades indicadas: existem valores por litro, por mês, por ano e por tonelada.
+
+84
+00:06:08,194 --> 00:06:10,098
+Os campos não são intercambiáveis.
+
+85
+00:06:10,928 --> 00:06:16,547
+Na tabela Equipamentos, cada coluna corresponde a uma configuração de caminhão ou ao equipamento de carga.
+
+86
+00:06:16,727 --> 00:06:23,148
+Selecione um modelo do catálogo para preencher uma referência, ou mantenha Valores digitados e informe os dados próprios.
+
+87
+00:06:23,328 --> 00:06:26,869
+Revise aquisição, residual e vida útil na coluna correta.
+
+88
+00:06:27,049 --> 00:06:32,691
+Os valores de referência servem como ponto de partida e podem ser substituídos pelos dados do seu estudo.
+
+89
+00:06:33,521 --> 00:06:40,615
+Continue pela tabela para configurar o modo de consumo do diesel e os valores de operação, manutenção, pneus e pessoal.
+
+90
+00:06:40,795 --> 00:06:44,812
+Confira se o consumo está por hora ou por tonelada antes de preencher a quantidade.
+
+91
+00:06:44,992 --> 00:06:48,544
+Revise também os campos de envelhecimento e substituição disponíveis.
+
+92
+00:06:48,724 --> 00:06:54,808
+Depois de concluir o financeiro, consulte Resultados e decisão para executar ou atualizar a comparação econômica.
+
+93
+00:06:55,638 --> 00:06:57,391
+Abra Resultados do circuito.
+
+94
+00:06:57,571 --> 00:07:01,101
+No quadro Matriz de configurações por cenários, clique em Simular.
+
+95
+00:07:01,281 --> 00:07:03,336
+Aguarde a indicação de processamento.
+
+96
+00:07:03,516 --> 00:07:08,334
+A execução utiliza os circuitos e alternativas cadastrados nas abas anteriores.
+
+97
+00:07:08,514 --> 00:07:11,765
+Evite repetir o comando enquanto o botão estiver desabilitado.
+
+98
+00:07:11,945 --> 00:07:17,239
+Quando concluir, a matriz aparece na mesma página e o botão passa a oferecer uma nova execução.
+
+99
+00:07:18,069 --> 00:07:21,900
+Na matriz, localize a configuração pela linha e o cenário pela coluna.
+
+100
+00:07:22,080 --> 00:07:24,820
+Clique na célula da combinação que deseja consultar.
+
+101
+00:07:25,000 --> 00:07:27,008
+O sistema atualiza os detalhes abaixo.
+
+102
+00:07:27,188 --> 00:07:31,554
+Você pode alternar entre as células para comparar opções sem refazer os cadastros.
+
+103
+00:07:31,734 --> 00:07:34,311
+Use Exportar Excel para baixar os resultados.
+
+104
+00:07:34,491 --> 00:07:39,820
+Os botões Memorial PDF e Memorial HTML ficam na parte superior desta consulta.
+
+105
+00:07:40,650 --> 00:07:44,899
+Role até o quadro que mostra o nome da configuração e do cenário selecionados.
+
+106
+00:07:45,079 --> 00:07:49,305
+Confira essa identificação antes de consultar os indicadores e as tabelas.
+
+107
+00:07:49,485 --> 00:07:52,841
+A página também apresenta a distribuição do tempo dos caminhões.
+
+108
+00:07:53,021 --> 00:07:56,573
+Para voltar à comparação, retorne à matriz e clique em outra célula.
+
+109
+00:07:56,753 --> 00:08:03,046
+Se você alterou dados de cadastro desde a última execução, utilize Simular de novo para atualizar os resultados.
+
+110
+00:08:03,876 --> 00:08:09,542
+Em Busca da frota mínima, selecione configuração, cenário e circuito, depois clique em Buscar.
+
+111
+00:08:09,722 --> 00:08:12,218
+Aguarde o resultado antes de mudar a seleção.
+
+112
+00:08:12,398 --> 00:08:19,352
+O quadro Simulação versus Dimensionamento possui o comando Dimensionar pela simulação para consultar a comparação com o planejamento.
+
+113
+00:08:19,532 --> 00:08:26,405
+Essas execuções são diferentes da matriz inicial; confira o título do quadro e a seleção ativa antes de usar cada botão.
+
+114
+00:08:27,235 --> 00:08:29,023
+Abra Resultados e decisão.
+
+115
+00:08:29,203 --> 00:08:35,310
+Primeiro escolha a base: Simples, com circuitos e calendário, ou Detalhado, com plano de lavra por período.
+
+116
+00:08:35,490 --> 00:08:37,731
+Confira o horizonte descrito logo abaixo.
+
+117
+00:08:37,911 --> 00:08:41,521
+Em Critério de escolha, selecione a forma de apresentação desejada.
+
+118
+00:08:41,701 --> 00:08:44,616
+A lista Comparar alterna o agrupamento das opções.
+
+119
+00:08:44,796 --> 00:08:50,519
+Utilize Simular, ou Simular de novo, quando precisar executar a comparação com os cadastros atuais.
+
+120
+00:08:51,349 --> 00:08:56,469
+Na seção Comparação das opções, consulte as linhas e clique na alternativa que deseja detalhar.
+
+121
+00:08:56,649 --> 00:08:59,250
+Confira o nome selecionado nas seções abaixo.
+
+122
+00:08:59,430 --> 00:09:06,512
+O destaque de melhor opção acompanha o critério escolhido; ao trocar o critério ou o agrupamento, revise novamente a identificação.
+
+123
+00:09:06,692 --> 00:09:11,951
+Utilize os botões Exportar Excel e Memorial para guardar a consulta que está sendo apresentada.
+
+124
+00:09:12,781 --> 00:09:19,956
+Em Vida útil e custos por período, acompanhe as linhas dos períodos e as colunas de frota, compras, trocas, idade e custo.
+
+125
+00:09:20,136 --> 00:09:23,027
+A seção pertence à opção identificada no título.
+
+126
+00:09:23,207 --> 00:09:28,339
+Para consultar outra alternativa, volte à tabela de comparação e selecione a linha correspondente.
+
+127
+00:09:28,519 --> 00:09:32,489
+Essa navegação evita confundir uma tabela de detalhe com o ranking geral.
+
+128
+00:09:33,319 --> 00:09:38,358
+Role até Sensibilidade para consultar as variações apresentadas para a opção selecionada.
+
+129
+00:09:38,538 --> 00:09:43,391
+A seção O que move o custo de cada opção organiza os componentes disponíveis para comparação.
+
+130
+00:09:43,571 --> 00:09:48,180
+Use esses quadros como consultas do software e confira os títulos antes de exportar.
+
+131
+00:09:48,360 --> 00:09:52,795
+Para alterar um custo de entrada, retorne à aba Financeiro e depois atualize a execução.
+
+132
+00:09:53,625 --> 00:09:55,947
+Mais abaixo está Fluxo de caixa detalhado.
+
+133
+00:09:56,127 --> 00:09:59,459
+Confira a opção no título e navegue pelos períodos da tabela.
+
+134
+00:09:59,639 --> 00:10:05,293
+Para obter o documento completo, volte ao início da aba e use Memorial PDF ou Memorial HTML.
+
+135
+00:10:05,473 --> 00:10:11,534
+O memorial registra a configuração da consulta; confira o resultado e o horizonte antes de encaminhar o arquivo.
+
+136
+00:10:11,714 --> 00:10:16,706
+Assim você conclui a consulta de decisão sem precisar desenvolver os cálculos fora do software.
+
+137
+00:10:17,536 --> 00:10:22,354
+Na aba Animação, selecione Configuração, Cenário, Operação e Duração animada.
+
+138
+00:10:22,534 --> 00:10:26,516
+Em Operação, escolha o Circuito ou um período do Plano de lavra disponível.
+
+139
+00:10:26,696 --> 00:10:28,566
+Depois clique em Gerar e aguarde.
+
+140
+00:10:28,746 --> 00:10:32,484
+Se você mudar as seleções, gere novamente a animação correspondente.
+
+141
+00:10:32,664 --> 00:10:35,125
+Para ajustar o mapa à tela, utilize Enquadrar.
+
+142
+00:10:35,955 --> 00:10:40,135
+Com a animação gerada, use Reproduzir e Pausar para controlar a exibição.
+
+143
+00:10:40,315 --> 00:10:43,856
+A lista Velocidade muda o ritmo em que você acompanha a operação.
+
+144
+00:10:44,036 --> 00:10:46,637
+A barra de tempo permite localizar outro instante.
+
+145
+00:10:46,817 --> 00:10:50,450
+Observe a legenda de cores para identificar os estados dos caminhões.
+
+146
+00:10:50,630 --> 00:10:55,588
+Quando precisar examinar uma situação, pause primeiro e depois ajuste o enquadramento do mapa.
+
+147
+00:10:56,418 --> 00:11:00,667
+Abaixo do mapa, alterne entre Por circuito, Por caminhão e Matriz do período.
+
+148
+00:11:00,847 --> 00:11:03,738
+Confira qual aba está selecionada antes de ler a tabela.
+
+149
+00:11:03,918 --> 00:11:07,819
+Essas consultas permitem acompanhar os registros da animação apresentada.
+
+150
+00:11:07,999 --> 00:11:13,235
+Para consultar a matriz de comparações de todas as alternativas, volte a Resultados do circuito.
+
+151
+00:11:13,415 --> 00:11:16,863
+As duas telas têm funções diferentes dentro do fluxo de uso.
+
+152
+00:11:17,693 --> 00:11:21,815
+Use os botões dois D e três D para alternar a apresentação disponível.
+
+153
+00:11:21,995 --> 00:11:25,327
+A topografia depende dos arquivos carregados neste navegador.
+
+154
+00:11:25,507 --> 00:11:30,371
+Ao concluir, pause a animação e confira se a consulta está na configuração desejada.
+
+155
+00:11:30,551 --> 00:11:39,294
+Você percorreu o fluxo de uso da Simulação: cadastrar circuitos, organizar o plano, configurar alternativas e custos, executar, consultar os
+
+156
+00:11:39,474 --> 00:11:41,587
+resultados e acompanhar a animação.

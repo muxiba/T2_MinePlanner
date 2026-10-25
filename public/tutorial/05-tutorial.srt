@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:01,416
+Clique em Replanejamento.
+
+2
+00:00:01,596 --> 00:00:05,056
+Essa tela utiliza os apontamentos feitos em Lançamento Produção.
+
+3
+00:00:05,236 --> 00:00:09,276
+Comece conferindo realizado, saldo e quantidade de dias lançados.
+
+4
+00:00:09,456 --> 00:00:15,041
+Se o realizado estiver zerado ou incompleto, volte aos lançamentos antes de interpretar o acompanhamento.
+
+5
+00:00:15,221 --> 00:00:20,852
+A página apresenta os dados automaticamente; você não precisa redigitar a meta e a produção nesta área.
+
+6
+00:00:21,682 --> 00:00:25,153
+Acompanhe o gráfico de produção acumulada e o quadro Resumo.
+
+7
+00:00:25,333 --> 00:00:28,584
+Passe o mouse sobre o gráfico para consultar os valores de um dia.
+
+8
+00:00:28,764 --> 00:00:32,305
+Observe a nova meta diária e os avisos apresentados na tela.
+
+9
+00:00:32,485 --> 00:00:37,779
+Quando houver necessidade de alterar caminhões ou parâmetros de uma rota, use o menu Dimensionamento de Frota.
+
+10
+00:00:37,959 --> 00:00:42,673
+O replanejamento é a área de consulta desse acompanhamento, não o cadastro de uma nova frota.
+
+11
+00:00:43,503 --> 00:00:48,576
+Leia as ações sugeridas e clique em Ver diagnóstico da frota para expandir a análise disponível.
+
+12
+00:00:48,756 --> 00:00:52,077
+Feche a seção pelo mesmo controle quando quiser voltar à visão resumida.
+
+13
+00:00:52,257 --> 00:00:57,365
+Utilize Exportar Excel no alto da página para compartilhar a tabela de acompanhamento com a equipe.
+
+14
+00:00:57,545 --> 00:01:04,790
+Se houver divergência, confira primeiro os dias registrados e o período ativo, depois revise as premissas e as rotas nas áreas
+
+15
+00:01:04,970 --> 00:01:06,073
+correspondentes.

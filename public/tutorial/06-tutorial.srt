@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:01,091
+Clique em Calendário.
+
+2
+00:00:01,271 --> 00:00:04,789
+A visão Calendário do mês organiza o plano e o realizado por data.
+
+3
+00:00:04,969 --> 00:00:09,996
+Confira os indicadores do mês no alto da página e depois localize o dia desejado na grade.
+
+4
+00:00:10,176 --> 00:00:13,706
+A mensagem sem lançamento identifica dias ainda sem apontamento.
+
+5
+00:00:13,886 --> 00:00:20,004
+A tela apresenta o que veio das premissas e dos lançamentos, sem exigir que você cadastre a produção novamente aqui.
+
+6
+00:00:20,834 --> 00:00:24,932
+Selecione Tabela diária para consultar os mesmos dias em linhas e colunas.
+
+7
+00:00:25,112 --> 00:00:29,733
+Essa visão facilita conferir planejado, realizado e acompanhamento do mês.
+
+8
+00:00:29,913 --> 00:00:35,544
+A opção Incluir frota extra permite consultar a apresentação com as alocações extras configuradas.
+
+9
+00:00:35,724 --> 00:00:39,103
+Ao alternar essa opção, confira o que mudou na visualização.
+
+10
+00:00:39,283 --> 00:00:43,369
+Para alterar uma alocação de caminhões por horas, volte ao Dimensionamento de Frota.
+
+11
+00:00:44,199 --> 00:00:49,784
+Os ajustes de jornada e parada de cada data ficam no Calendário Operacional das Premissas Fundamentais.
+
+12
+00:00:49,964 --> 00:00:54,074
+Abra essa área, encontre o dia e revise mina e planta separadamente.
+
+13
+00:00:54,254 --> 00:00:57,586
+Depois volte ao Calendário para conferir o acompanhamento atualizado.
+
+14
+00:00:57,766 --> 00:01:00,947
+Para levar a consulta a uma planilha, utilize Exportar Excel.
+
+15
+00:01:01,127 --> 00:01:07,536
+Assim você separa o cadastro das horas, o apontamento da produção e a consulta do calendário nos lugares corretos.

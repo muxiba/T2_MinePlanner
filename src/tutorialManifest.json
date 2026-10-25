@@ -1,0 +1,654 @@
+[
+  {
+    "id": "01",
+    "title": "Premissas Fundamentais",
+    "file": "01-tutorial.mp4",
+    "duration": 169.5701133786848,
+    "chapters": [
+      {
+        "title": "Abrir Premissas Fundamentais",
+        "start": 0.0,
+        "end": 21.629478458049885
+      },
+      {
+        "title": "Escolher período e jornadas",
+        "start": 21.629478458049885,
+        "end": 42.99768707482993
+      },
+      {
+        "title": "Preencher Mina e Planta",
+        "start": 42.99768707482993,
+        "end": 67.14068027210884
+      },
+      {
+        "title": "Escolher o processo",
+        "start": 67.14068027210884,
+        "end": 91.11537414965986
+      },
+      {
+        "title": "Configurar caminhões e tempos",
+        "start": 91.11537414965986,
+        "end": 116.57614512471655
+      },
+      {
+        "title": "Catálogo e perdas detalhadas",
+        "start": 116.57614512471655,
+        "end": 142.81478458049887
+      },
+      {
+        "title": "Ajustar dias e conferir salvamento",
+        "start": 142.81478458049887,
+        "end": 169.5701133786848
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Abrir Premissas Fundamentais",
+        "start": 0.0,
+        "end": 21.629478458049885,
+        "chapter": null
+      },
+      {
+        "title": "Escolher período e jornadas",
+        "start": 21.629478458049885,
+        "end": 42.99768707482993,
+        "chapter": null
+      },
+      {
+        "title": "Preencher Mina e Planta",
+        "start": 42.99768707482993,
+        "end": 67.14068027210884,
+        "chapter": null
+      },
+      {
+        "title": "Escolher o processo",
+        "start": 67.14068027210884,
+        "end": 91.11537414965986,
+        "chapter": null
+      },
+      {
+        "title": "Configurar caminhões e tempos",
+        "start": 91.11537414965986,
+        "end": 116.57614512471655,
+        "chapter": null
+      },
+      {
+        "title": "Catálogo e perdas detalhadas",
+        "start": 116.57614512471655,
+        "end": 142.81478458049887,
+        "chapter": null
+      },
+      {
+        "title": "Ajustar dias e conferir salvamento",
+        "start": 142.81478458049887,
+        "end": 169.5701133786848,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "02",
+    "title": "Dimensionamento de Frota",
+    "file": "02-tutorial.mp4",
+    "duration": 118.398820861678,
+    "chapters": [
+      {
+        "title": "Abrir e conferir a frota",
+        "start": 0.0,
+        "end": 23.04004535147392
+      },
+      {
+        "title": "Editar uma frente ou rota",
+        "start": 23.04004535147392,
+        "end": 45.499591836734695
+      },
+      {
+        "title": "Usar parâmetros próprios e ativar rota",
+        "start": 45.499591836734695,
+        "end": 70.51333333333334
+      },
+      {
+        "title": "Conferir os fluxos cadastrados",
+        "start": 70.51333333333334,
+        "end": 93.92489795918367
+      },
+      {
+        "title": "Alocar caminhões por horas",
+        "start": 93.92489795918367,
+        "end": 118.398820861678
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Abrir e conferir a frota",
+        "start": 0.0,
+        "end": 23.04004535147392,
+        "chapter": null
+      },
+      {
+        "title": "Editar uma frente ou rota",
+        "start": 23.04004535147392,
+        "end": 45.499591836734695,
+        "chapter": null
+      },
+      {
+        "title": "Usar parâmetros próprios e ativar rota",
+        "start": 45.499591836734695,
+        "end": 70.51333333333334,
+        "chapter": null
+      },
+      {
+        "title": "Conferir os fluxos cadastrados",
+        "start": 70.51333333333334,
+        "end": 93.92489795918367,
+        "chapter": null
+      },
+      {
+        "title": "Alocar caminhões por horas",
+        "start": 93.92489795918367,
+        "end": 118.398820861678,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "03",
+    "title": "Resultado",
+    "file": "03-tutorial.mp4",
+    "duration": 67.35541950113378,
+    "chapters": [
+      {
+        "title": "Consultar o resultado do plano",
+        "start": 0.0,
+        "end": 22.68013605442177
+      },
+      {
+        "title": "Abrir o detalhe de uma rota",
+        "start": 22.68013605442177,
+        "end": 41.81922902494331
+      },
+      {
+        "title": "Ajustar e comparar na própria tela",
+        "start": 41.81922902494331,
+        "end": 67.35541950113378
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Consultar o resultado do plano",
+        "start": 0.0,
+        "end": 22.68013605442177,
+        "chapter": null
+      },
+      {
+        "title": "Abrir o detalhe de uma rota",
+        "start": 22.68013605442177,
+        "end": 41.81922902494331,
+        "chapter": null
+      },
+      {
+        "title": "Ajustar e comparar na própria tela",
+        "start": 41.81922902494331,
+        "end": 67.35541950113378,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "04",
+    "title": "Lançamento de Produção",
+    "file": "04-tutorial.mp4",
+    "duration": 93.8146485260771,
+    "chapters": [
+      {
+        "title": "Escolher lançamento manual",
+        "start": 0.0,
+        "end": 22.465396825396827
+      },
+      {
+        "title": "Preencher e salvar o dia",
+        "start": 22.465396825396827,
+        "end": 47.03795918367347
+      },
+      {
+        "title": "Informar produção acumulada",
+        "start": 47.03795918367347,
+        "end": 71.43637188208616
+      },
+      {
+        "title": "Consultar, exportar e acompanhar",
+        "start": 71.43637188208616,
+        "end": 93.8146485260771
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Escolher lançamento manual",
+        "start": 0.0,
+        "end": 22.465396825396827,
+        "chapter": null
+      },
+      {
+        "title": "Preencher e salvar o dia",
+        "start": 22.465396825396827,
+        "end": 47.03795918367347,
+        "chapter": null
+      },
+      {
+        "title": "Informar produção acumulada",
+        "start": 47.03795918367347,
+        "end": 71.43637188208616,
+        "chapter": null
+      },
+      {
+        "title": "Consultar, exportar e acompanhar",
+        "start": 71.43637188208616,
+        "end": 93.8146485260771,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "05",
+    "title": "Replanejamento",
+    "file": "05-tutorial.mp4",
+    "duration": 66.90263038548753,
+    "chapters": [
+      {
+        "title": "Abrir o acompanhamento do saldo",
+        "start": 0.0,
+        "end": 21.681678004535147
+      },
+      {
+        "title": "Consultar gráfico e resumo",
+        "start": 21.681678004535147,
+        "end": 43.50267573696145
+      },
+      {
+        "title": "Expandir diagnóstico e exportar",
+        "start": 43.50267573696145,
+        "end": 66.90263038548753
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Abrir o acompanhamento do saldo",
+        "start": 0.0,
+        "end": 21.681678004535147,
+        "chapter": null
+      },
+      {
+        "title": "Consultar gráfico e resumo",
+        "start": 21.681678004535147,
+        "end": 43.50267573696145,
+        "chapter": null
+      },
+      {
+        "title": "Expandir diagnóstico e exportar",
+        "start": 43.50267573696145,
+        "end": 66.90263038548753,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "06",
+    "title": "Calendário",
+    "file": "06-tutorial.mp4",
+    "duration": 68.36548752834467,
+    "chapters": [
+      {
+        "title": "Consultar o calendário mensal",
+        "start": 0.0,
+        "end": 20.834149659863947
+      },
+      {
+        "title": "Alternar para tabela diária",
+        "start": 20.834149659863947,
+        "end": 44.199274376417236
+      },
+      {
+        "title": "Onde editar horas e paradas",
+        "start": 44.199274376417236,
+        "end": 68.36548752834467
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Consultar o calendário mensal",
+        "start": 0.0,
+        "end": 20.834149659863947,
+        "chapter": null
+      },
+      {
+        "title": "Alternar para tabela diária",
+        "start": 20.834149659863947,
+        "end": 44.199274376417236,
+        "chapter": null
+      },
+      {
+        "title": "Onde editar horas e paradas",
+        "start": 44.199274376417236,
+        "end": 68.36548752834467,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "07",
+    "title": "Cenários",
+    "file": "07-tutorial.mp4",
+    "duration": 67.581768707483,
+    "chapters": [
+      {
+        "title": "Abrir a área de cenários",
+        "start": 0.0,
+        "end": 18.634013605442178
+      },
+      {
+        "title": "Nomear e salvar uma configuração",
+        "start": 18.634013605442178,
+        "end": 42.080408163265304
+      },
+      {
+        "title": "Exportar e importar cenários",
+        "start": 42.080408163265304,
+        "end": 67.581768707483
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Abrir a área de cenários",
+        "start": 0.0,
+        "end": 18.634013605442178,
+        "chapter": null
+      },
+      {
+        "title": "Nomear e salvar uma configuração",
+        "start": 18.634013605442178,
+        "end": 42.080408163265304,
+        "chapter": null
+      },
+      {
+        "title": "Exportar e importar cenários",
+        "start": 42.080408163265304,
+        "end": 67.581768707483,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "08",
+    "title": "Detalhes de cálculo",
+    "file": "08-tutorial.mp4",
+    "duration": 64.76054421768707,
+    "chapters": [
+      {
+        "title": "Abrir e exportar os detalhes",
+        "start": 0.0,
+        "end": 20.64253968253968
+      },
+      {
+        "title": "Encontrar os dados de uma rota",
+        "start": 20.64253968253968,
+        "end": 42.254557823129254
+      },
+      {
+        "title": "Experimentar sem alterar o plano",
+        "start": 42.254557823129254,
+        "end": 64.76054421768707
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Abrir e exportar os detalhes",
+        "start": 0.0,
+        "end": 20.64253968253968,
+        "chapter": null
+      },
+      {
+        "title": "Encontrar os dados de uma rota",
+        "start": 20.64253968253968,
+        "end": 42.254557823129254,
+        "chapter": null
+      },
+      {
+        "title": "Experimentar sem alterar o plano",
+        "start": 42.254557823129254,
+        "end": 64.76054421768707,
+        "chapter": null
+      }
+    ]
+  },
+  {
+    "id": "09",
+    "title": "Simulação",
+    "file": "09-tutorial.mp4",
+    "duration": 702.4166893424036,
+    "chapters": [
+      {
+        "title": "1. Circuito",
+        "start": 0.0,
+        "end": 140.26634920634922
+      },
+      {
+        "title": "2. Plano de lavra",
+        "start": 140.26634920634922,
+        "end": 277.7578231292517
+      },
+      {
+        "title": "3. Configurações e cenários",
+        "start": 277.7578231292517,
+        "end": 348.10861678004534
+      },
+      {
+        "title": "4. Financeiro",
+        "start": 348.10861678004534,
+        "end": 415.6380952380952
+      },
+      {
+        "title": "5. Resultados do circuito",
+        "start": 415.6380952380952,
+        "end": 507.2352380952381
+      },
+      {
+        "title": "6. Resultados e decisão",
+        "start": 507.2352380952381,
+        "end": 617.5359637188209
+      },
+      {
+        "title": "7. Animação",
+        "start": 617.5359637188209,
+        "end": 702.4166893424036
+      }
+    ],
+    "scenes": [
+      {
+        "title": "Importar e conferir as rotas",
+        "start": 0.0,
+        "end": 25.10671201814059,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Definir período e vínculo com as premissas",
+        "start": 25.10671201814059,
+        "end": 50.01020408163265,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Configurar cada circuito",
+        "start": 50.01020408163265,
+        "end": 71.95891156462585,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Associar o veículo ao trajeto",
+        "start": 71.95891156462585,
+        "end": 95.54462585034014,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Configurar o recebimento",
+        "start": 95.54462585034014,
+        "end": 117.93451247165532,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Revisar parâmetros gerais",
+        "start": 117.93451247165532,
+        "end": 140.26634920634922,
+        "chapter": "1. Circuito"
+      },
+      {
+        "title": "Escolher período e vista do plano",
+        "start": 140.26634920634922,
+        "end": 161.4894784580499,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Cadastrar lugares de carga e descarga",
+        "start": 161.4894784580499,
+        "end": 184.45401360544219,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Importar frentes e sólidos por período",
+        "start": 184.45401360544219,
+        "end": 207.20380952380953,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Configurar calendário e períodos",
+        "start": 207.20380952380953,
+        "end": 228.72294784580498,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Preencher as movimentações",
+        "start": 228.72294784580498,
+        "end": 253.66702947845806,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Executar e consultar a frota por período",
+        "start": 253.66702947845806,
+        "end": 277.7578231292517,
+        "chapter": "2. Plano de lavra"
+      },
+      {
+        "title": "Adicionar uma configuração de transporte",
+        "start": 277.7578231292517,
+        "end": 301.9704761904762,
+        "chapter": "3. Configurações e cenários"
+      },
+      {
+        "title": "Consultar velocidades e tempos por rota",
+        "start": 301.9704761904762,
+        "end": 325.47492063492064,
+        "chapter": "3. Configurações e cenários"
+      },
+      {
+        "title": "Organizar os cenários operacionais",
+        "start": 325.47492063492064,
+        "end": 348.10861678004534,
+        "chapter": "3. Configurações e cenários"
+      },
+      {
+        "title": "Preencher os custos gerais",
+        "start": 348.10861678004534,
+        "end": 370.9280725623583,
+        "chapter": "4. Financeiro"
+      },
+      {
+        "title": "Configurar valores por equipamento",
+        "start": 370.9280725623583,
+        "end": 393.52108843537417,
+        "chapter": "4. Financeiro"
+      },
+      {
+        "title": "Conferir consumos e manutenção",
+        "start": 393.52108843537417,
+        "end": 415.6380952380952,
+        "chapter": "4. Financeiro"
+      },
+      {
+        "title": "Executar a matriz",
+        "start": 415.6380952380952,
+        "end": 438.06866213151926,
+        "chapter": "5. Resultados do circuito"
+      },
+      {
+        "title": "Selecionar uma célula de resultado",
+        "start": 438.06866213151926,
+        "end": 460.65015873015875,
+        "chapter": "5. Resultados do circuito"
+      },
+      {
+        "title": "Consultar o detalhe escolhido",
+        "start": 460.65015873015875,
+        "end": 483.87596371882086,
+        "chapter": "5. Resultados do circuito"
+      },
+      {
+        "title": "Buscar frota e comparar com o dimensionamento",
+        "start": 483.87596371882086,
+        "end": 507.2352380952381,
+        "chapter": "5. Resultados do circuito"
+      },
+      {
+        "title": "Escolher a base e o critério",
+        "start": 507.2352380952381,
+        "end": 531.3492517006803,
+        "chapter": "6. Resultados e decisão"
+      },
+      {
+        "title": "Selecionar uma opção na tabela",
+        "start": 531.3492517006803,
+        "end": 552.7812698412698,
+        "chapter": "6. Resultados e decisão"
+      },
+      {
+        "title": "Consultar equipamentos e custos por período",
+        "start": 552.7812698412698,
+        "end": 573.3193197278912,
+        "chapter": "6. Resultados e decisão"
+      },
+      {
+        "title": "Abrir a sensibilidade e os custos",
+        "start": 573.3193197278912,
+        "end": 593.6251700680272,
+        "chapter": "6. Resultados e decisão"
+      },
+      {
+        "title": "Consultar fluxo de caixa e baixar memorial",
+        "start": 593.6251700680272,
+        "end": 617.5359637188209,
+        "chapter": "6. Resultados e decisão"
+      },
+      {
+        "title": "Selecionar e gerar a animação",
+        "start": 617.5359637188209,
+        "end": 635.9552380952381,
+        "chapter": "7. Animação"
+      },
+      {
+        "title": "Reproduzir, pausar e navegar no tempo",
+        "start": 635.9552380952381,
+        "end": 656.4178684807256,
+        "chapter": "7. Animação"
+      },
+      {
+        "title": "Consultar as tabelas da animação",
+        "start": 656.4178684807256,
+        "end": 677.6931972789116,
+        "chapter": "7. Animação"
+      },
+      {
+        "title": "Alternar vistas e encerrar a consulta",
+        "start": 677.6931972789116,
+        "end": 702.4166893424036,
+        "chapter": "7. Animação"
+      }
+    ]
+  }
+]
