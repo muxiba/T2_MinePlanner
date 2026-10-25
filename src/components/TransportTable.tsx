@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import StopsEditor from './StopsEditor';
+import GeoImport from './GeoImport';
 import { Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, Route } from '@/types';
 import { analyzeFleet, routeTargets } from '@/engine/fleet';
@@ -25,6 +26,7 @@ interface Props {
 const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRoutes }) => {
   const nodes = premises.nodes ?? [];
   const [open, setOpen] = useState<string | null>(null);
+  const periods = (premises.simulation?.plan?.periods ?? []).map((p) => p.label);
   const fa = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
   const masses = useMemo(() => routeTargets(routes, premises), [routes, premises]);
   const nameOf = (id?: string) => nodes.find((n) => n.id === id)?.name ?? '';
@@ -98,7 +100,7 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
               <th className="px-1 py-1 font-medium">Via</th>
               <th className="px-1 py-1 text-right font-medium">Carga (min)</th>
               <th className="px-1 py-1 text-right font-medium">Descarga (min)</th>
-              <th className="px-1 py-1 font-medium">Paradas</th>
+              <th className="px-1 py-1 font-medium">Paradas / mapa</th>
               <th className="px-1 py-1 text-right font-medium">Ciclo (min)</th>
               <th className="px-1 py-1 text-right font-medium">Caminhões</th>
               <th className="px-1 py-1 font-medium">Ativa</th>
@@ -127,7 +129,7 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   <td className="px-1 py-1 text-right"><input type="number" step={0.1} min={0} className={`${num} w-20`} value={r.dumpMin ?? ''} placeholder={String(premises.dumpingTime)} title="Vazio = o tempo de basculamento das premissas" aria-label="Tempo de descarga" onChange={(e) => setRoute(r.id, { dumpMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
                   <td className="px-1 py-1">
                     <button type="button" onClick={() => setOpen(open === r.id ? null : r.id)} className="whitespace-nowrap rounded-lg border border-black/10 px-2 py-1 text-xs hover:bg-black/5">
-                      {r.stops?.length ? `${r.stops.length} · ${n1(r.stops.reduce((s2, x) => s2 + x.stopMin * (x.dir === 'ambos' ? 2 : 1), 0))} min` : '+ parada'}
+                      {r.stops?.length ? `${r.stops.length} parada(s) · ${n1(r.stops.reduce((s2, x) => s2 + x.stopMin * (x.dir === 'ambos' ? 2 : 1), 0))} min` : '+ parada'}{r.geo?.length ? ' · DXF' : ' · + DXF'}
                     </button>
                   </td>
                   <td className="px-1 py-1 text-right font-mono tabular-nums">{a ? n1(a.cycle.totalMin) : '—'}</td>
@@ -140,6 +142,8 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
                     <td colSpan={14} className="px-2 py-2">
                       <p className="mb-1 text-xs text-black/55">Paradas no trajeto de <b>{r.name}</b> (DMT {t0(r.distance)} m):</p>
                       <StopsEditor route={r} onChange={(stops) => setRoute(r.id, { stops })} />
+                      <p className="mb-1 mt-3 text-xs text-black/55">Mapa (DXF) de origem, destino e trajeto:</p>
+                      <GeoImport route={r} periods={periods} onChange={(nr) => setRoutes((rs) => rs.map((x) => (x.id === r.id ? nr : x)))} />
                     </td>
                   </tr>
                 )}

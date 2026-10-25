@@ -5,6 +5,7 @@ import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportM
 import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
 import TransportTable from './TransportTable';
 import StopsEditor from './StopsEditor';
+import GeoImport from './GeoImport';
 import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
 import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
@@ -678,6 +679,10 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                   <p className="mb-1 text-xs text-black/55">Paradas no trajeto</p>
                   <StopsEditor route={selRoute} compact onChange={(stops) => setRoute(selRoute.id, { stops })} />
                 </div>
+                <details>
+                  <summary className="cursor-pointer text-xs text-black/55">Mapa (DXF) de origem, destino e trajeto{selRoute.geo?.length ? ' · importado' : ''}</summary>
+                  <div className="mt-2"><GeoImport route={selRoute} periods={(premises.simulation?.plan?.periods ?? []).map((p) => p.label)} onChange={(nr) => setRoutes((rs) => rs.map((x) => (x.id === nr.id ? nr : x)))} /></div>
+                </details>
                 <label className="flex items-center gap-2 text-xs text-black/60"><input type="checkbox" checked={selRoute.active} onChange={(e) => setRoute(selRoute.id, { active: e.target.checked })} /> Ativa (consome frota)</label>
                 <button type="button" onClick={() => removeRoute(selRoute)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> Apagar movimentação</button>
               </div>

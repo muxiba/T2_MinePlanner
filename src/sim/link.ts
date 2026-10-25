@@ -8,6 +8,7 @@
  */
 import type { DetailedPremises, Route } from '@/types';
 import { fleetTypesOf, mixedOn } from '@/engine/mix';
+import { geoFor } from '@/engine/geo';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { interferenceMin, lossesOf } from '@/engine/losses';
 import { processPct } from '@/engine/process';
@@ -343,7 +344,19 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
     const tph = receivingLoaderTph(premises, r.loaderId, density);
     return tph ? { ...r, stackerTph: tph, stackerDf: premises.dfPlanta || r.stackerDf } : r;
   });
-  let out: SimModel = { ...base, circuits, receiving };
+  // trajeto do DXF da movimentação ligada (período escolhido): vira a rota do circuito, com rampas
+  const gp = model.geoPeriod ?? 1;
+  const geoRoutes: SimModel['routes'] = [];
+  const circuitsGeo = circuits.map((c) => {
+    const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
+    const path = r ? geoFor(r, gp).path : undefined;
+    if (!r || !path || path.length < 2) return c;
+    const id = `geo-${r.id}`;
+    if (!geoRoutes.some((x) => x.id === id)) geoRoutes.push({ id, name: r.name, points: path });
+    return { ...c, routeId: id };
+  });
+  const simRoutes = geoRoutes.length ? [...model.routes.filter((x) => !geoRoutes.some((g) => g.id === x.id)), ...geoRoutes] : model.routes;
+  let out: SimModel = { ...base, routes: simRoutes, circuits: circuitsGeo, receiving };
   // trucks automáticos e meta do período (aba Circuito)
   const calc = circuitTargets(out, premises, edges);
   out = {

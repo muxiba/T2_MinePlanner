@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ArrowLeftRight, Download, FileText, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
 import type { DetailedPremises, Route } from '@/types';
+import { geoFor } from '@/engine/geo';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { CONFIG_PRESETS, HIGHWAY_SPEED, ROAD_TRUCK_SPEED, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
@@ -83,6 +84,25 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
     return m;
   }, [stored, premises, edges, routes]);
   const setModel = (m: SimModel) => setPremises({ ...premises, simulation: m });
+  // áreas de origem e destino (DXF das movimentações) no mapa, no período escolhido
+  const geoOverlays: MapOverlays | undefined = useMemo(() => {
+    const polys: NonNullable<MapOverlays['polygons']> = [];
+    const seen = new Set<string>();
+    for (const r of routes ?? []) {
+      if (!r.active) continue;
+      const g = geoFor(r, stored.geoPeriod ?? 1);
+      const nodes = premises.nodes ?? [];
+      const add = (ring: [number, number][] | undefined, id: string | undefined, fill: string, stroke: string) => {
+        if (!ring || ring.length < 3 || seen.has(`${id}-${fill}`)) return;
+        seen.add(`${id}-${fill}`);
+        polys.push({ ring, fill, stroke, label: nodes.find((n) => n.id === id)?.name });
+      };
+      add(g.origin, r.fromId, 'rgba(24,95,165,0.14)', '#185FA5');
+      add(g.dest, r.toId, 'rgba(59,109,17,0.14)', '#3B6D11');
+    }
+    return polys.length ? { polygons: polys } : undefined;
+  }, [routes, premises.nodes, stored.geoPeriod]);
+  const geoPeriods = Math.max(1, ...(routes ?? []).flatMap((r) => (r.geo ?? []).map((g) => g.period)));
   const linked = linkOn(model);
   const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
   const lockIf = (on: boolean) => (linked && on ? LOCK : undefined);
@@ -176,7 +196,8 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
     const kindMap = { rom: 'rom', product: 'produto', tailings: 'rejeito', waste: 'esteril' } as const;
     for (const r of list) {
       const len = Math.max(50, r.distance || 0);
-      const route: SimRoute = { id: `r${Date.now().toString(36)}${simRoutes.length}`, name: r.name, points: [{ x: 0, y: simRoutes.length * 60, z: 0 }, { x: len, y: simRoutes.length * 60, z: 0 }] };
+      const gpath = geoFor(r, model.geoPeriod ?? 1).path;
+      const route: SimRoute = { id: `r${Date.now().toString(36)}${simRoutes.length}`, name: r.name, points: gpath && gpath.length > 1 ? gpath : [{ x: 0, y: simRoutes.length * 60, z: 0 }, { x: len, y: simRoutes.length * 60, z: 0 }] };
       simRoutes.push(route);
       const destination = nodes.find((n) => n.id === r.toId)?.name ?? r.name.split('→').pop()?.trim() ?? `Destino ${circuits.length + 1}`;
       circuits.push({ ...defaultCircuit(route, circuits.length), destination, edgeId: r.id, flow: kindMap[routeKind(r)] });
@@ -459,7 +480,16 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       {/* ============================== CIRCUITO ============================== */}
       {tab === 'modelo' && (
         <fieldset disabled={!canEdit} className="min-w-0 space-y-6">
-          <MapCanvas terrain={terrain} contours={contours} routes={model.routes} />
+          <MapCanvas terrain={terrain} contours={contours} routes={model.routes} overlays={geoOverlays} />
+          {geoPeriods > 1 && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-black/65">
+              Mapa e trajetos do período
+              <select className="rounded-lg border border-black/10 bg-white px-2 py-1 text-sm" value={model.geoPeriod ?? 1} aria-label="Período da geometria" onChange={(e) => setModel({ ...model, geoPeriod: Number(e.target.value) })}>
+                {Array.from({ length: geoPeriods }, (_, i) => i + 1).map((p) => <option key={p} value={p}>{model.plan?.periods?.[p - 1]?.label ?? `Período ${p}`}</option>)}
+              </select>
+              <span className="text-xs text-black/45">os DXF de cada movimentação (Premissas → tabela de transporte ou desenho)</span>
+            </label>
+          )}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <Card title="Rotas" description="Polilinhas 3D do eixo das vias (DXF). Cada rota vira um circuito de transporte.">
@@ -1503,7 +1533,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
               <View3D
                 dem={animDem}
                 routes={(animRoutes ?? model.routes).map((r) => ({ points: r.points }))}
-                overlays={animOverlays}
+                overlays={mergeOverlays(animOverlays, geoOverlays)}
                 dots={frame?.dots}
                 loaders={frame?.loaders}
                 height={560}
@@ -1513,7 +1543,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
               terrain={terrain}
               contours={contours}
               routes={animRoutes ?? model.routes}
-              overlays={animOverlays}
+              overlays={mergeOverlays(animOverlays, geoOverlays)}
               dots={frame?.dots}
               loaders={frame?.loaders}
               queues={frame?.queues}
@@ -1584,3 +1614,9 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
 };
 
 export default SimulationView;
+
+function mergeOverlays(a?: MapOverlays, b?: MapOverlays): MapOverlays | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return { polygons: [...(b.polygons ?? []), ...(a.polygons ?? [])], paths: [...(a.paths ?? []), ...(b.paths ?? [])] };
+}

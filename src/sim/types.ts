@@ -144,6 +144,8 @@ export interface Scenario {
 export interface SimModel {
   /** frota mista: composição fixa (proporções) ou sorteio do tipo de cada caminhão a cada réplica */
   mixDraw?: 'fixo' | 'sorteio';
+  /** período cuja geometria (DXF das movimentações) é usada na simulação e no mapa; padrão 1 */
+  geoPeriod?: number;
   /** despacho: cada caminhão fica no seu circuito ('fixo') ou, a cada viagem, vai para o circuito mais atrasado na meta ('dinamico') */
   dispatch?: 'fixo' | 'dinamico';
   routes: SimRoute[];
