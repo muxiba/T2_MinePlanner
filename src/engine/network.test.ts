@@ -71,3 +71,51 @@ describe('rede de fluxos', () => {
     expect(need.needed).toBe(Math.ceil(need.busyH / need.effHPerUnit - 1e-6));
   });
 });
+
+describe('só transporte, equipamentos por local e estéril', () => {
+  it('modo só transporte: massas informadas, aviso em passagem desbalanceada, rede do processo guardada', async () => {
+    const { switchFlowMode } = await import('./flowMode');
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const p0 = { ...P, nodes: net.nodes };
+    const sw = switchFlowMode(p0, net.routes, 'transporte')!;
+    expect(sw.routes.length).toBe(0);
+    const nodes: FlowNode[] = [
+      { id: 'o', name: 'Cava', type: 'frente', group: 'origem' },
+      { id: 'pt', name: 'Pátio', type: 'estoque', group: 'passagem' },
+      { id: 'd', name: 'Porto', type: 'expedicao', group: 'destino' },
+    ];
+    const pt = { ...sw.premises, nodes };
+    const routes = [R('a', 'Cava → Pátio', 'rom', 'o', 'pt', { targetMass: 50000 }), R('b', 'Pátio → Porto', 'rom', 'pt', 'd', { targetMass: 45000 })];
+    const t = routeTargets(routes, pt);
+    expect(t.get('a')).toBe(50000);
+    const res = networkBalance(routes, pt, routeKind);
+    expect(res.issues.some((x) => x.nodeId === 'pt')).toBe(true);
+    expect(networkBalance(routes, { ...pt, nodes: nodes.map((n) => (n.id === 'pt' ? { ...n, stockChangeT: 5000 } : n)) }, routeKind).issues.length).toBe(0);
+    expect(ensureNetwork(routes, pt, routeKind)).toBe(null);
+    const back = switchFlowMode(pt, routes, 'processo')!;
+    expect(back.routes.length).toBe(net.routes.length);
+    expect(back.premises.savedNets?.transporte?.routes.length).toBe(2);
+  });
+
+  it('dois equipamentos na planta: um para o produto, outro para o rejeito, e a pá da alimentação', () => {
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const planta = net.nodes.find((n) => n.type === 'planta')!;
+    const prod = net.routes.find((r) => routeKind(r) === 'product')!;
+    const nodes = net.nodes.map((n) => (n.id === planta.id ? { ...n, loaders: [{ id: 'a', classId: 'pa-35', routeIds: [prod.id] }, { id: 'b', classId: 'esc-35' }, { id: 'c', classId: 'pa-55', role: 'alimentacao' as const }] } : n));
+    const fa = analyzeFleet(net.routes, { ...P, nodes });
+    const needs = fa.loaderNeeds.filter((l) => l.nodeId === planta.id);
+    expect(needs.map((l) => l.entryId).sort()).toEqual(['a', 'b', 'c']);
+    expect(needs.find((l) => l.entryId === 'a')!.routeIds).toEqual([prod.id]);
+    expect(needs.find((l) => l.entryId === 'c')!.feedWetT!).toBeGreaterThan(0);
+  });
+
+  it('desmarcar estéril desativa as movimentações de estéril e marcar traz de volta', async () => {
+    const { setWasteOn } = await import('./flowMode');
+    const routes = [R('w', 'Mina → PDE', 'waste', 'f', 'pde'), R('r', 'Mina → Planta', 'rom', 'f', 'p')];
+    const off = setWasteOn({ ...P, hasWasteRock: true }, routes, false);
+    expect(off.routes.find((r) => r.id === 'w')!.active).toBe(false);
+    expect(off.routes.find((r) => r.id === 'r')!.active).toBe(true);
+    const on = setWasteOn(off.premises, off.routes, true);
+    expect(on.routes.find((r) => r.id === 'w')!.active).toBe(true);
+  });
+});

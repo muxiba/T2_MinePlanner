@@ -457,7 +457,9 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises, edge
     const flow = flowOf(c);
     const sharePct = flow === 'outro' ? 1 : (c.share ?? 1) / (shareSum[flow] || 1);
     // movimentação da rede ligada ao circuito: massa da movimentação no mês × (ROM do período ÷ ROM do mês)
-    const edgeT = c.edgeId && edges?.has(c.edgeId) ? (edges.get(c.edgeId)! * per.romT) / Math.max(1, premises.targetMonthlyROM || per.romT) : undefined;
+    // meses do período: ROM do período ÷ ROM do mês (no modo só transporte, pela duração do período)
+    const months = premises.flowMode === 'transporte' || !premises.targetMonthlyROM ? periodMonths(per.kind, per.kind === 'dias' ? per.days ?? per.qty : undefined, per.qty) : per.romT / premises.targetMonthlyROM;
+    const edgeT = c.edgeId && edges?.has(c.edgeId) ? edges.get(c.edgeId)! * months : undefined;
     const fromFlow = edgeT !== undefined ? edgeT : flow === 'outro' ? c.tonnesManual ?? 0 : (flow === 'rom' ? flows.rom : derived[flow]) * sharePct;
     const overridden = c.tonnesDryOverride !== undefined && flow !== 'outro';
     const tonnesDry = overridden ? c.tonnesDryOverride! : fromFlow;

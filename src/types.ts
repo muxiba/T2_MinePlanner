@@ -42,6 +42,10 @@ export interface Route {
   /** rede de fluxos: local de origem e de destino (FlowNode.id) */
   fromId?: string;
   toId?: string;
+  /** modo só transporte: nome livre do material (minério, estéril, areia...) */
+  materialName?: string;
+  /** desativada porque “possui estéril” foi desmarcado (volta ao marcar de novo) */
+  wasteOff?: boolean;
   /** via: interna (mina/planta) ou estrada pública (só caminhões rodoviários) */
   roadType?: 'interna' | 'estrada';
   /** frota mista: caminhões de cada tipo (id do catálogo) nesta rota */
@@ -77,8 +81,23 @@ export interface FlowNode {
   loaderCount?: number;
   /** disponibilidade física do equipamento de carga (%) */
   loaderDf?: number;
-  /** estoque: bloco do desenho em que fica (mina = pilha de ROM, produto, rejeito ou estéril) */
-  group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril';
+  /** bloco do desenho em que fica: no processo (mina = pilha de ROM, produto, rejeito ou estéril); no modo só transporte (origem, passagem, destino) */
+  group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
+  /** equipamentos de carga do local (vazio = um equipamento: o escolhido em loaderClassId ou o padrão) */
+  loaders?: NodeLoader[];
+}
+
+/** Equipamento de carga de um local: carrega os caminhões de algumas (ou todas as) saídas, ou alimenta a planta. */
+export interface NodeLoader {
+  id: string;
+  /** id do catálogo, 'silo', 'tempo' (tempo de carga das premissas) ou vazio (o equipamento padrão de Transporte / Frota) */
+  classId?: string;
+  /** quantidade disponível (vazio = o sistema calcula o necessário) */
+  count?: number;
+  /** carregar caminhões (padrão) ou alimentar a planta (sem caminhão, pela taxa de alimentação) */
+  role?: 'caminhoes' | 'alimentacao';
+  /** movimentações atendidas (vazio = todas as saídas que nenhum outro equipamento do local atende) */
+  routeIds?: string[];
 }
 
 export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';
@@ -221,6 +240,10 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** rede: processo (mina → planta → produto/rejeito) ou só transporte (origem → destino, massas informadas) */
+  flowMode?: 'processo' | 'transporte';
+  /** rede guardada de cada modo, para voltar a ela ao trocar de modo */
+  savedNets?: Partial<Record<'processo' | 'transporte', { nodes: FlowNode[]; routes: Route[] }>>;
   /** equipamento de carga padrão (catálogo ou 'silo') para todos os locais que não escolheram o seu */
   defaultLoaderClassId?: string;
   /** frota por tipo de caminhão (frota mista); vazio = um tipo só (classe e número de caminhões das premissas) */

@@ -20,8 +20,8 @@
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
 import { processPct } from './process';
-import { networkBalance, networkOn } from './network';
-import type { DetailedPremises, EquipmentCatalog, FlowNode, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import { networkBalance, networkOn, transportBalance, transportMode } from './network';
+import type { DetailedPremises, EquipmentCatalog, FlowNode, NodeLoader, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
 import { mixedOn, syncMix } from './mix';
 
@@ -84,12 +84,37 @@ export function effectiveLoaderId(n: Pick<FlowNode, 'loaderClassId'>, premises: 
   return n.loaderClassId || premises.defaultLoaderClassId || null;
 }
 
+/** Equipamentos de carga do local (planos antigos: um, o escolhido em loaderClassId ou o padrão). */
+export function nodeLoaderEntries(n: FlowNode): NodeLoader[] {
+  return n.loaders ?? [{ id: `${n.id}-l1`, classId: n.loaderClassId, count: n.loaderCount, role: 'caminhoes' }];
+}
+
+/** Altera o primeiro equipamento do local (telas que mostram um só: desenho e tabela da rede). */
+export function withFirstEntry(n: FlowNode, patch: Partial<NodeLoader>): FlowNode {
+  const list = nodeLoaderEntries(n);
+  const first = list[0] ?? { id: `${n.id}-l1`, role: 'caminhoes' as const };
+  return { ...n, loaders: [{ ...first, ...patch }, ...list.slice(1)], loaderClassId: undefined, loaderCount: undefined };
+}
+
+/** Modelo do equipamento: 'tempo' e o padrão vazio = tempo de carga das premissas (null). */
+export function entryClassId(e: NodeLoader, premises: Pick<DetailedPremises, 'defaultLoaderClassId'>): string | null {
+  if (e.classId === 'tempo') return null;
+  return e.classId || premises.defaultLoaderClassId || null;
+}
+
+/** Equipamento do local que carrega os caminhões desta movimentação: o que a lista nominalmente; senão o geral do local. */
+export function entryForRoute(n: FlowNode, routeId: string): NodeLoader | null {
+  const list = nodeLoaderEntries(n).filter((e) => (e.role ?? 'caminhoes') === 'caminhoes');
+  return list.find((e) => e.routeIds?.includes(routeId)) ?? list.find((e) => !e.routeIds?.length) ?? null;
+}
+
 export function nodeLoaderOf(route: Route, premises: DetailedPremises): LoaderSetup | null {
   const n = premises.nodes?.find((x) => x.id === route.fromId);
-  const id = n ? effectiveLoaderId(n, premises) : null;
-  if (!n || !id || id === 'silo') return null;
+  const e = n ? entryForRoute(n, route.id) : null;
+  const id = e ? entryClassId(e, premises) : null;
+  if (!n || !e || !id || id === 'silo') return null;
   const l = catalogOf(premises).loaders.find((x) => x.id === id);
-  return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: n.loaderCount ?? 1, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85, spotMin: l.spotMin } : null;
+  return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: e.count ?? 1, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85, spotMin: l.spotMin } : null;
 }
 
 /** Equipamento de carga de uma rota a partir de um modelo do catálogo. */
@@ -335,6 +360,7 @@ export function newFlowRoute(kind: RouteKind, premises: DetailedPremises): Route
  * Fluxos cuja rota o usuário apagou ficam de fora. Retorna null se nada mudou.
  */
 export function ensureFlowRoutes(routes: Route[], premises: DetailedPremises): Route[] | null {
+  if (transportMode(premises)) return null;
   const dismissed = new Set(premises.dismissedFlows ?? []);
   const missing = requiredFlows(premises).filter((k) => !dismissed.has(k) && !routes.some((r) => routeKind(r) === k));
   if (!missing.length) return null;
@@ -488,6 +514,7 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
 
 /** Distribui a meta mensal (seca) entre as rotas de cada tipo, respeitando massas fixadas nas rotas. */
 export function routeTargets(routes: Route[], premises: DetailedPremises): Map<string, number> {
+  if (transportMode(premises)) return transportBalance(routes, premises).edges;
   // rede de fluxos (locais e movimentações): balanço de massa por local
   if (networkOn(premises) && routes.some((r) => r.fromId)) return networkBalance(routes, premises, routeKind).edges;
   const { rm, rej } = processPct(premises);
@@ -780,6 +807,12 @@ export interface LoaderNeed {
   source: 'local' | 'rota';
   nodeId?: string;
   routeIds: string[];
+  /** equipamento da lista do local e a função dele */
+  entryId?: string;
+  role?: 'caminhoes' | 'alimentacao';
+  /** alimentação da planta: produção do equipamento (t/h) e massa que ele retoma no mês (t úmida) */
+  feedTph?: number;
+  feedWetT?: number;
   /** parte de cada movimentação que sai do local */
   perRoute?: { routeId: string; name: string; trucksLoaded: number; busyH: number; neededExact: number }[];
   loaderName: string;
@@ -810,11 +843,31 @@ export function loaderSizing(routes: Route[], premises: DetailedPremises, analys
   const active = routes.filter((r) => r.active && byId.has(r.id));
   const areaOf = (k: RouteKind) => (k === 'product' || k === 'tailings' ? 'planta' : 'mina');
   const uf = (area: 'mina' | 'planta') => (area === 'mina' ? premises.ufMina : premises.ufPlanta) || 100;
-  for (const n of premises.nodes ?? []) {
-    const lid = effectiveLoaderId(n, premises);
+  const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : DEFAULT_LOOSE_DENSITY;
+  for (const n of premises.nodes ?? []) for (const e of nodeLoaderEntries(n)) {
+    const lid = entryClassId(e, premises);
     const l = lid && lid !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === lid) : null;
     if (!l) continue;
-    const rs = active.filter((r) => r.fromId === n.id && !r.loader);
+    const lName = `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`;
+    if (e.role === 'alimentacao') {
+      // alimentação da planta: o equipamento retoma do pátio e alimenta o processo (sem caminhão), pela massa que chega ao local
+      const ins = active.filter((r) => r.toId === n.id);
+      const feedWetT = ins.reduce((acc, r) => acc + (byId.get(r.id)?.targetWetT ?? 0), 0);
+      const passT = Math.max(l.bucketM3, 0.01) * ((l.fillFactor ?? 90) / 100) * density;
+      const tph = (passT * 3600) / Math.max(1, loaderCycleSec(l));
+      const busyH = tph > 0 ? feedWetT / tph : 0;
+      const effH = sumCalendarHours(premises, 'planta') * ((l.dfPct ?? premises.dfPlanta ?? 85) / 100) * (uf('planta') / 100);
+      const neededExact = effH > 0 ? busyH / effH : 0;
+      const available = e.count ?? null;
+      out.push({
+        where: n.name, source: 'local', role: 'alimentacao', entryId: e.id, nodeId: n.id, routeIds: ins.map((r) => r.id), loaderName: lName,
+        passes: 0, loadMin: 0, trucksLoaded: 0, feedTph: tph, feedWetT, busyH, effHPerUnit: effH, neededExact,
+        needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)), available,
+        utilization: effH > 0 ? busyH / (effH * Math.max(1, available ?? Math.ceil(neededExact - 1e-6))) : 0,
+      });
+      continue;
+    }
+    const rs = active.filter((r) => r.fromId === n.id && !r.loader && entryForRoute(n, r.id)?.id === e.id);
     if (!rs.length) continue;
     let trucks = 0;
     let busyMin = 0;
@@ -847,14 +900,16 @@ export function loaderSizing(routes: Route[], premises: DetailedPremises, analys
     const busyH = busyMin / 60;
     const neededExact = effH > 0 ? busyH / effH : 0;
     for (const pr of perRoute) pr.neededExact = effH > 0 ? pr.busyH / effH : 0;
-    const available = n.loaderCount ?? null;
+    const available = e.count ?? null;
     out.push({
       where: n.name,
       source: 'local',
+      role: 'caminhoes',
+      entryId: e.id,
       nodeId: n.id,
       routeIds: rs.map((r) => r.id),
       perRoute,
-      loaderName: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`,
+      loaderName: lName,
       passes: trucks ? passesW / trucks : 0,
       loadMin: trucks ? busyMin / trucks : 0,
       trucksLoaded: trucks,

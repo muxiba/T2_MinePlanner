@@ -53,8 +53,10 @@ const newId = (p: string) => `${p}-${Math.random().toString(36).slice(2, 8)}`;
  * Os números não mudam (uma rota por fluxo, mesma divisão por peso/massa). Retorna null se nada mudou.
  */
 export function ensureNetwork(routes: Route[], premises: DetailedPremises, kindOf: (r: Route) => RouteKind): { nodes: FlowNode[]; routes: Route[] } | null {
+  if (transportMode(premises)) return null;
   const nodes = [...(premises.nodes ?? [])];
   const valid = (id?: string) => !!id && nodes.some((n) => n.id === id);
+  if (!routes.length) return null;
   if (nodes.length && routes.every((r) => valid(r.fromId) && valid(r.toId))) return null;
   const byType = (t: NodeType, name: string) => {
     let n = nodes.find((x) => x.type === t);
@@ -108,7 +110,46 @@ const zero = (): Record<RouteKind, number> => ({ rom: 0, product: 0, tailings: 0
 const isSource = (t: NodeType, m: RouteKind) => (t === 'frente' && (m === 'rom' || m === 'waste')) || (t === 'planta' && (m === 'product' || m === 'tailings'));
 const isFinal = (t: NodeType, m: RouteKind) => (t === 'planta' && m === 'rom') || (t === 'expedicao' && m === 'product') || (t === 'rejeito' && m === 'tailings') || (t === 'esteril' && m === 'waste');
 
+export function transportMode(p: Pick<DetailedPremises, 'flowMode'>) {
+  return p.flowMode === 'transporte';
+}
+
+/**
+ * Modo só transporte: cada movimentação leva a massa informada (t seca/mês); o balanço só confere os pontos de passagem
+ * (o que entra sai, ± variação de estoque) e avisa movimentação sem massa.
+ */
+export function transportBalance(routes: Route[], premises: DetailedPremises): NetworkResult {
+  const nodes = premises.nodes ?? [];
+  const active = routes.filter((r) => r.active && r.fromId && r.toId && nodes.some((n) => n.id === r.fromId) && nodes.some((n) => n.id === r.toId));
+  const edges = new Map<string, number>();
+  const issues: NetworkIssue[] = [];
+  for (const r of active) {
+    edges.set(r.id, Math.max(0, r.targetMass || 0));
+    if (!(r.targetMass && r.targetMass > 0)) issues.push({ routeId: r.id, level: 'erro', text: `${r.name}: informe a massa do mês (t seca).` });
+  }
+  const out: NodeBalance[] = nodes.map((n) => {
+    const inT = zero();
+    const outT = zero();
+    for (const r of active) {
+      if (r.toId === n.id) inT.rom += edges.get(r.id) ?? 0;
+      if (r.fromId === n.id) outT.rom += edges.get(r.id) ?? 0;
+    }
+    const genT = zero();
+    const pass = n.group === 'passagem';
+    if (!pass) genT.rom = Math.max(0, outT.rom - inT.rom);
+    const keptT = zero();
+    keptT.rom = Math.max(0, inT.rom - outT.rom);
+    if (pass && (inT.rom > 0.5 || outT.rom > 0.5)) {
+      const diff = inT.rom - outT.rom - (n.stockChangeT ?? 0);
+      if (Math.abs(diff) > 0.5) issues.push({ nodeId: n.id, level: 'aviso', text: `${n.name}: entram ${Math.round(inT.rom).toLocaleString('pt-BR')} t e saem ${Math.round(outT.rom).toLocaleString('pt-BR')} t${n.stockChangeT ? ` (variação de estoque ${Math.round(n.stockChangeT).toLocaleString('pt-BR')} t)` : ''}: ${diff > 0 ? 'sobram' : 'faltam'} ${Math.round(Math.abs(diff)).toLocaleString('pt-BR')} t.` });
+    }
+    return { node: n, inT, genT, outT, availT: { ...outT }, keptT };
+  });
+  return { edges, nodes: out, issues, romToPlants: 0 };
+}
+
 export function networkBalance(routes: Route[], premises: DetailedPremises, kindOf: (r: Route) => RouteKind): NetworkResult {
+  if (transportMode(premises)) return transportBalance(routes, premises);
   const nodes = premises.nodes ?? [];
   const pp = processPct(premises);
   const active = routes.filter((r) => r.active && r.fromId && r.toId && nodes.some((n) => n.id === r.fromId) && nodes.some((n) => n.id === r.toId));

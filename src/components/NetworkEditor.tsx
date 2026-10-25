@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance } from '@/engine/network';
-import { effectiveLoaderId, routeKind } from '@/engine/fleet';
+import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
 import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
@@ -36,7 +36,9 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
   const shareSum = frentes.reduce((a, n) => a + (n.romShare ?? 1), 0) || 1;
   const pp = processPct(premises);
 
-  const addNode = (type: NodeType) => setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id: newId(type), name: `${NODE_LABELS[type]} ${(p.nodes ?? []).filter((n) => n.type === type).length + 1}`, type }] }));
+  const tm = premises.flowMode === 'transporte';
+  const tGroup = (t: NodeType) => (t === 'frente' ? 'origem' : t === 'estoque' ? 'passagem' : 'destino') as FlowNode['group'];
+  const addNode = (type: NodeType) => setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id: newId(type), name: `${NODE_LABELS[type]} ${(p.nodes ?? []).filter((n) => n.type === type).length + 1}`, type, ...(tm ? { group: tGroup(type) } : {}) }] }));
   const removeNode = (id: string) => {
     if (routes.some((r) => r.fromId === id || r.toId === id)) return alert('Este local tem movimentações. Apague ou mude as movimentações dele primeiro.');
     setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).filter((n) => n.id !== id) }));
@@ -140,12 +142,12 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                     </td>
                     <td className="px-1 py-1">
                       {hasOut ? (
-                        <LoaderSelect premises={premises} className={cell} value={n.loaderClassId} label="Carregamento" onChange={(v) => setNode(n.id, { loaderClassId: v })} />
+                        <LoaderSelect premises={premises} className={cell} value={nodeLoaderEntries(n)[0]?.classId} label="Carregamento" onChange={(v) => setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === n.id ? withFirstEntry(x, { classId: v }) : x)) }))} />
                       ) : <span className="text-xs text-black/30">sem saída de caminhões</span>}
                     </td>
                     <td className="px-1 py-1">
-                      {hasOut && (effectiveLoaderId(n, premises) ?? 'silo') !== 'silo' ? (
-                        <input type="number" min={0} step={1} className={`${num} w-20`} value={n.loaderCount ?? ''} placeholder="calcular" aria-label="Equipamentos disponíveis" onChange={(e) => setNode(n.id, { loaderCount: e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))) })} />
+                      {hasOut && (entryClassId(nodeLoaderEntries(n)[0] ?? {}, premises) ?? 'silo') !== 'silo' ? (
+                        <input type="number" min={0} step={1} className={`${num} w-20`} value={nodeLoaderEntries(n)[0]?.count ?? ''} placeholder="calcular" aria-label="Equipamentos disponíveis" onChange={(e) => { const c = e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))); setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === n.id ? withFirstEntry(x, { count: c }) : x)) })); }} />
                       ) : <span className="text-xs text-black/30">—</span>}
                     </td>
                     <td className="px-1 py-1">
@@ -213,9 +215,13 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                       </select>
                     </td>
                     <td className="px-1 py-1">
-                      <select className={cell} value={k} aria-label="Material" onChange={(e) => setRoute(r.id, { kind: e.target.value as RouteKind, targetMass: undefined })}>
-                        {mats.map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
-                      </select>
+                      {tm ? (
+                        <input className={cell} value={r.materialName ?? ''} placeholder="minério…" aria-label="Material" onChange={(e) => setRoute(r.id, { materialName: e.target.value })} />
+                      ) : (
+                        <select className={cell} value={k} aria-label="Material" onChange={(e) => setRoute(r.id, { kind: e.target.value as RouteKind, targetMass: undefined })}>
+                          {mats.map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
+                        </select>
+                      )}
                     </td>
                     <td className="px-1 py-1">
                       <select className={`${cell} w-28`} value={r.roadType ?? 'interna'} aria-label="Via" title="Estrada pública: só caminhões rodoviários do catálogo entram nesta movimentação (frota mista)" onChange={(e) => setRoute(r.id, { roadType: e.target.value as 'interna' | 'estrada' })}>
@@ -224,7 +230,7 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                       </select>
                     </td>
                     <td className="px-1 py-1"><input type="number" step={10} className={`${num} w-24`} value={r.distance} aria-label="DMT" onChange={(e) => setRoute(r.id, { distance: Math.max(0, Number(e.target.value) || 0) })} /></td>
-                    <td className="px-1 py-1"><input type="number" step={1000} className={`${num} w-28`} value={r.targetMass ?? ''} placeholder="pelo balanço" aria-label="Massa fixa" onChange={(e) => setRoute(r.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
+                    <td className="px-1 py-1"><input type="number" step={1000} className={`${num} w-28`} value={r.targetMass ?? ''} placeholder={tm ? 'obrigatória' : 'pelo balanço'} aria-label="Massa fixa" onChange={(e) => setRoute(r.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
                     <td className="px-1 py-1"><input type="number" step={0.5} min={0} className={`${num} w-16`} value={r.share ?? 1} disabled={!!r.targetMass} aria-label="Peso na divisão" onChange={(e) => setRoute(r.id, { share: Math.max(0, Number(e.target.value) || 0) })} /></td>
                     <td className="px-1 py-1 text-right font-mono font-semibold tabular-nums">{r.active ? t0(res.edges.get(r.id) ?? 0) : '—'}</td>
                     <td className="px-1 py-1 text-center"><input type="checkbox" checked={r.active} aria-label="Movimentação ativa" onChange={(e) => setRoute(r.id, { active: e.target.checked })} /></td>

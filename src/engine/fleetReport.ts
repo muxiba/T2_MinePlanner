@@ -69,7 +69,7 @@ export function buildFleetReport(routes: Route[], premises: DetailedPremises): F
     return {
       id: a.id,
       name: a.name,
-      material: KIND_LABELS[a.kind].split(' (')[0],
+      material: r.materialName || KIND_LABELS[a.kind].split(' (')[0],
       massWetT: a.targetWetT,
       massDryT: a.targetDryT,
       distance: r.distance,

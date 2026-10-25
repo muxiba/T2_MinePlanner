@@ -1,8 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Trash2, X } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
-import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance } from '@/engine/network';
-import { effectiveLoaderId, routeKind } from '@/engine/fleet';
+import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportMode } from '@/engine/network';
+import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
+import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
 import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
@@ -13,11 +14,12 @@ import { processPct } from '@/engine/process';
  * É a mesma rede da tabela: locais = premises.nodes, setas = rotas com fromId/toId.
  */
 
-export type Group = 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril';
+export type Group = 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
+const T_GROUPS: Group[] = ['origem', 'passagem', 'destino'];
 
-const GROUP_LABEL: Record<Group, string> = { mina: 'Mina (ROM)', planta: 'Planta(s)', produto: 'Produto(s)', rejeito: 'Rejeito', esteril: 'Estéril' };
+const GROUP_LABEL: Record<Group, string> = { mina: 'Mina (ROM)', planta: 'Planta(s)', produto: 'Produto(s)', rejeito: 'Rejeito', esteril: 'Estéril', origem: 'Origens', passagem: 'Pontos de passagem', destino: 'Destinos' };
 /** material que entra em cada bloco */
-const GROUP_MAT: Record<Group, RouteKind> = { mina: 'rom', planta: 'rom', produto: 'product', rejeito: 'tailings', esteril: 'waste' };
+const GROUP_MAT: Record<Group, RouteKind> = { mina: 'rom', planta: 'rom', produto: 'product', rejeito: 'tailings', esteril: 'waste', origem: 'rom', passagem: 'rom', destino: 'rom' };
 const MAT_COLOR: Record<RouteKind, string> = { rom: '#185FA5', product: '#3B6D11', tailings: '#A32D2D', waste: '#6B6A64' };
 /** o que dá para criar em cada bloco */
 const ADD: Record<Group, { type: NodeType; label: string; name: string }[]> = {
@@ -32,10 +34,14 @@ const ADD: Record<Group, { type: NodeType; label: string; name: string }[]> = {
   ],
   rejeito: [{ type: 'rejeito', label: 'baia / pilha', name: 'Baia' }],
   esteril: [{ type: 'esteril', label: 'pilha', name: 'PDE' }],
+  origem: [{ type: 'frente', label: 'origem', name: 'Origem' }],
+  passagem: [{ type: 'estoque', label: 'ponto de passagem', name: 'Pátio' }],
+  destino: [{ type: 'expedicao', label: 'destino', name: 'Destino' }],
 };
 
 /** Bloco de cada local: pelo tipo; estoque pelo grupo gravado ou pelo material que chega/sai dele. */
 export function groupOf(n: FlowNode, routes: Route[]): Group {
+  if (n.group && T_GROUPS.includes(n.group)) return n.group;
   switch (n.type) {
     case 'frente':
       return 'mina';
@@ -57,8 +63,13 @@ export function groupOf(n: FlowNode, routes: Route[]): Group {
 /** Material que um local manda para outro (null = ligação que não faz sentido). */
 export function linkMaterial(from: FlowNode, to: FlowNode, routes: Route[]): RouteKind | null {
   if (from.id === to.id) return null;
-  const m = GROUP_MAT[groupOf(to, routes)];
-  const emits = from.type === 'estoque' ? [GROUP_MAT[groupOf(from, routes)]] : materialsFrom(from.type);
+  const gf = groupOf(from, routes);
+  const gt = groupOf(to, routes);
+  // só transporte: origem → passagem/destino; passagem → passagem/destino
+  if (T_GROUPS.includes(gf) || T_GROUPS.includes(gt)) return (gf === 'origem' || gf === 'passagem') && (gt === 'passagem' || gt === 'destino') ? 'rom' : null;
+  const m = GROUP_MAT[gt];
+  // pilha / estoque da mina também manda estéril para a PDE
+  const emits = from.type === 'estoque' ? (gf === 'mina' ? (['rom', 'waste'] as RouteKind[]) : [GROUP_MAT[gf]]) : materialsFrom(from.type);
   return emits.includes(m) ? m : null;
 }
 
@@ -97,8 +108,8 @@ export interface FlowLayout {
 }
 
 /** Posição dos blocos, dos locais e das setas (usada no desenho da tela e no do PDF). */
-export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<typeof networkBalance>, showWaste: boolean, showTail: boolean): FlowLayout {
-    const by: Record<Group, FlowNode[]> = { mina: [], planta: [], produto: [], rejeito: [], esteril: [] };
+export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<typeof networkBalance>, showWaste: boolean, showTail: boolean, transport = false): FlowLayout {
+    const by: Record<Group, FlowNode[]> = { mina: [], planta: [], produto: [], rejeito: [], esteril: [], origem: [], passagem: [], destino: [] };
     for (const n of nodes) by[groupOf(n, routes)].push(n);
     // dentro do bloco: frentes antes das pilhas; estoques antes do terminal (ordem do fluxo)
     const order: Partial<Record<NodeType, number>> = { frente: 0, estoque: 1, planta: 0, expedicao: 2, rejeito: 1, esteril: 0 };
@@ -107,6 +118,11 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
     const box: Partial<Record<Group, { x: number; y: number; w: number; h: number }>> = {};
     const top = 20;
     let yMina = top;
+    if (transport) {
+      box.origem = { x: COL.mina, y: top, w: W + 20, h: h('origem') };
+      box.passagem = { x: COL.planta, y: top, w: W + 20, h: h('passagem') };
+      box.destino = { x: COL.right, y: top, w: W + 20, h: h('destino') };
+    } else {
     if (showWaste) {
       box.esteril = { x: 300, y: top, w: W + 20, h: h('esteril') };
       yMina = top + h('esteril') + 40;
@@ -115,6 +131,7 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
     box.planta = { x: COL.planta, y: yMina + Math.max(0, (h('mina') - h('planta')) / 2), w: W + 20, h: h('planta') };
     box.produto = { x: COL.right, y: top, w: W + 20, h: h('produto') };
     if (showTail) box.rejeito = { x: COL.right, y: Math.max(top + h('produto') + 40, box.planta.y + box.planta.h / 2 + 10), w: W + 20, h: h('rejeito') };
+    }
     const pos = new Map<string, { x: number; y: number; w: number; h: number; g: Group }>();
     for (const g of Object.keys(box) as Group[]) {
       const b = box[g]!;
@@ -177,12 +194,19 @@ export function flowSvg(routes: Route[], premises: DetailedPremises): string {
   if (!nodes.length) return '';
   const res = networkBalance(routes, premises, routeKind);
   const pp = processPct(premises);
-  const showWaste = !!premises.hasWasteRock || nodes.some((n) => n.type === 'esteril');
-  const showTail = !pp.seco || nodes.some((n) => n.type === 'rejeito');
-  const L = flowLayout(nodes, routes, res, showWaste, showTail);
+  const tmode = transportMode(premises);
+  const showWaste = !tmode && !!premises.hasWasteRock;
+  const showTail = !tmode && (!pp.seco || nodes.some((n) => n.type === 'rejeito'));
+  const L = flowLayout(nodes, routes, res, showWaste, showTail, tmode);
   const frentes = nodes.filter((n) => n.type === 'frente');
   const shareSum = frentes.reduce((a, n) => a + (n.romShare ?? 1), 0) || 1;
   const sub = (n: FlowNode) => {
+    if (tmode) {
+      const b = res.nodes.find((x) => x.node.id === n.id);
+      const i = b?.inT.rom ?? 0;
+      const o = b?.outT.rom ?? 0;
+      return o > 0.5 ? `envia ${t0(o)} t` : i > 0.5 ? `recebe ${t0(i)} t` : 'sem movimentação';
+    }
     if (n.type === 'frente') return `${Math.round(((n.romShare ?? 1) / shareSum) * 100)}% do ROM`;
     if (n.type === 'planta') return pp.seco ? `RM ${pp.rm.toLocaleString('pt-BR')}% · a seco` : `RM ${pp.rm.toLocaleString('pt-BR')}% · rejeito ${pp.rej.toLocaleString('pt-BR')}%`;
     const b = res.nodes.find((x) => x.node.id === n.id);
@@ -228,13 +252,27 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
   const [link, setLink] = useState<{ from: string; x: number; y: number; moved: boolean } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const showWaste = !!premises.hasWasteRock || nodes.some((n) => n.type === 'esteril');
-  const showTail = !pp.seco || nodes.some((n) => n.type === 'rejeito');
+  const tm = transportMode(premises);
+  const showWaste = !tm && !!premises.hasWasteRock;
+  const showTail = !tm && (!pp.seco || nodes.some((n) => n.type === 'rejeito'));
   const frentes = nodes.filter((n) => n.type === 'frente');
   const shareSum = frentes.reduce((a, n) => a + (n.romShare ?? 1), 0) || 1;
+  const setMode = (m: FlowMode) => {
+    const x = switchFlowMode(premises, routes, m);
+    if (!x) return;
+    setPremises(() => x.premises);
+    setRoutes(() => x.routes);
+    setSel(null);
+    setLink(null);
+  };
+  const setWaste = (on: boolean) => {
+    const x = setWasteOn(premises, routes, on);
+    setPremises((p) => ({ ...p, hasWasteRock: x.premises.hasWasteRock }));
+    setRoutes(() => x.routes);
+  };
 
   /* ------------------------------ layout ------------------------------ */
-  const layout = useMemo(() => flowLayout(nodes, routes, res, showWaste, showTail), [nodes, routes, res, showWaste, showTail]);
+  const layout = useMemo(() => flowLayout(nodes, routes, res, showWaste, showTail, tm), [nodes, routes, res, showWaste, showTail, tm]);
   const edges = layout.edges;
 
   /* ------------------------------ ações ------------------------------ */
@@ -243,7 +281,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
   const addNode = (g: Group, type: NodeType, name: string) => {
     const id = newId(type);
     const count = nodes.filter((n) => n.type === type && groupOf(n, routes) === g).length + 1;
-    setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id, name: `${name} ${count}`, type, ...(type === 'estoque' ? { group: g } : {}) }] }));
+    setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id, name: `${name} ${count}`, type, ...(type === 'estoque' || T_GROUPS.includes(g) ? { group: g } : {}) }] }));
     setSel({ kind: 'node', id });
   };
   const removeNode = (id: string) => {
@@ -265,6 +303,10 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
     if (!f || !t) return;
     const m = linkMaterial(f, t, routes);
     if (!m) {
+      if (tm) {
+        setMsg(`Ligação não permitida: no modo só transporte a movimentação sai de uma origem ou de um ponto de passagem e chega a um ponto de passagem ou a um destino.`);
+        return;
+      }
       setMsg(`${f.name} não manda material para ${t.name}: ${t.name} recebe ${matTxt(GROUP_MAT[groupOf(t, routes)])}, e ${f.name} só envia ${(f.type === 'estoque' ? [GROUP_MAT[groupOf(f, routes)]] : materialsFrom(f.type)).map(matTxt).join(' ou ')}.`);
       return;
     }
@@ -277,7 +319,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
     const id = newId('mov');
     setRoutes((rs) => [
       ...rs,
-      { id, name: `${f.name} → ${t.name}`, kind: m, fromId, toId, active: true, truckCount: 0, truckCapacity: premises.truckCapacity, distance: 1000, cycleTime: 20, mechanicalAvailability: premises.dfMina, operationalEfficiency: 100, processType: premises.processType, fleetMode: 'inteiro' },
+      { id, name: `${f.name} → ${t.name}`, kind: m, fromId, toId, active: true, ...(tm ? { materialName: 'Minério', targetMass: undefined } : {}), truckCount: 0, truckCapacity: premises.truckCapacity, distance: 1000, cycleTime: 20, mechanicalAvailability: premises.dfMina, operationalEfficiency: 100, processType: premises.processType, fleetMode: 'inteiro' },
     ]);
     setSel({ kind: 'route', id });
     setMsg(null);
@@ -328,6 +370,12 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
   const issuesOf = (id: string) => res.issues.filter((x) => x.nodeId === id);
   const balOf = (id: string) => res.nodes.find((b) => b.node.id === id);
   const subLabel = (n: FlowNode) => {
+    if (tm) {
+      const b = balOf(n.id);
+      const i = b?.inT.rom ?? 0;
+      const o = b?.outT.rom ?? 0;
+      return i > 0.5 && o > 0.5 ? `recebe ${t0(i)} · envia ${t0(o)} t` : o > 0.5 ? `envia ${t0(o)} t` : i > 0.5 ? `recebe ${t0(i)} t` : 'sem movimentação';
+    }
     if (n.type === 'frente') return `${Math.round(((n.romShare ?? 1) / shareSum) * 100)}% do ROM · ${t0(((premises.targetMonthlyROM || 0) * (n.romShare ?? 1)) / shareSum)} t`;
     if (n.type === 'planta') return pp.seco ? `RM ${pp.rm.toLocaleString('pt-BR')}% · a seco` : `RM ${pp.rm.toLocaleString('pt-BR')}% · rejeito ${pp.rej.toLocaleString('pt-BR')}%`;
     const b = balOf(n.id);
@@ -343,16 +391,38 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-3xl text-xs text-black/55">
-          Crie os locais dentro de cada bloco (“+”) e ligue um ao outro puxando a bolinha à direita do local até o destino — ou clique nela e depois no destino. As massas saem do balanço: produto = ROM × {pp.rm.toLocaleString('pt-BR')}%
-          {pp.seco ? '' : `, rejeito = ROM × ${pp.rej.toLocaleString('pt-BR')}%`}; estoques mandam adiante o que recebem (± variação). Clique num local ou numa seta para editar.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-black/70">
-          <input type="checkbox" checked={!!premises.hasWasteRock} onChange={(e) => setPremises((p) => ({ ...p, hasWasteRock: e.target.checked }))} />
-          Possui estéril
-        </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-lg border border-black/10 p-0.5 text-sm" role="radiogroup" aria-label="Modo da rede">
+          {([['processo', 'Processo (mina → planta → produto/rejeito)'], ['transporte', 'Só transporte (origem → destino)']] as const).map(([m, label]) => (
+            <button key={m} type="button" role="radio" aria-checked={(premises.flowMode ?? 'processo') === m} onClick={() => setMode(m)} className={`rounded-md px-3 py-1 font-medium ${(premises.flowMode ?? 'processo') === m ? 'bg-[#15567F] text-white' : 'text-black/60 hover:bg-black/5'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {!tm && (
+          <label className="flex items-center gap-2 text-sm text-black/70">
+            <input type="checkbox" checked={!!premises.hasWasteRock} onChange={(e) => setWaste(e.target.checked)} />
+            Possui estéril
+          </label>
+        )}
+        {showWaste && (
+          <label className="flex items-center gap-2 text-sm text-black/70">
+            Meta de estéril
+            <input type="number" step={1000} min={0} className="w-28 rounded-lg border border-black/10 bg-white px-2 py-1 text-right font-mono text-sm" value={premises.targetMonthlyWasteRock || ''} aria-label="Meta de estéril" onChange={(e) => setPremises((p) => ({ ...p, targetMonthlyWasteRock: Math.max(0, Number(e.target.value) || 0) }))} />
+            <span className="text-xs text-black/45">t seca/mês</span>
+          </label>
+        )}
       </div>
+      <p className="max-w-4xl text-xs text-black/55">
+        {tm ? (
+          <>Só transporte: crie origens, pontos de passagem (opcional) e destinos e ligue um ao outro puxando a bolinha à direita do local. Cada movimentação leva a massa que você informar (t seca/mês; a umidade converte para úmida). Consumo da planta, RM, rejeito e as demais variáveis do processo não são usados neste modo. A rede do modo Processo fica guardada.</>
+        ) : (
+          <>
+            Crie os locais dentro de cada bloco (“+”) e ligue um ao outro puxando a bolinha à direita do local até o destino — ou clique nela e depois no destino. As massas saem do balanço: produto = ROM × {pp.rm.toLocaleString('pt-BR')}%
+            {pp.seco ? '' : `, rejeito = ROM × ${pp.rej.toLocaleString('pt-BR')}%`}; estoques mandam adiante o que recebem (± variação). Clique num local ou numa seta para editar.
+          </>
+        )}
+      </p>
 
       <div className="space-y-4">
         <div className="relative">
@@ -448,7 +518,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
               const src = link ? nodes.find((x) => x.id === link.from) : undefined;
               const can = src ? !!linkMaterial(src, n, routes) : false;
               const dim = !!src && !can && src.id !== n.id;
-              const canSend = (n.type === 'estoque' ? [GROUP_MAT[groupOf(n, routes)]] : materialsFrom(n.type)).length > 0;
+              const canSend = tm ? groupOf(n, routes) !== 'destino' : (n.type === 'estoque' ? [GROUP_MAT[groupOf(n, routes)]] : materialsFrom(n.type)).length > 0;
               return (
                 <g key={n.id} data-node={n.id} opacity={dim ? 0.35 : 1}>
                   <g role="button" tabIndex={0} aria-label={`Local ${n.name}`} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); clickNode(n.id); }} onKeyDown={(e) => e.key === 'Enter' && clickNode(n.id)}>
@@ -495,14 +565,14 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
               </div>
               <div className="space-y-3">
                 <label className="block text-xs text-black/55">Nome<input className={`${cell} mt-1`} value={selNode.name} onChange={(e) => setNode(selNode.id, { name: e.target.value })} /></label>
-                {selNode.type === 'frente' && (
+                {!tm && selNode.type === 'frente' && (
                   <label className="block text-xs text-black/55">
                     Parte do ROM (peso)
                     <input type="number" step={1} className={`${num} mt-1`} value={selNode.romShare ?? 1} onChange={(e) => setNode(selNode.id, { romShare: Math.max(0, Number(e.target.value) || 0) })} />
                     <span className="mt-0.5 block text-[11px] text-black/45">{Math.round(((selNode.romShare ?? 1) / shareSum) * 100)}% da meta · 60 e 40 = 60% e 40%</span>
                   </label>
                 )}
-                {selNode.type === 'frente' && premises.hasWasteRock && (
+                {!tm && selNode.type === 'frente' && premises.hasWasteRock && (
                   <label className="block text-xs text-black/55">Estéril desta frente (t seca/mês)<input type="number" step={1000} className={`${num} mt-1`} value={selNode.wasteT ?? ''} placeholder="divide a meta" onChange={(e) => setNode(selNode.id, { wasteT: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></label>
                 )}
                 {['estoque', 'expedicao', 'rejeito', 'esteril'].includes(selNode.type) && routes.some((r) => r.fromId === selNode.id) && (
@@ -516,10 +586,11 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                   <>
                     <label className="block text-xs text-black/55">
                       Carregamento dos caminhões
-                      <LoaderSelect premises={premises} className={`${cell} mt-1`} value={selNode.loaderClassId} label="Carregamento dos caminhões" onChange={(v) => setNode(selNode.id, { loaderClassId: v })} />
+                      <LoaderSelect premises={premises} className={`${cell} mt-1`} value={nodeLoaderEntries(selNode)[0]?.classId} label="Carregamento dos caminhões" onChange={(v) => setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === selNode.id ? withFirstEntry(x, { classId: v }) : x)) }))} />
+                      {nodeLoaderEntries(selNode).length > 1 && <span className="mt-0.5 block text-[11px] text-black/45">+{nodeLoaderEntries(selNode).length - 1} equipamento(s) neste local — veja em Carga e ciclo</span>}
                     </label>
-                    {(effectiveLoaderId(selNode, premises) ?? 'silo') !== 'silo' && (
-                      <label className="block text-xs text-black/55">Equipamentos disponíveis<input type="number" min={0} step={1} className={`${num} mt-1`} value={selNode.loaderCount ?? ''} placeholder="o sistema calcula" onChange={(e) => setNode(selNode.id, { loaderCount: e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))) })} /></label>
+                    {(entryClassId(nodeLoaderEntries(selNode)[0] ?? {}, premises) ?? 'silo') !== 'silo' && (
+                      <label className="block text-xs text-black/55">Equipamentos disponíveis<input type="number" min={0} step={1} className={`${num} mt-1`} value={nodeLoaderEntries(selNode)[0]?.count ?? ''} placeholder="o sistema calcula" onChange={(e) => { const c = e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))); setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === selNode.id ? withFirstEntry(x, { count: c }) : x)) })); }} /></label>
                     )}
                   </>
                 )}
@@ -547,7 +618,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
           {selRoute && (
             <div className="rounded-xl border border-black/[0.08] bg-white p-4">
               <div className="mb-3 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: MAT_COLOR[routeKind(selRoute)] }}>Movimentação · {MATERIAL_LABELS[routeKind(selRoute)]}</p>
+                <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: MAT_COLOR[routeKind(selRoute)] }}>Movimentação · {tm ? selRoute.materialName || 'material' : MATERIAL_LABELS[routeKind(selRoute)]}</p>
                 <button type="button" className="rounded p-1 text-black/40 hover:bg-black/5" aria-label="Fechar" onClick={() => setSel(null)}><X size={14} /></button>
               </div>
               <div className="space-y-3">
@@ -561,10 +632,19 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                       <option value="estrada">Estrada pública</option>
                     </select>
                   </label>
+{tm ? (
+                  <>
+                    <label className="block text-xs text-black/55">Material<input className={`${cell} mt-1`} value={selRoute.materialName ?? ''} placeholder="minério, estéril, areia…" onChange={(e) => setRoute(selRoute.id, { materialName: e.target.value })} /></label>
+                    <label className="block text-xs text-black/55">Massa do mês (t seca)<input type="number" step={1000} className={`${num} mt-1 ${!selRoute.targetMass ? 'border-red-300' : ''}`} value={selRoute.targetMass ?? ''} placeholder="obrigatória" onChange={(e) => setRoute(selRoute.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></label>
+                  </>
+                ) : (
+                  <>
                   <label className="block text-xs text-black/55">Massa fixa (t seca)<input type="number" step={1000} className={`${num} mt-1`} value={selRoute.targetMass ?? ''} placeholder="pelo balanço" onChange={(e) => setRoute(selRoute.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></label>
                   <label className="block text-xs text-black/55">Peso na divisão<input type="number" step={0.5} min={0} className={`${num} mt-1`} value={selRoute.share ?? 1} disabled={!!selRoute.targetMass} onChange={(e) => setRoute(selRoute.id, { share: Math.max(0, Number(e.target.value) || 0) })} /></label>
+                  </>
+                )}
                 </div>
-                <p className="text-[11px] text-black/45">Peso: movimentações do mesmo material saindo do mesmo local dividem a massa (1 e 1 = metade; 3 e 1 = 75% e 25%). Massa fixa: leva exatamente essa massa e o saldo vai para as outras.</p>
+                {!tm && <p className="text-[11px] text-black/45">Peso: movimentações do mesmo material saindo do mesmo local dividem a massa (1 e 1 = metade; 3 e 1 = 75% e 25%). Massa fixa: leva exatamente essa massa e o saldo vai para as outras.</p>}
                 <p className="rounded-lg bg-black/[0.03] px-3 py-2 text-sm">Massa no mês: <b className="font-mono">{selRoute.active ? t0(res.edges.get(selRoute.id) ?? 0) : '—'} t seca</b></p>
                 <label className="flex items-center gap-2 text-xs text-black/60"><input type="checkbox" checked={selRoute.active} onChange={(e) => setRoute(selRoute.id, { active: e.target.checked })} /> Ativa (consome frota)</label>
                 <button type="button" onClick={() => removeRoute(selRoute)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> Apagar movimentação</button>
@@ -597,8 +677,8 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
               </tfoot>
             </table>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-black/50">
-              {(Object.keys(MAT_COLOR) as RouteKind[]).filter((k) => k !== 'tailings' || showTail).filter((k) => k !== 'waste' || showWaste).map((k) => (
-                <span key={k} className="flex items-center gap-1"><span className="inline-block h-0.5 w-4" style={{ background: MAT_COLOR[k] }} /> {MATERIAL_LABELS[k]}</span>
+              {(tm ? (['rom'] as RouteKind[]) : (Object.keys(MAT_COLOR) as RouteKind[])).filter((k) => k !== 'tailings' || showTail).filter((k) => k !== 'waste' || showWaste).map((k) => (
+                <span key={k} className="flex items-center gap-1"><span className="inline-block h-0.5 w-4" style={{ background: MAT_COLOR[k] }} /> {tm ? "Movimentação" : MATERIAL_LABELS[k]}</span>
               ))}
             </div>
           </div>

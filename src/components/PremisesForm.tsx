@@ -1,5 +1,6 @@
 import CatalogEditor from './CatalogEditor';
 import { analyzeFleet } from '@/engine/fleet';
+import { setWasteOn } from '@/engine/flowMode';
 import NetworkEditor from './NetworkEditor';
 import FlowDiagram from './FlowDiagram';
 import { LoaderNeedsTable, LoaderTimesEditor } from './LoaderSetupEditor';
@@ -265,6 +266,12 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     return `Com os equipamentos escolhidos a carga média é ${fmt(avg)} min (${needs.map((l) => `${l.where}: ${fmt(l.loadMin)}`).join(' · ')}). Este valor só vale para os locais sem equipamento.`;
   })();
 
+  // modo só transporte: variáveis do processo ficam travadas (não entram no cálculo)
+  const tm = premises.flowMode === 'transporte';
+  const TM_LOCKED = new Set(['targetMonthlyROM', 'contractedHoursPlanta', 'dfPlanta', 'ufPlanta', 'eoPlanta', 'plantFeedRateTPH', 'processType', 'rmGlobal', 'rmDry', 'rejeitoTotal', '__perda', 'hasWasteRock', 'targetMonthlyWasteRock', 'fleetCapacityMinaTPH', 'fleetCapacityBaiaTPH', 'fleetCapacityTerminalTPH', 'maxTotalFleetCapacityTPH']);
+  const tmLock = <T extends { fields: any[] }>(sec: T): T =>
+    tm ? { ...sec, fields: sec.fields.map((f) => (TM_LOCKED.has(f.key) ? { ...f, disabled: true, label: `${f.label} — não usado no modo só transporte` } : f)) } : sec;
+
   const sections = [
     {
       title: "Período de Simulação",
@@ -434,7 +441,10 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </div>
       </div>
 
-      {show(2) && (
+      {show(2) && tm && (
+        <p className="rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4 text-sm text-sky-900">Modo só transporte: a produção planejada da planta não é usada. As massas são as de cada movimentação, em Locais e movimentações.</p>
+      )}
+      {show(2) && !tm && (
         <>
       {/* Planned Production Summary */}
       <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
@@ -492,7 +502,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {sections.filter((section) => show(section.step)).map((section) => (
+        {sections.filter((section) => show(section.step)).map((section) => tmLock(section)).map((section) => (
           <div key={section.title} className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
             <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-4">{section.title}</h3>
             <div className="space-y-4">
@@ -504,6 +514,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                   </label>
                   {field.type === "select" ? (
                     <select
+                      disabled={field.disabled}
                       value={String(premises[field.key as keyof DetailedPremises] ?? (field.key === "moistureMode" ? "somada" : ""))}
                       onChange={(e) => {
                         const val =
@@ -516,7 +527,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                               : parseInt(e.target.value);
                         if (field.key === "month") handleMonthYearChange(val as number, premises.year);
                         else if (field.key === "year") handleMonthYearChange(premises.month, val as number);
-                        else handleChange(field.key as keyof DetailedPremises, val);
+                        else if (field.key === "hasWasteRock" && routes) {
+                          const x = setWasteOn(premises, routes, !!val);
+                          setPremises(x.premises);
+                          setRoutes(x.routes);
+                        } else handleChange(field.key as keyof DetailedPremises, val);
                       }}
                       className="w-full bg-[#F8F9FA] border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
                     >

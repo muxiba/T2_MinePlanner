@@ -254,6 +254,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
       </section>
 
       {/* ------------------------------ fluxos ------------------------------ */}
+      {premises.flowMode !== 'transporte' && (
       <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
         <div className="mb-3">
           <h4 className="font-bold text-black/80">Fluxos de massa</h4>
@@ -307,6 +308,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
           <span className="text-black/40">Cada fluxo das premissas ganha uma rota automaticamente; se você apagar, ela não volta (crie de novo aqui).</span>
         </div>}
       </section>
+      )}
 
       {/* ------------------------------ rotas ------------------------------ */}
       {visibleRoutes.map((route) => {
