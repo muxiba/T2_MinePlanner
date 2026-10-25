@@ -42,6 +42,8 @@ export interface Route {
   /** rede de fluxos: local de origem e de destino (FlowNode.id) */
   fromId?: string;
   toId?: string;
+  /** paradas no trajeto (pesagem, inspeção, abastecimento...), sem massa */
+  stops?: RouteStop[];
   /** tempos próprios desta movimentação (min); vazio = os das premissas / do equipamento do local */
   loadMin?: number;
   dumpMin?: number;
@@ -88,6 +90,21 @@ export interface FlowNode {
   group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
   /** equipamentos de carga do local (vazio = um equipamento: o escolhido em loaderClassId ou o padrão) */
   loaders?: NodeLoader[];
+}
+
+/** Parada no trajeto de uma movimentação: o caminhão para (com fila, se o posto estiver ocupado) e segue. */
+export interface RouteStop {
+  id: string;
+  name: string;
+  kind: 'pesagem' | 'inspecao' | 'abastecimento' | 'outro';
+  /** distância da origem até a parada (m) */
+  distM: number;
+  /** tempo parado (min) */
+  stopMin: number;
+  /** em que sentido o caminhão para */
+  dir: 'ida' | 'volta' | 'ambos';
+  /** postos de atendimento (ex.: 1 balança) */
+  posts?: number;
 }
 
 /** Equipamento de carga de um local: carrega os caminhões de algumas (ou todas as) saídas, ou alimenta a planta. */
@@ -245,6 +262,8 @@ export interface DetailedPremises {
   extraAllocations?: ExtraFleetAllocation[];
   /** rede: processo (mina → planta → produto/rejeito) ou só transporte (origem → destino, massas informadas) */
   flowMode?: 'processo' | 'transporte';
+  /** modo só transporte: meta de transporte (t/h, base seca) — a massa entregue nos destinos que a frota precisa atingir */
+  transportTargetTph?: number;
   /** rede guardada de cada modo, para voltar a ela ao trocar de modo */
   savedNets?: Partial<Record<'processo' | 'transporte', { nodes: FlowNode[]; routes: Route[] }>>;
   /** equipamento de carga padrão (catálogo ou 'silo') para todos os locais que não escolheram o seu */

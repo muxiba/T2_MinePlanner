@@ -86,6 +86,8 @@ export interface Circuit {
   share?: number;
   /** frota mista: proporção de cada configuração de caminhão (id → quantidade ou peso); vazio = uma configuração só */
   mix?: Record<string, number>;
+  /** paradas no trajeto: posição (fração da rota a partir da origem), tempo (min), sentido e postos */
+  stops?: { name: string; weigh: boolean; frac: number; stopMin: number; dir: 'ida' | 'volta' | 'ambos'; posts: number }[];
   /** despacho dinâmico: peso do circuito na divisão das viagens (meta do período, t) */
   dispatchWeight?: number;
   /** t secas no período quando o fluxo é 'outro' */

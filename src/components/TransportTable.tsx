@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import StopsEditor from './StopsEditor';
 import { Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, Route } from '@/types';
 import { analyzeFleet, routeTargets } from '@/engine/fleet';
@@ -23,6 +24,7 @@ interface Props {
 
 const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRoutes }) => {
   const nodes = premises.nodes ?? [];
+  const [open, setOpen] = useState<string | null>(null);
   const fa = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
   const masses = useMemo(() => routeTargets(routes, premises), [routes, premises]);
   const nameOf = (id?: string) => nodes.find((n) => n.id === id)?.name ?? '';
@@ -96,6 +98,7 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
               <th className="px-1 py-1 font-medium">Via</th>
               <th className="px-1 py-1 text-right font-medium">Carga (min)</th>
               <th className="px-1 py-1 text-right font-medium">Descarga (min)</th>
+              <th className="px-1 py-1 font-medium">Paradas</th>
               <th className="px-1 py-1 text-right font-medium">Ciclo (min)</th>
               <th className="px-1 py-1 text-right font-medium">Caminhões</th>
               <th className="px-1 py-1 font-medium">Ativa</th>
@@ -106,12 +109,13 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
             {routes.map((r) => {
               const a = fa.routes.find((x) => x.id === r.id);
               return (
-                <tr key={r.id} className={`border-t border-black/5 ${r.active ? '' : 'opacity-50'}`}>
+                <React.Fragment key={r.id}>
+                <tr className={`border-t border-black/5 ${r.active ? '' : 'opacity-50'}`}>
                   <td className="px-1 py-1"><input className={cell} value={r.name} aria-label="Nome da movimentação" onChange={(e) => setRoute(r.id, { name: e.target.value })} /></td>
                   <td className="px-1 py-1"><input key={`${r.id}-f-${r.fromId}`} className={cell} list="tt-origens" defaultValue={nameOf(r.fromId)} aria-label="Origem" onBlur={(e) => e.target.value !== nameOf(r.fromId) && setEnd(r, 'from', e.target.value)} /></td>
                   <td className="px-1 py-1"><input key={`${r.id}-t-${r.toId}`} className={cell} list="tt-destinos" defaultValue={nameOf(r.toId)} aria-label="Destino" onBlur={(e) => e.target.value !== nameOf(r.toId) && setEnd(r, 'to', e.target.value)} /></td>
                   <td className="px-1 py-1"><input className={cell} value={r.materialName ?? ''} placeholder="minério…" aria-label="Material" onChange={(e) => setRoute(r.id, { materialName: e.target.value })} /></td>
-                  <td className="px-1 py-1 text-right"><input type="number" step={1000} min={0} className={`${num} w-32 ${!r.targetMass ? 'border-red-300' : ''}`} value={r.targetMass ?? ''} placeholder="obrigatória" aria-label="Massa do mês" onChange={(e) => setRoute(r.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
+                  <td className="px-1 py-1 text-right"><input type="number" step={1000} min={0} className={`${num} w-32 ${!(masses.get(r.id) ?? 0) ? 'border-red-300' : ''}`} value={r.targetMass ?? ''} placeholder={(masses.get(r.id) ?? 0) > 0 ? `${t0(masses.get(r.id)!)} (meta)` : 'obrigatória'} aria-label="Massa do mês" onChange={(e) => setRoute(r.id, { targetMass: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
                   <td className="px-1 py-1 text-right"><input type="number" step={10} min={0} className={`${num} w-24`} value={r.distance} aria-label="DMT" onChange={(e) => setRoute(r.id, { distance: Math.max(0, Number(e.target.value) || 0) })} /></td>
                   <td className="px-1 py-1">
                     <select className={`${cell} w-28`} value={r.roadType ?? 'interna'} aria-label="Via" onChange={(e) => setRoute(r.id, { roadType: e.target.value as 'interna' | 'estrada' })}>
@@ -121,11 +125,25 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   </td>
                   <td className="px-1 py-1 text-right"><input type="number" step={0.1} min={0} className={`${num} w-20`} value={r.loadMin ?? ''} placeholder={a ? n1(a.cycle.loadMin) : String(premises.loadingTime)} title="Vazio = o equipamento do local ou o tempo de carga das premissas" aria-label="Tempo de carga" onChange={(e) => setRoute(r.id, { loadMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
                   <td className="px-1 py-1 text-right"><input type="number" step={0.1} min={0} className={`${num} w-20`} value={r.dumpMin ?? ''} placeholder={String(premises.dumpingTime)} title="Vazio = o tempo de basculamento das premissas" aria-label="Tempo de descarga" onChange={(e) => setRoute(r.id, { dumpMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} /></td>
+                  <td className="px-1 py-1">
+                    <button type="button" onClick={() => setOpen(open === r.id ? null : r.id)} className="whitespace-nowrap rounded-lg border border-black/10 px-2 py-1 text-xs hover:bg-black/5">
+                      {r.stops?.length ? `${r.stops.length} · ${n1(r.stops.reduce((s2, x) => s2 + x.stopMin * (x.dir === 'ambos' ? 2 : 1), 0))} min` : '+ parada'}
+                    </button>
+                  </td>
                   <td className="px-1 py-1 text-right font-mono tabular-nums">{a ? n1(a.cycle.totalMin) : '—'}</td>
                   <td className="px-1 py-1 text-right font-mono tabular-nums">{a ? `${t0(a.trucksAllocated)} (${n1(a.trucksNeededExact)})` : '—'}</td>
                   <td className="px-1 py-1 text-center"><input type="checkbox" checked={r.active} aria-label="Movimentação ativa" onChange={(e) => setRoute(r.id, { active: e.target.checked })} /></td>
                   <td className="px-1 py-1"><button type="button" onClick={() => del(r)} className="rounded-lg p-1.5 text-black/35 hover:bg-red-50 hover:text-red-600" aria-label={`Apagar ${r.name}`}><Trash2 size={14} /></button></td>
                 </tr>
+                {open === r.id && (
+                  <tr className="bg-black/[0.02]">
+                    <td colSpan={14} className="px-2 py-2">
+                      <p className="mb-1 text-xs text-black/55">Paradas no trajeto de <b>{r.name}</b> (DMT {t0(r.distance)} m):</p>
+                      <StopsEditor route={r} onChange={(stops) => setRoute(r.id, { stops })} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -133,7 +151,7 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
             <tr className="border-t border-black/10 font-semibold">
               <td className="px-1 py-1" colSpan={4}>Total</td>
               <td className="px-1 py-1 text-right font-mono tabular-nums">{t0(routes.filter((r) => r.active).reduce((s, r) => s + (masses.get(r.id) ?? 0), 0))}</td>
-              <td colSpan={8} />
+              <td colSpan={9} />
             </tr>
           </tfoot>
         </table>

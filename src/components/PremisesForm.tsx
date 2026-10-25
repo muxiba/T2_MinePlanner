@@ -1,6 +1,7 @@
 import CatalogEditor from './CatalogEditor';
 import { analyzeFleet } from '@/engine/fleet';
 import { setWasteOn, switchFlowMode } from '@/engine/flowMode';
+import { transportTargetMonth } from '@/engine/network';
 import TransportTable from './TransportTable';
 import NetworkEditor from './NetworkEditor';
 import FlowDiagram from './FlowDiagram';
@@ -319,6 +320,9 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
             { label: "Só transporte (origem → destino, sem planta)", value: "transporte" }
           ] 
         },
+        ...(tm
+          ? [{ label: "Meta de transporte (t/h, base seca)", key: "transportTargetTph", highlight: true, hint: (() => { const m = transportTargetMonth(premises); return m.tph > 0 ? `= ${Math.round(m.monthT).toLocaleString('pt-BR')} t/mês com ${Math.round(m.effH).toLocaleString('pt-BR')} h efetivas (calendário × DF × UF da mina). Movimentações sem massa dividem o saldo da meta.` : 'Massa que a frota precisa entregar nos destinos. Vazio = vale a massa de cada movimentação.'; })() }]
+          : []),
         premises.processType === 'seco'
           ? { label: "RM — recuperação mássica a seco (%)", key: "rmDry" }
           : { label: "RM Global (%)", key: "rmGlobal" },

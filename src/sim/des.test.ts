@@ -173,3 +173,17 @@ describe('despacho dinâmico', () => {
     expect(Math.abs(fixed.stats.perCircuit[0].trips - fixed.stats.perCircuit[1].trips)).toBeLessThan(fixed.stats.perCircuit[0].trips * 0.2);
   });
 });
+
+describe('paradas no trajeto', () => {
+  it('parada de 10 min nos dois sentidos soma ~20 min ao ciclo; balança única forma fila', () => {
+    const r1 = { id: 'r1', name: 'A', points: [{ x: 0, y: 0, z: 0 }, { x: 2000, y: 0, z: 0 }] };
+    const m0 = emptyModel();
+    const c = { ...defaultCircuit(r1, 0), destination: 'D1', trucks: 1 };
+    const base: SimModel = { ...m0, routes: [r1], circuits: [c] };
+    const withStop: SimModel = { ...base, circuits: [{ ...c, stops: [{ name: 'Balança', weigh: true, frac: 0.5, stopMin: 10, dir: 'ambos', posts: 1 }] }] };
+    const a = simulate(base, { scenario: base.scenarios[0], config: base.configs[0], seed: 3 }).stats.perCircuit[0].cycleMin;
+    const b = simulate(withStop, { scenario: base.scenarios[0], config: base.configs[0], seed: 3 }).stats.perCircuit[0].cycleMin;
+    expect(b - a).toBeGreaterThan(17);
+    expect(b - a).toBeLessThan(23);
+  });
+});

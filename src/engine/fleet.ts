@@ -151,6 +151,8 @@ export interface CycleBreakdown {
   queueMin: number;
   /** interferências na via por viagem (perdas detalhadas das premissas) */
   interferenceMin: number;
+  /** paradas no trajeto (pesagem, inspeção, abastecimento) */
+  stopsMin?: number;
   calculatedMin: number;
   informedMin: number;
   /** ciclo efetivamente usado */
@@ -485,6 +487,11 @@ export function loaderLoading(loader: Pick<LoaderSetup, 'bucketM3' | 'fillFactor
   return { passLoadT, passes, loadMin, passesStatus: passesStatusOf(passes) };
 }
 
+/** Tempo parado no trajeto por ciclo (min): cada parada conta uma vez por sentido em que o caminhão para. */
+export function routeStopsMin(route: Pick<Route, 'stops'>) {
+  return (route.stops ?? []).reduce((a, s) => a + Math.max(0, s.stopMin || 0) * (s.dir === 'ambos' ? 2 : 1), 0);
+}
+
 function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): CycleBreakdown {
   const vLoaded = Math.max(premises.velocidadeCheio, 1) * (1000 / 60); // m/min
   const vEmpty = Math.max(premises.velocidadeVazio, 1) * (1000 / 60);
@@ -494,7 +501,8 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
   const weighMin = Math.max(premises.weighingTimeLoaded, 0) + Math.max(premises.weighingTimeEmpty, 0);
   const queueMin = Math.max(route.queueMin ?? 0, 0);
   const interference = interferenceMin(premises);
-  const calculatedMin = loadMin + travelLoadedMin + dumpMin + travelEmptyMin + weighMin + queueMin + interference;
+  const stopsMin = routeStopsMin(route);
+  const calculatedMin = loadMin + travelLoadedMin + dumpMin + travelEmptyMin + weighMin + queueMin + interference + stopsMin;
   const informedMin = Math.max(route.cycleTime || 0, 0);
   const mode = route.cycleMode === 'informed' && informedMin > 0 ? 'informed' : 'calculated';
   return {
@@ -505,6 +513,7 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
     weighMin,
     queueMin,
     interferenceMin: interference,
+    stopsMin,
     calculatedMin,
     informedMin,
     totalMin: Math.max(mode === 'informed' ? informedMin : calculatedMin, 0.1),

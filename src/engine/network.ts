@@ -118,14 +118,49 @@ export function transportMode(p: Pick<DetailedPremises, 'flowMode'>) {
  * Modo só transporte: cada movimentação leva a massa informada (t seca/mês); o balanço só confere os pontos de passagem
  * (o que entra sai, ± variação de estoque) e avisa movimentação sem massa.
  */
+/** Horas efetivas da mina no mês (calendário × DF × UF) e a meta de transporte do mês (t seca). */
+export function transportTargetMonth(premises: DetailedPremises) {
+  const cal = (premises.dailyCalendar ?? []).reduce((a, d) => a + (d.hoursMina || 0), 0) || (premises.calendarDays || 30) * (premises.contractedHoursMina || 24);
+  const effH = cal * ((premises.dfMina || 0) / 100) * ((premises.ufMina || 0) / 100);
+  const tph = Math.max(0, premises.transportTargetTph || 0);
+  return { tph, effH, monthT: tph * effH };
+}
+
 export function transportBalance(routes: Route[], premises: DetailedPremises): NetworkResult {
   const nodes = premises.nodes ?? [];
   const active = routes.filter((r) => r.active && r.fromId && r.toId && nodes.some((n) => n.id === r.fromId) && nodes.some((n) => n.id === r.toId));
   const edges = new Map<string, number>();
   const issues: NetworkIssue[] = [];
+  const meta = transportTargetMonth(premises);
+  const isPass = (id?: string) => nodes.find((n) => n.id === id)?.group === 'passagem';
+  const w = (r: Route) => (r.share === undefined ? 1 : Math.max(0, r.share));
+  const fixed = (r: Route) => (r.targetMass && r.targetMass > 0 ? r.targetMass : null);
+  // 1) saídas das origens: massas informadas; as em branco dividem o saldo da meta pelo peso
+  const fromOrigins = active.filter((r) => !isPass(r.fromId));
+  const fixedSum = fromOrigins.reduce((a, r) => a + (fixed(r) ?? 0), 0);
+  const blanks = fromOrigins.filter((r) => fixed(r) === null);
+  const wSum = blanks.reduce((a, r) => a + w(r), 0) || 1;
+  for (const r of fromOrigins) edges.set(r.id, fixed(r) ?? (meta.monthT > 0 ? (Math.max(0, meta.monthT - fixedSum) * w(r)) / wSum : 0));
+  // 2) saídas dos pontos de passagem: em branco = o que entra − variação de estoque − saídas informadas, pelo peso
+  for (let it = 0; it < 12; it++) {
+    for (const n of nodes.filter((x) => x.group === 'passagem')) {
+      const outs = active.filter((r) => r.fromId === n.id);
+      if (!outs.length) continue;
+      const inT = active.filter((r) => r.toId === n.id).reduce((a, r) => a + (edges.get(r.id) ?? 0), 0);
+      const fx = outs.reduce((a, r) => a + (fixed(r) ?? 0), 0);
+      const bl = outs.filter((r) => fixed(r) === null);
+      const ws = bl.reduce((a, r) => a + w(r), 0) || 1;
+      const rest = Math.max(0, inT - (n.stockChangeT ?? 0) - fx);
+      for (const r of outs) edges.set(r.id, fixed(r) ?? (rest * w(r)) / ws);
+    }
+  }
   for (const r of active) {
-    edges.set(r.id, Math.max(0, r.targetMass || 0));
-    if (!(r.targetMass && r.targetMass > 0)) issues.push({ routeId: r.id, level: 'erro', text: `${r.name}: informe a massa do mês (t seca).` });
+    if (!((edges.get(r.id) ?? 0) > 0)) issues.push({ routeId: r.id, level: 'erro', text: `${r.name}: informe a massa do mês (t seca) ou a meta de transporte.` });
+  }
+  if (meta.monthT > 0) {
+    const delivered = active.filter((r) => !isPass(r.toId)).reduce((a, r) => a + (edges.get(r.id) ?? 0), 0);
+    if (Math.abs(delivered - meta.monthT) > Math.max(1, meta.monthT * 0.005))
+      issues.push({ level: 'aviso', text: `Meta de transporte ${Math.round(meta.tph).toLocaleString('pt-BR')} t/h = ${Math.round(meta.monthT).toLocaleString('pt-BR')} t/mês; as movimentações entregam ${Math.round(delivered).toLocaleString('pt-BR')} t: ${delivered < meta.monthT ? 'faltam' : 'sobram'} ${Math.round(Math.abs(delivered - meta.monthT)).toLocaleString('pt-BR')} t.` });
   }
   const out: NodeBalance[] = nodes.map((n) => {
     const inT = zero();

@@ -4,6 +4,7 @@ import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/t
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportMode } from '@/engine/network';
 import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
 import TransportTable from './TransportTable';
+import StopsEditor from './StopsEditor';
 import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
 import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
@@ -105,7 +106,7 @@ export interface FlowLayout {
   box: Partial<Record<Group, { x: number; y: number; w: number; h: number }>>;
   pos: Map<string, { x: number; y: number; w: number; h: number; g: Group }>;
   H: number;
-  edges: { r: Route; d: string; lx: number; ly: number; k: RouteKind; bad: boolean; mass: number }[];
+  edges: { r: Route; d: string; lx: number; ly: number; k: RouteKind; bad: boolean; mass: number; stops: { x: number; y: number; name: string; kind: string }[] }[];
 }
 
 /** Posição dos blocos, dos locais e das setas (usada no desenho da tela e no do PDF). */
@@ -173,14 +174,20 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
       const ly = bz(lt, 1);
       const k = routeKind(r);
       const bad = res.issues.some((x) => x.routeId === r.id && x.level === 'erro');
-      return { r, d, lx, ly, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0 };
+      // paradas no trajeto: marcadores sobre a seta, pela distância da origem ÷ DMT
+      const stops = (r.stops ?? []).map((st) => {
+        const f = Math.min(0.97, Math.max(0.03, (st.distM || 0) / Math.max(1, r.distance || 1)));
+        return { x: bz(f, 0), y: bz(f, 1), name: st.name, kind: st.kind };
+      });
+      return { r, d, lx, ly, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops };
     });
 
   // rótulos de massa não se sobrepõem: desce o que bater em outro já colocado
   const placed: { x: number; y: number }[] = [];
+  const marks = edges.flatMap((e) => e.stops);
   for (const e of edges) {
     let tries = 0;
-    while (tries++ < 8 && placed.some((q) => Math.abs(q.x - e.lx) < 84 && Math.abs(q.y - e.ly) < 22)) e.ly += 22;
+    while (tries++ < 8 && (placed.some((q) => Math.abs(q.x - e.lx) < 84 && Math.abs(q.y - e.ly) < 22) || marks.some((m) => Math.abs(m.x - e.lx) < 50 && Math.abs(m.y - e.ly) < 18))) e.ly += 22;
     placed.push({ x: e.lx, y: e.ly });
   }
 
@@ -235,6 +242,7 @@ export function flowSvg(routes: Route[], premises: DetailedPremises): string {
     out.push(`<text x="${p.x + 10}" y="${p.y + 17}" font-size="13" font-weight="bold" fill="#151619">${esc(cut(n.name))}</text>`);
     out.push(`<text x="${p.x + 10}" y="${p.y + 32}" font-size="11" fill="#555555">${esc(cut(sub(n), 34))}</text>`);
   }
+  for (const e of L.edges) for (const st of e.stops) out.push(`<rect x="${st.x - 6}" y="${st.y - 6}" width="12" height="12" transform="rotate(45 ${st.x} ${st.y})" fill="#ffffff" stroke="${MAT_COLOR[e.k]}" stroke-width="2"/><text x="${st.x}" y="${st.y - 11}" text-anchor="middle" font-size="10.5" fill="${MAT_COLOR[e.k]}">${esc(cut(st.name, 14))}</text>`);
   for (const e of L.edges) {
     const c = MAT_COLOR[e.k];
     out.push(`<rect x="${e.lx - 40}" y="${e.ly - 10}" width="80" height="20" rx="5" fill="#ffffff" stroke="${c}" stroke-opacity="0.6"/>`);
@@ -265,6 +273,13 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
     setRoutes(() => x.routes);
     setSel(null);
     setLink(null);
+  };
+  const cleanup = () => {
+    const unused = nodes.filter((n) => !routes.some((r) => r.fromId === n.id || r.toId === n.id));
+    if (!unused.length || !confirm(`Apagar ${unused.length} local(is) sem movimentação: ${unused.map((n) => n.name).join(', ')}?`)) return;
+    const ids = new Set(unused.map((n) => n.id));
+    setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).filter((n) => !ids.has(n.id)) }));
+    setSel(null);
   };
   const setWaste = (on: boolean) => {
     const x = setWasteOn(premises, routes, on);
@@ -400,6 +415,11 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
             </button>
           ))}
         </div>
+        {nodes.some((n) => !routes.some((r) => r.fromId === n.id || r.toId === n.id)) && (
+          <button type="button" onClick={cleanup} className="rounded-lg border border-black/10 px-3 py-1 text-sm text-black/65 hover:bg-black/5" title="Apaga do desenho os locais que não têm nenhuma movimentação">
+            Remover locais sem movimentação
+          </button>
+        )}
         {!tm && (
           <label className="flex items-center gap-2 text-sm text-black/70">
             <input type="checkbox" checked={!!premises.hasWasteRock} onChange={(e) => setWaste(e.target.checked)} />
@@ -504,6 +524,13 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                     <rect x={-40} y={-10} width={80} height={20} rx={5} fill="#fff" stroke={color} strokeOpacity={on ? 1 : 0.45} />
                     <text y={4} textAnchor="middle" fontSize={11.5} fontWeight={600} fill={color}>{e.r.active ? `${t0(e.mass)} t` : 'inativa'}</text>
                   </g>
+                  {e.stops.map((st, i) => (
+                    <g key={i} transform={`translate(${st.x},${st.y})`}>
+                      <title>{`${st.name} (${st.kind})`}</title>
+                      <rect x={-6} y={-6} width={12} height={12} transform="rotate(45)" fill="#fff" stroke={color} strokeWidth={2} />
+                      <text y={-11} textAnchor="middle" fontSize={10.5} fill={color}>{cut(st.name, 14)}</text>
+                    </g>
+                  ))}
                 </g>
               );
             })}
@@ -647,6 +674,10 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                 </div>
                 {!tm && <p className="text-[11px] text-black/45">Peso: movimentações do mesmo material saindo do mesmo local dividem a massa (1 e 1 = metade; 3 e 1 = 75% e 25%). Massa fixa: leva exatamente essa massa e o saldo vai para as outras.</p>}
                 <p className="rounded-lg bg-black/[0.03] px-3 py-2 text-sm">Massa no mês: <b className="font-mono">{selRoute.active ? t0(res.edges.get(selRoute.id) ?? 0) : '—'} t seca</b></p>
+                <div>
+                  <p className="mb-1 text-xs text-black/55">Paradas no trajeto</p>
+                  <StopsEditor route={selRoute} compact onChange={(stops) => setRoute(selRoute.id, { stops })} />
+                </div>
                 <label className="flex items-center gap-2 text-xs text-black/60"><input type="checkbox" checked={selRoute.active} onChange={(e) => setRoute(selRoute.id, { active: e.target.checked })} /> Ativa (consome frota)</label>
                 <button type="button" onClick={() => removeRoute(selRoute)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> Apagar movimentação</button>
               </div>

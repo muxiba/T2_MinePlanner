@@ -120,3 +120,22 @@ describe('só transporte, equipamentos por local e estéril', () => {
     expect(on.routes.find((r) => r.id === 'w')!.active).toBe(true);
   });
 });
+
+describe('meta de transporte', () => {
+  it('movimentações sem massa dividem a meta; o ponto de passagem repassa o que recebe', async () => {
+    const { transportTargetMonth } = await import('./network');
+    const nodes: FlowNode[] = [
+      { id: 'o1', name: 'Cava 1', type: 'frente', group: 'origem' },
+      { id: 'o2', name: 'Cava 2', type: 'frente', group: 'origem' },
+      { id: 'pt', name: 'Pátio', type: 'estoque', group: 'passagem' },
+      { id: 'd', name: 'Porto', type: 'expedicao', group: 'destino' },
+    ];
+    const p = { ...P, flowMode: 'transporte' as const, nodes, transportTargetTph: 200 };
+    const routes = [R('a', 'Cava 1 → Pátio', 'rom', 'o1', 'pt', { targetMass: 30000 }), R('b', 'Cava 2 → Pátio', 'rom', 'o2', 'pt'), R('c', 'Pátio → Porto', 'rom', 'pt', 'd')];
+    const m = transportTargetMonth(p).monthT;
+    const t = routeTargets(routes, p);
+    expect(t.get('b')!).toBeCloseTo(m - 30000, 0);
+    expect(t.get('c')!).toBeCloseTo(m, 0);
+    expect(networkBalance(routes, p, routeKind).issues.length).toBe(0);
+  });
+});

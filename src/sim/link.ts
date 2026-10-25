@@ -328,6 +328,13 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
       const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
       return r?.loadMin !== undefined ? { loadSpotMin: r.loadMin, loaderTph: 1e9 } : {};
     })()),
+    // paradas no trajeto da movimentação ligada: posição pela distância da origem ÷ DMT
+    stops: (() => {
+      const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
+      if (!r?.stops?.length) return undefined;
+      const L = Math.max(1, r.distance || 1);
+      return r.stops.map((x) => ({ name: x.name, weigh: x.kind === 'pesagem', frac: Math.min(1, Math.max(0, (x.distM || 0) / L)), stopMin: Math.max(0, x.stopMin || 0), dir: x.dir, posts: Math.max(1, x.posts || 1) }));
+    })(),
   }));
   const dests = [...new Set(model.circuits.map((c) => c.destination))];
   const recList = [...model.receiving, ...dests.filter((d) => !model.receiving.some((r) => r.destination === d)).map((d) => defaultReceiving(d))];
@@ -477,7 +484,8 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises, edge
       const loadMin = loadTime(cfg, c);
       const dumpMin = cfg.dumpMin + cfg.maneuverMin;
       const interfC = interference + Math.max(0, cfg.trafficDelayMin ?? 0);
-      const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interfC;
+      const stopsMin = (c.stops ?? []).reduce((a, x) => a + x.stopMin * (x.dir === 'ambos' ? 2 : 1), 0);
+      const cycleMin = loadMin + tt.loaded + tt.empty + dumpMin + weighMin + queue + interfC + stopsMin;
       const payloadT = payloadFor(cfg, c);
       return { weight, tt, loadMin, dumpMin, interfC, cycleMin, payloadT, perTruckTph: cycleMin > 0 ? (payloadT * 60) / cycleMin : 0 };
     });

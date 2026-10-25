@@ -479,6 +479,11 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       /** média de cada espera (metade na ida, metade na volta) */
       interf: (interfBase + Math.max(0, cfg.trafficDelayMin ?? 0)) / 2,
       variants,
+      // paradas no trajeto: na ida pela posição a partir da origem, na volta a partir do destino
+      stopsFor: {
+        ida: (c.stops ?? []).filter((x) => x.dir !== 'volta').map((x) => ({ ...x, pos: Math.min(1, Math.max(0, x.frac)), server: new Server(Math.max(1, x.posts || 1)) })).sort((a, b) => a.pos - b.pos),
+        volta: (c.stops ?? []).filter((x) => x.dir !== 'ida').map((x) => ({ ...x, pos: 1 - Math.min(1, Math.max(0, x.frac)), server: new Server(Math.max(1, x.posts || 1)) })).sort((a, b) => a.pos - b.pos),
+      },
     };
   });
 
@@ -581,6 +586,36 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
     beginLoad2(k, t, unit);
   };
 
+  /** Percorre um sentido da rota parando nas paradas do trajeto (fila no posto, tempo parado) e chama done no fim. */
+  const drive = (k: Truck, t: number, travel: number, leg: 'ida' | 'volta', moving: TruckState, done: (t: number) => void) => {
+    const list = ctx[k.ci].stopsFor[leg];
+    let i = 0;
+    let prev = 0;
+    const next = (tt: number) => {
+      if (i >= list.length) {
+        const tEnd = tt + travel * (1 - prev);
+        heap.push(tEnd, () => done(tEnd));
+        return;
+      }
+      const st = list[i++];
+      const ta = tt + travel * (st.pos - prev);
+      prev = st.pos;
+      heap.push(ta, () => {
+        setState(k, st.weigh ? 'fila_balanca' : 'interferencia', ta);
+        st.server.request(ta, () => {
+          setState(k, st.weigh ? 'pesando' : 'interferencia', now);
+          const t1 = now + lognormal(r, Math.max(0.01, st.stopMin), cv);
+          heap.push(t1, () => {
+            st.server.release(t1);
+            setState(k, moving, t1);
+            next(t1);
+          });
+        });
+      });
+    };
+    next(t);
+  };
+
   const beginLoad2 = (k: Truck, t: number, unit: number) => {
     const x = ctx[k.ci];
     const v = x.variants[k.vi];
@@ -591,18 +626,17 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       x.loader.release(t + d);
       setState(k, 'carregado', t + d);
       const tr = lognormal(r, v.tt.loaded, cv * 0.5);
-      const ta = t + d + tr;
       // interferências na via (cruzamentos, equipamentos de apoio, tráfego): espera no trajeto
       const w = v.interf ? exp(r, v.interf) : 0;
-      if (w > 0.05) {
-        heap.push(ta, () => {
+      drive(k, t + d, tr, 'ida', 'carregado', (ta) => {
+        if (w > 0.05) {
           setState(k, 'interferencia', ta);
           heap.push(ta + w, () => {
             setState(k, 'carregado', ta + w);
             afterHaul(k, ta + w);
           });
-        });
-      } else heap.push(ta, () => afterHaul(k, ta));
+        } else afterHaul(k, ta);
+      });
     });
   };
 
@@ -654,7 +688,6 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
       }
       setState(k, 'vazio', t1);
       const tr = lognormal(r, v.tt.empty, cv * 0.5);
-      const t2 = t1 + tr;
       const wE = v.interf ? exp(r, v.interf) : 0;
       const endEmpty = (t2: number) => {
         const productive = t2 - k.cycleStart;
@@ -669,12 +702,12 @@ export function simulate(model: SimModel, opt: RunOptions): RunResult {
           heap.push(t2 + loss, () => startCycle(k, t2 + loss));
         } else startCycle(k, t2);
       };
-      if (wE > 0.05) {
-        heap.push(t2, () => {
+      drive(k, t1, tr, 'volta', 'vazio', (t2) => {
+        if (wE > 0.05) {
           setState(k, 'interferencia', t2);
           heap.push(t2 + wE, () => endEmpty(t2 + wE));
-        });
-      } else heap.push(t2, () => endEmpty(t2));
+        } else endEmpty(t2);
+      });
     });
   };
 
