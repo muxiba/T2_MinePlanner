@@ -27,6 +27,7 @@ const pc = (n: number) => `${Math.round(n * 100)}%`;
 const inputCls = 'w-full bg-[#F8F9FA] border border-black/5 rounded-xl px-3 py-2 text-sm font-mono';
 
 const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises, setPremises }) => {
+  const netOn = (premises.nodes?.length ?? 0) > 0 && routes.some((r) => !!r.fromId);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [memo, setMemo] = React.useState<string | null>(null);
   const analysis = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
@@ -151,11 +152,18 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
           <button onClick={exportToCSV} className="flex items-center gap-2 rounded-xl border border-black/5 bg-white px-4 py-2.5 text-sm font-bold text-black/60 hover:bg-black/[0.02]">
             <Download size={16} /> Exportar Excel
           </button>
-          <button onClick={handleAddRoute} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-600">
-            <Plus size={16} /> Adicionar frente/rota
-          </button>
+          {!netOn && (
+            <button onClick={handleAddRoute} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-600">
+              <Plus size={16} /> Adicionar frente/rota
+            </button>
+          )}
         </div>
       </div>
+      {netOn && (
+        <p className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          As movimentações (origem, destino, material, DMT e massa) e a frota são entradas das <b>Premissas Fundamentais</b> (etapas Locais e movimentações, e Frota e catálogo). Esta tela analisa a frota de cada rota; DF, UF, carga útil e caminhões alterados aqui valem como cenário desta rota.
+        </p>
+      )}
 
       {/* ------------------------------ frota ------------------------------ */}
       <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
@@ -331,7 +339,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
             </tbody>
           </table>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-black/55">
+        {!netOn && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-black/55">
           Adicionar rota de:
           {FLOW_ORDER.filter((k) => flowTargets(premises)[k] > 0).map((k) => (
             <button key={k} type="button" onClick={() => addFlowRoute(k)} className="rounded-lg border border-black/10 bg-white px-2.5 py-1 font-semibold text-black/70 hover:bg-black/[0.03]">
@@ -339,7 +347,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
             </button>
           ))}
           <span className="text-black/40">Cada fluxo das premissas ganha uma rota automaticamente; se você apagar, ela não volta (crie de novo aqui).</span>
-        </div>
+        </div>}
       </section>
 
       {/* ------------------------------ rotas ------------------------------ */}
@@ -349,6 +357,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
         const area = kind === 'product' || kind === 'tailings' ? 'planta' : 'mina';
         const rates = routeRates(route, premises, area);
         const editing = editingId === route.id;
+        const fromNet = netOn && !!route.fromId;
         return (
           <div key={route.id} className={`rounded-3xl border bg-white shadow-sm ${editing ? 'border-emerald-500 ring-4 ring-emerald-500/5' : 'border-black/5'}`}>
             <div className="p-6">
@@ -359,12 +368,14 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                   </div>
                   {editing ? (
                     <div className="flex flex-col gap-2">
-                      <input type="text" value={route.name} onChange={(e) => handleUpdateRoute(route.id, { name: e.target.value })} className="rounded-xl border border-black/5 bg-[#F8F9FA] px-4 py-2 text-lg font-bold" />
+                      <input type="text" value={route.name} readOnly={fromNet} title={fromNet ? 'Editar em Premissas → Locais e movimentações' : undefined} onChange={(e) => handleUpdateRoute(route.id, { name: e.target.value })} className="rounded-xl border border-black/5 bg-[#F8F9FA] px-4 py-2 text-lg font-bold" />
                       <label className="flex flex-col gap-1 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-[10px] font-black tracking-widest text-emerald-700 uppercase">
                         <span className="flex items-center gap-2"><PlusCircle size={12} /> Massa mensal planejada (t seca)</span>
                         <input
                           type="number"
                           value={route.targetMass || ''}
+                          readOnly={fromNet}
+                          title={fromNet ? 'Editar em Premissas → Locais e movimentações' : undefined}
                           onChange={(e) => handleMassChange(route, parseFloat(e.target.value) || 0)}
                           className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 font-mono text-sm font-bold text-emerald-900 normal-case"
                           placeholder="vazio = calculada pelas premissas"
@@ -463,7 +474,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
                   )}
                 </Field>
                 <Field label="DMT (m)" icon={<MapPin size={12} />}>
-                  {editing ? (
+                  {editing && !fromNet ? (
                     <input type="number" value={route.distance} onChange={(e) => handleUpdateRoute(route.id, { distance: parseFloat(e.target.value) || 0 })} className={inputCls} />
                   ) : (
                     <p className="font-mono text-lg font-bold">{t0(route.distance)}</p>

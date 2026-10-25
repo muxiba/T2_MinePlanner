@@ -1,3 +1,4 @@
+import FleetRequirement from './FleetRequirement';
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import {
@@ -389,6 +390,8 @@ const SummaryView: React.FC<Props> = ({ analysis, routes, setRoutes, premises, s
           <p className="mt-5 text-sm text-black/60">A frota das premissas já está toda nas rotas. Para atingir a meta faltam {opt.missingForTarget} caminhão(ões), ou ganhos de produtividade (ações abaixo).</p>
         )}
       </section>
+
+      <FleetRequirement routes={routes} premises={premises} />
 
       {/* Etapas */}
       <section aria-labelledby="etapas">

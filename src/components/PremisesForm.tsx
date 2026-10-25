@@ -2,7 +2,7 @@ import CatalogEditor from './CatalogEditor';
 import NetworkEditor from './NetworkEditor';
 import FleetTypesEditor from './FleetTypesEditor';
 import { processPct } from '@/engine/process';
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Download } from "lucide-react";
@@ -27,6 +27,16 @@ const months = [
 const years = [2024, 2025, 2026, 2027, 2028];
 const fmt2 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt3 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
+
+const STEPS = [
+  { id: 0, label: 'Todas', hint: '' },
+  { id: 1, label: 'Período e calendário', hint: 'Mês, consumo da planta, jornadas, DF e UF, e as paradas programadas do calendário da mina e da planta.' },
+  { id: 2, label: 'Processo e massas', hint: 'Tipo de processo, RM, rejeito, umidade e estéril. A produção planejada mostra as massas que saem destas entradas.' },
+  { id: 3, label: 'Locais e movimentações', hint: 'Frentes, plantas, estoques, expedição, baias e pilhas, e as movimentações entre eles (cada uma é uma rota e consome frota).' },
+  { id: 4, label: 'Frota e catálogo', hint: 'Caminhão das premissas ou frota mista por tipo, velocidades, e o catálogo de modelos com custos e vida útil.' },
+  { id: 5, label: 'Carga e ciclo', hint: 'Tempos do ciclo. O equipamento de carga de cada local fica em Locais e movimentações.' },
+  { id: 6, label: 'Perdas', hint: 'Troca de turno, refeição, abastecimento e interferências: definem a UF e entram em cada ciclo.' },
+];
 
 const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setRoutes, results, routes }) => {
   const handleChange = (field: keyof DetailedPremises, value: any) => {
@@ -226,9 +236,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     if ((Object.keys(next) as (keyof typeof next)[]).some((k) => Math.abs((premises[k] ?? 0) - next[k]) > 0.005)) setPremises((prev) => ({ ...prev, ...next }));
   }, [tr.rom, tr.tailings, tr.product, tr.total]);
 
+  const [step, setStep] = useState(0);
+  const show = (n: number) => step === 0 || step === n;
+  const mixedFleet = (premises.fleetTypes ?? []).filter((t) => t.count > 0).length > 1;
+
   const sections = [
     {
       title: "Período de Simulação",
+      step: 1,
       fields: [
         { label: "Mês", key: "month", type: "select", options: months.map((m, i) => ({ label: m, value: i })) },
         { label: "Ano", key: "year", type: "select", options: years.map(y => ({ label: y.toString(), value: y })) },
@@ -239,6 +254,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     },
     {
       title: "Mina",
+      step: 1,
       fields: [
         { label: "DF Equipamentos (%)", key: "dfMina" },
         { label: premises.losses?.enabled ? "UF Equipamentos (%) — calculada pelas perdas" : "UF Equipamentos (%)", key: "ufMina", readOnly: !!premises.losses?.enabled },
@@ -248,6 +264,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     },
     {
       title: "Planta & Limite de Processamento",
+      step: 1,
       fields: [
         { label: "DF Equipamentos (%)", key: "dfPlanta" },
         { label: "UF Equipamentos (%)", key: "ufPlanta" },
@@ -257,6 +274,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     },
     {
       title: "Processo",
+      step: 2,
       fields: [
         { 
           label: "Tipo de Processo", 
@@ -289,12 +307,13 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     },
     {
       title: "Transporte / Frota",
+      step: 4,
       fields: [
         { label: "Velocidade Vazio (km/h)", key: "velocidadeVazio" },
         { label: "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
         { label: "Classe do Caminhão", key: "truckClassId", type: "select", options: [...catalogOf(premises).trucks.map((t) => ({ label: `${t.manufacturer ? `${t.manufacturer} – ` : ''}${t.name}`, value: t.id })), { label: "Outra (informar abaixo)", value: "" }] },
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
-        { label: "Número de Caminhões", key: "truckCount" },
+        { label: mixedFleet ? "Número de Caminhões — soma da frota por tipo" : "Número de Caminhões", key: "truckCount", readOnly: mixedFleet },
         { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
         { label: "Transporte de rejeito necessário (t/h úmida)", key: "fleetCapacityBaiaTPH", readOnly: true },
         { label: "Transporte de produto necessário (t/h úmida)", key: "fleetCapacityTerminalTPH", readOnly: true },
@@ -303,6 +322,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     },
     {
       title: "Tempos de Ciclo (min)",
+      step: 5,
       fields: [
         { label: "Carregamento (min)", key: "loadingTime" },
         { label: "Basculamento/Manobra (min)", key: "dumpingTime" },
@@ -326,6 +346,23 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           Exportar Excel
         </button>
       </div>
+      {/* Etapas: todas as entradas do planejamento ficam aqui; as outras telas analisam */}
+      <nav className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1.5 rounded-2xl border border-black/5 bg-white/95 p-1.5 shadow-sm backdrop-blur" aria-label="Etapas das premissas">
+        {STEPS.map((st) => (
+          <button
+            key={st.id}
+            type="button"
+            onClick={() => setStep(st.id)}
+            aria-current={step === st.id ? 'step' : undefined}
+            className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-colors ${step === st.id ? 'bg-[#151619] text-white' : 'text-black/60 hover:bg-black/5'}`}
+          >
+            {st.id > 0 && <span className="mr-1 font-mono text-xs opacity-60">{st.id}</span>}
+            {st.label}
+          </button>
+        ))}
+      </nav>
+      {step > 0 && <p className="-mt-4 text-xs text-black/50">{STEPS[step].hint}</p>}
+
       {/* Header Stats */}
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -366,6 +403,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </div>
       </div>
 
+      {show(2) && (
+        <>
       {/* Planned Production Summary */}
       <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
         <h3 className="text-sm font-bold uppercase tracking-widest text-emerald-400 mb-2">Produção Planejada Detalhada</h3>
@@ -418,8 +457,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </div>
       </div>
 
+      </>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {sections.map((section) => (
+        {sections.filter((section) => show(section.step)).map((section) => (
           <div key={section.title} className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
             <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-4">{section.title}</h3>
             <div className="space-y-4">
@@ -469,6 +511,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         ))}
       </div>
 
+      {show(3) && (
+        <>
       {/* Locais e movimentações */}
       {routes && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
@@ -477,6 +521,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </div>
       )}
 
+      </>
+      )}
+
+      {show(4) && (
+        <>
       {/* Frota por tipo (frota mista) */}
       {routes && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
@@ -493,6 +542,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </div>
       </details>
 
+      </>
+      )}
+
+      {show(6) && (
+        <>
       {/* Perdas operacionais detalhadas */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -538,7 +592,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         </p>
       </div>
 
+      </>
+      )}
+
       {/* Operational Calendar Table */}
+      {show(1) && (
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
         <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-6">Calendário Operacional & Paradas Programadas</h3>
         
@@ -650,6 +708,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };
