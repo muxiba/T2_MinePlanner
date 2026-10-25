@@ -144,6 +144,8 @@ export interface Scenario {
 export interface SimModel {
   /** frota mista: composição fixa (proporções) ou sorteio do tipo de cada caminhão a cada réplica */
   mixDraw?: 'fixo' | 'sorteio';
+  /** resumo da última matriz simulada (para o memorial impresso) */
+  lastRun?: { at: string; targetTpd: number; rows: { config: string; scenario: string; tpd: number; lo: number; hi: number; cycleMin: number; queueLoadMin: number; costPerT: number }[]; circuits: { name: string; tpd: number; cycleMin: number }[] };
   /** período cuja geometria (DXF das movimentações) é usada na simulação e no mapa; padrão 1 */
   geoPeriod?: number;
   /** despacho: cada caminhão fica no seu circuito ('fixo') ou, a cada viagem, vai para o circuito mais atrasado na meta ('dinamico') */

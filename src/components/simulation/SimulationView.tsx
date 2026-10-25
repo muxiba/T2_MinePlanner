@@ -246,6 +246,20 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
         (f) => setMatrixBusy(f),
       );
       setMatrix(res);
+      // resumo guardado no plano para o memorial impresso (Detalhes de cálculo)
+      const cfgName = (id: string) => model.configs.find((c) => c.id === id)?.name ?? id;
+      const scName = (id: string) => model.scenarios.find((c) => c.id === id)?.name ?? id;
+      const base = res.find((x) => x.configId === model.configs[0]?.id && x.scenarioId === model.scenarios[0]?.id) ?? res[0];
+      if (canEdit && base)
+        setModel({
+          ...model,
+          lastRun: {
+            at: new Date().toISOString(),
+            targetTpd: model.targetTpd ?? 0,
+            rows: res.map((x) => ({ config: cfgName(x.configId), scenario: scName(x.scenarioId), tpd: x.stats.tpd.mean, lo: x.stats.tpd.lo, hi: x.stats.tpd.hi, cycleMin: x.stats.cycleMin.mean, queueLoadMin: x.stats.queueLoadMin.mean, costPerT: x.stats.costPerT.mean })),
+            circuits: base.stats.perCircuit.map((c) => ({ name: c.name, tpd: c.tpd.mean, cycleMin: c.cycleMin ?? 0 })),
+          },
+        });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

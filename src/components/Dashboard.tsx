@@ -90,7 +90,7 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
 
   return (
     <div className="space-y-6">
-      <CalcReport analysis={a} premises={premises} results={results} companyName={companyName} planName={planName} />
+      <CalcReport analysis={a} premises={premises} results={results} companyName={companyName} planName={planName} routes={routes} />
       {/* ------------------------------ cabeçalho ------------------------------ */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>

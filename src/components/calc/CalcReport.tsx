@@ -1,8 +1,13 @@
 import React, { useMemo } from 'react';
 import { processPct } from '@/engine/process';
 import { createPortal } from 'react-dom';
-import type { DetailedPremises } from '@/types';
-import { fmtTrucks, KIND_LABELS, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
+import type { DetailedPremises, Route } from '@/types';
+import { catalogOf, fmtTrucks, KIND_LABELS, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
+import { flowSvg } from '@/components/FlowDiagram';
+import { buildFleetReport } from '@/engine/fleetReport';
+import { fleetTypesOf, hourlyCost, mixedOn } from '@/engine/mix';
+import { transportMode, transportTargetMonth } from '@/engine/network';
+import { mapSvg } from '@/sim/mapSvg';
 import { t0, n1, n2, pc, KIND_COLOR, FlowBox, Arrow, HoursCascade, CycleBars, StageBar } from './parts';
 
 /**
@@ -18,6 +23,8 @@ interface Props {
   results: any;
   companyName?: string;
   planName?: string;
+  /** movimentações (rede de fluxos) para o desenho, a frota por tipo, a carga e o mapa */
+  routes?: Route[];
 }
 
 const PAGE_CSS = `
@@ -34,10 +41,22 @@ const PAGE_CSS = `
   .calc-report .avoid { break-inside: avoid; page-break-inside: avoid; }
   .calc-report .page-break { break-before: page; page-break-before: always; }
   .calc-report h2 { break-after: avoid; }
+  .calc-report .fig svg { width: 100%; height: auto; display: block; }
 }
 `;
 
-export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results, companyName, planName }) => {
+export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results, companyName, planName, routes = [] }) => {
+  const tm = transportMode(p);
+  const meta = transportTargetMonth(p);
+  const net = flowSvg(routes, p);
+  const map = mapSvg(p.simulation, routes, p);
+  const rep = buildFleetReport(routes, p);
+  const mixed = mixedOn(p);
+  const cat = catalogOf(p);
+  const lname = (id?: string) => (id === 'silo' ? 'Silo / correia' : cat.loaders.find((l) => l.id === id)?.name ?? '—');
+  const run = p.simulation?.lastRun;
+  const tmOk = a.routes.every((r) => r.ratio >= 0.999);
+  const delivered = tm ? a.routes.filter((r) => !(p.nodes ?? []).some((n) => n.group === 'passagem' && routes.find((x) => x.id === r.id)?.toId === n.id)).reduce((acc, r) => acc + r.targetDryT, 0) : 0;
   const f = a.fleet;
   const b = a.bottleneck;
   const now = new Date();
@@ -67,7 +86,13 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
     ['Pesagem carregado / vazio', `${n1(p.weighingTimeLoaded)} / ${n1(p.weighingTimeEmpty)} min`],
     ['Fila por ciclo', `${n1(p.queueMin ?? 0)} min`],
     ['Calendário', `${p.calendarDays} dias · ${t0(calMina)} h mina · ${t0(calPlanta)} h planta`],
+    ['Modo da rede', tm ? 'Só transporte (origem → destino)' : 'Processo (mina → planta → produto/rejeito)'],
+    ...(tm ? ([['Meta de transporte', meta.tph > 0 ? `${t0(meta.tph)} t/h = ${t0(meta.monthT)} t/mês` : 'pela massa de cada movimentação']] as [string, string][]) : []),
+    ['Frota por tipo', mixed ? fleetTypesOf(p).map((t) => `${t.count}× ${t.cls.name}`).join(' + ') : 'um tipo'],
+    ['Distribuição da frota', mixed ? ({ auto: 'automática (menor custo por t)', manual: 'manual', estatistico: 'estatística (caminhões compartilhados)' } as Record<string, string>)[p.mixMode ?? 'auto'] : '—'],
+    ['Equipamento de carga padrão', p.defaultLoaderClassId ? lname(p.defaultLoaderClassId) : 'tempo de carga das premissas'],
   ];
+  const tmRows = tm ? premisesRows.filter((r) => !/Meta de ROM|Processo|Recuperação|Rejeito|Perda de processo|Taxa de alimentação|da planta/.test(r[0])) : premisesRows;
 
   return createPortal(
     <div className="calc-report bg-white font-sans text-[10pt] leading-snug text-[#1A1A1A]">
@@ -93,6 +118,15 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
       </header>
 
       {/* ------------------------------ veredito ------------------------------ */}
+      {tm ? (
+        <div className={`avoid mt-4 rounded-xl border-l-4 px-4 py-3 ${tmOk ? 'border-emerald-600 bg-emerald-50 text-emerald-950' : 'border-red-600 bg-red-50 text-red-950'}`}>
+          <p className="text-[10.5pt]">
+            <b>{tmOk ? 'A frota atende todas as movimentações.' : 'A frota não atende todas as movimentações.'}</b> Só transporte: {t0(delivered)} t secas entregues nos destinos no mês
+            {meta.tph > 0 ? ` (meta ${t0(meta.tph)} t/h = ${t0(meta.monthT)} t/mês, ${pc(meta.monthT ? delivered / meta.monthT : 1)})` : ''}, com {fmtTrucks(f.allocated)} dos {f.premise} caminhões.
+          </p>
+        </div>
+      ) : null}
+      {!tm && (<>
       <div className={`avoid mt-4 rounded-xl border-l-4 px-4 py-3 ${a.meetsTarget ? 'border-emerald-600 bg-emerald-50 text-emerald-950' : 'border-red-600 bg-red-50 text-red-950'}`}>
         <p className="text-[10.5pt]">
           {a.meetsTarget ? (
@@ -117,13 +151,15 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
         <RKpi label="Etapa mais justa" value={b ? pc(b.ratio) : '—'} sub={b?.label ?? ''} tone={b && b.ratio < 0.999 ? 'bad' : 'ok'} />
       </div>
 
+      </>)}
+
       {/* ------------------------------ premissas ------------------------------ */}
       <RSection title="Premissas utilizadas">
         <table className="w-full text-[9pt]">
           <tbody>
-            {Array.from({ length: Math.ceil(premisesRows.length / 2) }, (_, i) => (
+            {Array.from({ length: Math.ceil(tmRows.length / 2) }, (_, i) => (
               <tr key={i} className="border-b border-black/5">
-                {[premisesRows[i * 2], premisesRows[i * 2 + 1]].map((row, j) =>
+                {[tmRows[i * 2], tmRows[i * 2 + 1]].map((row, j) =>
                   row ? (
                     <React.Fragment key={j}>
                       <td className="py-1 pr-2 text-black/55">{row[0]}</td>
@@ -140,7 +176,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
       </RSection>
 
       {/* ------------------------------ 1 ------------------------------ */}
-      <RSection n={1} title="Do objetivo às massas transportadas" note={`Massa úmida = seca ${p.moistureMode === 'base_umida' ? `÷ (1 − ${n1(p.umidadeNatural)}%) × (1 + ${n1(p.perdaMaterial)}%)` : `× (1 + ${n1(p.umidadeNatural)}% umidade + ${n1(p.perdaMaterial)}% perda)`}. Produto e rejeito saem do ROM pela recuperação mássica.`}>
+      {!tm && <RSection n={1} title="Do objetivo às massas transportadas" note={`Massa úmida = seca ${p.moistureMode === 'base_umida' ? `÷ (1 − ${n1(p.umidadeNatural)}%) × (1 + ${n1(p.perdaMaterial)}%)` : `× (1 + ${n1(p.umidadeNatural)}% umidade + ${n1(p.perdaMaterial)}% perda)`}. Produto e rejeito saem do ROM pela recuperação mássica.`}>
         <div className="flex items-stretch gap-1.5 text-[9pt]">
           <FlowBox color="#059669" title="ROM na mina" main={`${t0(a.romTargetDryT)} t seca`} lines={[`${t0(romWet)} t úmidas transportadas`, `${n1(mineEff ? romWet / mineEff : 0)} t/h efetiva`]} />
           <Arrow />
@@ -151,24 +187,24 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
             {p.processType === 'umido' && <FlowBox color="#d97706" title={`Rejeito (${n1(processPct(p).rej)}%)`} main={`${t0(tailDry)} t seca`} lines={['disposição']} />}
           </div>
         </div>
-      </RSection>
+      </RSection>}
 
       {/* ------------------------------ 2 ------------------------------ */}
       <RSection n={2} title="Horas disponíveis no mês" note="Horas efetivas = horas de calendário × DF (disponibilidade física) × UF (utilização). São as horas em que cada caminhão realmente transporta.">
         <div className="grid grid-cols-2 gap-6">
           <HoursCascade title="Mina (ROM e estéril)" cal={calMina} df={p.dfMina} uf={p.ufMina} />
-          <HoursCascade title="Planta (produto e rejeito)" cal={calPlanta} df={p.dfPlanta} uf={p.ufPlanta} />
+          {!tm && <HoursCascade title="Planta (produto e rejeito)" cal={calPlanta} df={p.dfPlanta} uf={p.ufPlanta} />}
         </div>
       </RSection>
 
       {/* ------------------------------ 3 ------------------------------ */}
-      <RSection n={3} title="Ciclo de cada caminhão" note="Ciclo = carga + viagem cheio + descarga + viagem vazio + pesagens + fila. Viagens por hora = 60 ÷ ciclo.">
+      <RSection n={3} title="Ciclo de cada caminhão" note="Ciclo = carga + viagem cheio + descarga + viagem vazio + pesagens + paradas no trajeto + fila + interferências. Viagens por hora = 60 ÷ ciclo.">
         <CycleBars routes={a.routes} />
         <table className="mt-3 w-full text-[8.5pt]">
           <thead>
             <tr className="border-b border-black/15 text-left text-black/50">
               <th className="py-1 font-medium">Rota</th>
-              {['Carga', 'Ida cheio', 'Descarga', 'Volta vazio', 'Pesagens', 'Fila', 'Interf.', 'Ciclo'].map((h) => (
+              {['Carga', 'Ida cheio', 'Descarga', 'Volta vazio', 'Pesagens', 'Paradas', 'Fila', 'Interf.', 'Ciclo'].map((h) => (
                 <th key={h} className="w-[10%] py-1 pl-2 text-right font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -177,7 +213,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
             {a.routes.map((r) => (
               <tr key={r.id} className="border-b border-black/5">
                 <td className="py-1">{r.name}</td>
-                {[r.cycle.loadMin, r.cycle.travelLoadedMin, r.cycle.dumpMin, r.cycle.travelEmptyMin, r.cycle.weighMin, r.cycle.queueMin, r.cycle.interferenceMin ?? 0].map((v, i) => (
+                {[r.cycle.loadMin, r.cycle.travelLoadedMin, r.cycle.dumpMin, r.cycle.travelEmptyMin, r.cycle.weighMin, r.cycle.stopsMin ?? 0, r.cycle.queueMin, r.cycle.interferenceMin ?? 0].map((v, i) => (
                   <td key={i} className="py-1 text-right font-mono">{n1(v)}</td>
                 ))}
                 <td className="py-1 text-right font-mono font-bold">{n1(r.cycle.totalMin)} min</td>
@@ -209,7 +245,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
                 <td className="py-1.5">
                   <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: KIND_COLOR[r.kind] }} />
                   <b className="font-semibold">{r.name}</b>
-                  <span className="block pl-3.5 text-[7.5pt] text-black/45">{KIND_LABELS[r.kind]}</span>
+                  <span className="block pl-3.5 text-[7.5pt] text-black/45">{tm ? routes.find((x) => x.id === r.id)?.materialName || 'Transporte' : KIND_LABELS[r.kind]}</span>
                 </td>
                 <td className="py-1.5 text-right font-mono">{t0(r.targetWetT)} t</td>
                 <td className="py-1.5 text-right font-mono">{n1(r.payloadT)} t</td>
@@ -234,16 +270,16 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
       {/* ------------------------------ 5 ------------------------------ */}
       <RSection n={5} title="Capacidade × necessidade por etapa" note="A produção que chega à planta é limitada pela etapa mais justa do caminho mina → planta. Acima de 100%, a etapa tem folga. O traço preto marca 100%.">
         <div className="space-y-2">
-          {a.stages.map((s) => (
+          {a.stages.filter((s) => !tm || s.id !== 'planta').map((s) => (
             <StageBar key={s.id} label={s.label} need={s.needT} cap={s.capacityT} ratio={s.ratio} basis={s.basis} isBottleneck={b?.id === s.id} />
           ))}
         </div>
       </RSection>
 
       {/* ------------------------------ 6 ------------------------------ */}
-      <RSection n={6} title="Acompanhamento do mês (lançamentos)" note="Planejado = meta diária das premissas. Realizado = ROM lançado em Lançamento Produção.">
+      {!tm && <RSection n={6} title="Acompanhamento do mês (lançamentos)" note="Planejado = meta diária das premissas. Realizado = ROM lançado em Lançamento Produção.">
         <Tracking results={results} target={p.targetMonthlyROM} />
-      </RSection>
+      </RSection>}
 
       {/* ------------------------------ 7 ------------------------------ */}
       {a.actions.length > 0 && (
@@ -260,6 +296,189 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
             ))}
           </ol>
         </RSection>
+      )}
+
+      {/* ------------------------------ 8 rede ------------------------------ */}
+      {routes.length > 0 && (
+        <RSection n={8} title="Rede de fluxos: locais, movimentações e massas" note={tm ? 'Só transporte: massas informadas por movimentação ou pela meta; pontos de passagem repassam o que recebem (± variação de estoque).' : 'Massas do balanço: ROM das frentes pela participação, produto e rejeito pela recuperação mássica, estoques repassam o que recebem (± variação).'}>
+          {net && <div className="fig avoid mb-3 overflow-hidden rounded-lg border border-black/10" dangerouslySetInnerHTML={{ __html: net }} />}
+          <table className="w-full text-[8.5pt]">
+            <thead>
+              <tr className="border-b border-black/15 text-left text-black/50">
+                <th className="py-1 font-medium">Movimentação</th>
+                <th className="py-1 font-medium">Material</th>
+                <th className="py-1 text-right font-medium">DMT</th>
+                <th className="py-1 text-right font-medium">Massa seca</th>
+                <th className="py-1 text-right font-medium">Massa úmida</th>
+                <th className="py-1 font-medium pl-2">Paradas no trajeto</th>
+                <th className="py-1 font-medium">DXF</th>
+              </tr>
+            </thead>
+            <tbody>
+              {a.routes.map((r) => {
+                const rt = routes.find((x) => x.id === r.id);
+                return (
+                  <tr key={r.id} className="border-b border-black/5">
+                    <td className="py-1">{r.name}</td>
+                    <td className="py-1">{rt?.materialName || KIND_LABELS[r.kind].split(' (')[0]}</td>
+                    <td className="py-1 text-right font-mono">{t0(rt?.distance ?? 0)} m</td>
+                    <td className="py-1 text-right font-mono">{t0(r.targetDryT)} t</td>
+                    <td className="py-1 text-right font-mono">{t0(r.targetWetT)} t</td>
+                    <td className="py-1 pl-2">{rt?.stops?.length ? rt.stops.map((x) => `${x.name} (${t0(x.distM)} m, ${n1(x.stopMin)} min, ${x.dir})`).join('; ') : '—'}</td>
+                    <td className="py-1">{rt?.geo?.length ? `${rt.geo.length} período(s)` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </RSection>
+      )}
+
+      {/* ------------------------------ 9 frota por tipo ------------------------------ */}
+      {mixed && (
+        <RSection n={9} title="Frota por tipo de caminhão" note={`Distribuição ${({ auto: 'automática, pelo menor custo por tonelada (custo horário ÷ t/h na rota), sem caminhão fora de estrada em estrada pública', manual: 'manual, definida por movimentação', estatistico: 'estatística: caminhões compartilhados entre as rotas; frota do tipo = soma das frações arredondada para cima' } as Record<string, string>)[p.mixMode ?? 'auto']}.`}>
+          <table className="w-full text-[8.5pt]">
+            <thead>
+              <tr className="border-b border-black/15 text-left text-black/50">
+                <th className="py-1 font-medium">Modelo</th>
+                <th className="py-1 text-right font-medium">Quantidade</th>
+                <th className="py-1 text-right font-medium">Carga útil</th>
+                <th className="py-1 text-right font-medium">Vel. cheio / vazio</th>
+                <th className="py-1 text-right font-medium">Custo por hora</th>
+                <th className="py-1 text-right font-medium">Necessários</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fleetTypesOf(p).map((t) => (
+                <tr key={t.classId} className="border-b border-black/5">
+                  <td className="py-1">{t.cls.manufacturer ? `${t.cls.manufacturer} ` : ''}{t.cls.name}</td>
+                  <td className="py-1 text-right font-mono">{t.count}</td>
+                  <td className="py-1 text-right font-mono">{n1(t.cls.payloadT)} t</td>
+                  <td className="py-1 text-right font-mono">{n1(t.speedLoaded || p.velocidadeCheio)} / {n1(t.speedEmpty || p.velocidadeVazio)} km/h</td>
+                  <td className="py-1 text-right font-mono">R$ {t0(hourlyCost(t.cls, p))}</td>
+                  <td className="py-1 text-right font-mono">{t0(rep.byType.find((b) => b.classId === t.classId)?.required ?? 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="mt-2 w-full text-[8.5pt]">
+            <tbody>
+              {a.routes.filter((r) => r.mix?.length).map((r) => (
+                <tr key={r.id} className="border-b border-black/5">
+                  <td className="py-1">{r.name}</td>
+                  <td className="py-1">{r.mix!.map((m) => `${m.count.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}× ${m.name} (${n1(m.payloadT)} t, ciclo ${n1(m.cycleMin)} min)`).join(' + ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </RSection>
+      )}
+
+      {/* ------------------------------ 10 carga ------------------------------ */}
+      {a.loaderNeeds.length > 0 && (
+        <RSection n={10} title="Equipamentos de carga por local" note="Necessários = horas de uso no mês ÷ horas efetivas de um equipamento (calendário × DF × UF). Carregar caminhões: caminhões carregados × tempo de carga. Alimentar a planta: massa que chega ÷ produção do equipamento.">
+          <table className="w-full text-[8.5pt]">
+            <thead>
+              <tr className="border-b border-black/15 text-left text-black/50">
+                <th className="py-1 font-medium">Local</th>
+                <th className="py-1 font-medium">Equipamento</th>
+                <th className="py-1 font-medium">Função</th>
+                <th className="py-1 text-right font-medium">Caçambadas</th>
+                <th className="py-1 text-right font-medium">Carga / produção</th>
+                <th className="py-1 text-right font-medium">Horas de uso</th>
+                <th className="py-1 text-right font-medium">Necessários</th>
+                <th className="py-1 text-right font-medium">Disponíveis</th>
+                <th className="py-1 text-right font-medium">Ocupação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {a.loaderNeeds.map((l, i) => (
+                <tr key={i} className="border-b border-black/5">
+                  <td className="py-1">{l.where}</td>
+                  <td className="py-1">{l.loaderName}</td>
+                  <td className="py-1">{l.role === 'alimentacao' ? 'alimentar a planta' : l.source === 'rota' ? 'carregar (rota)' : `carregar: ${l.routeIds.map((id) => routes.find((x) => x.id === id)?.name ?? '').join(', ')}`}</td>
+                  <td className="py-1 text-right font-mono">{l.role === 'alimentacao' ? '—' : n1(l.passes)}</td>
+                  <td className="py-1 text-right font-mono">{l.role === 'alimentacao' ? `${t0(l.feedTph ?? 0)} t/h` : `${n1(l.loadMin)} min`}</td>
+                  <td className="py-1 text-right font-mono">{t0(l.busyH)} h</td>
+                  <td className="py-1 text-right font-mono"><b>{l.needed}</b> ({n2(l.neededExact)})</td>
+                  <td className="py-1 text-right font-mono">{l.available ?? '—'}</td>
+                  <td className="py-1 text-right font-mono">{pc(l.utilization)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </RSection>
+      )}
+
+      {/* ------------------------------ 11 frota necessária ------------------------------ */}
+      {routes.length > 0 && (
+        <RSection n={11} title="Frota necessária" note="Caminhões por tipo em cada movimentação, horas efetivas e custo estimado (custo horário do modelo × horas).">
+          <div className="avoid mb-2 grid grid-cols-4 gap-2">
+            <RKpi label="Caminhões" value={`${rep.totals.trucksRequired.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}`} sub={`de ${rep.totals.trucksAvailable} disponíveis`} tone={rep.totals.trucksRequired > rep.totals.trucksAvailable ? 'bad' : 'ok'} />
+            <RKpi label="Equip. de carga" value={`${rep.totals.loadersRequired}`} sub="necessários" />
+            <RKpi label="Horas de caminhão" value={`${t0(rep.totals.truckHours)} h`} sub="efetivas no mês" />
+            <RKpi label="Custo do transporte" value={`R$ ${t0(rep.totals.costMonth / 1000)} mil`} sub={`${n2(rep.totals.massWetT ? rep.totals.costMonth / rep.totals.massWetT : 0)} R$/t`} />
+          </div>
+          <table className="w-full text-[8.5pt]">
+            <tbody>
+              {rep.movements.map((m) => (
+                <tr key={m.id} className="border-b border-black/5">
+                  <td className="py-1">{m.name}</td>
+                  <td className="py-1">{m.types.filter((x) => x.count > 0).map((x) => `${x.count.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}× ${x.name}`).join(' + ') || '—'}</td>
+                  <td className="py-1 text-right font-mono">{t0(m.truckHours)} h</td>
+                  <td className="py-1 text-right font-mono">R$ {t0(m.costMonth)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </RSection>
+      )}
+
+      {/* ------------------------------ 12 simulação ------------------------------ */}
+      {run && (
+        <RSection n={12} title="Resultado da simulação" note={`Última matriz simulada em ${new Date(run.at).toLocaleString('pt-BR')}. Produção média por dia com intervalo de 95% das repetições.${run.targetTpd ? ` Meta: ${t0(run.targetTpd)} t/dia.` : ''}`}>
+          <table className="w-full text-[8.5pt]">
+            <thead>
+              <tr className="border-b border-black/15 text-left text-black/50">
+                <th className="py-1 font-medium">Configuração</th>
+                <th className="py-1 font-medium">Cenário</th>
+                <th className="py-1 text-right font-medium">t/dia</th>
+                <th className="py-1 text-right font-medium">Intervalo</th>
+                <th className="py-1 text-right font-medium">Ciclo</th>
+                <th className="py-1 text-right font-medium">Fila na carga</th>
+                <th className="py-1 text-right font-medium">R$/t</th>
+              </tr>
+            </thead>
+            <tbody>
+              {run.rows.map((x, i) => (
+                <tr key={i} className="border-b border-black/5">
+                  <td className="py-1">{x.config}</td>
+                  <td className="py-1">{x.scenario}</td>
+                  <td className={`py-1 text-right font-mono font-bold ${run.targetTpd && x.tpd < run.targetTpd ? 'text-red-600' : ''}`}>{t0(x.tpd)}</td>
+                  <td className="py-1 text-right font-mono">{t0(x.lo)}–{t0(x.hi)}</td>
+                  <td className="py-1 text-right font-mono">{n1(x.cycleMin)} min</td>
+                  <td className="py-1 text-right font-mono">{n1(x.queueLoadMin)} min</td>
+                  <td className="py-1 text-right font-mono">{n2(x.costPerT)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {run.circuits.length > 0 && (
+            <p className="mt-2 text-[8.5pt] text-black/60">Por circuito (configuração e cenário de referência): {run.circuits.map((c) => `${c.name}: ${t0(c.tpd)} t/dia, ciclo ${n1(c.cycleMin)} min`).join(' · ')}.</p>
+          )}
+        </RSection>
+      )}
+
+      {/* ------------------------------ 13 mapa ------------------------------ */}
+      {map && (
+        <section className="page-break mt-5">
+          <h2 className="flex items-center gap-2 border-b-2 border-emerald-600 pb-1 text-[12pt] font-bold">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 font-mono text-[9pt] text-white">13</span>
+            Mapa da simulação
+          </h2>
+          <p className="mt-1 mb-2.5 text-[8.5pt] text-black/55">Áreas de origem (azul) e destino (verde) e trajetos dos DXF das movimentações{(p.simulation?.geoPeriod ?? 1) > 1 ? ` — período ${p.simulation?.geoPeriod}` : ''}; losangos = paradas no trajeto.</p>
+          <div className="fig overflow-hidden rounded-lg border border-black/10" dangerouslySetInnerHTML={{ __html: map }} />
+        </section>
       )}
 
       <p className="mt-6 border-t border-black/10 pt-2 text-[7.5pt] text-black/45">

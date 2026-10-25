@@ -355,7 +355,10 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
     if (!geoRoutes.some((x) => x.id === id)) geoRoutes.push({ id, name: r.name, points: path });
     return { ...c, routeId: id };
   });
-  const simRoutes = geoRoutes.length ? [...model.routes.filter((x) => !geoRoutes.some((g) => g.id === x.id)), ...geoRoutes] : model.routes;
+  // a rota substituída pelo trajeto do DXF sai da lista se nenhum outro circuito a usa
+  const replaced = new Set(circuits.filter((c, i) => circuitsGeo[i].routeId !== c.routeId).map((c) => c.routeId));
+  const stillUsed = new Set(circuitsGeo.map((c) => c.routeId));
+  const simRoutes = geoRoutes.length ? [...model.routes.filter((x) => !geoRoutes.some((g) => g.id === x.id) && !(replaced.has(x.id) && !stillUsed.has(x.id))), ...geoRoutes] : model.routes;
   let out: SimModel = { ...base, routes: simRoutes, circuits: circuitsGeo, receiving };
   // trucks automáticos e meta do período (aba Circuito)
   const calc = circuitTargets(out, premises, edges);
