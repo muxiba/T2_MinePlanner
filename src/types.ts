@@ -42,6 +42,16 @@ export interface Route {
   /** rede de fluxos: local de origem e de destino (FlowNode.id) */
   fromId?: string;
   toId?: string;
+  /** via: interna (mina/planta) ou estrada pública (só caminhões rodoviários) */
+  roadType?: 'interna' | 'estrada';
+  /** frota mista: caminhões de cada tipo (id do catálogo) nesta rota */
+  mix?: Record<string, number>;
+}
+
+/** Frota mista: tipo de caminhão (catálogo) e quantidade. */
+export interface FleetType {
+  classId: string;
+  count: number;
 }
 
 /** Tipos de local da rede de fluxos. */
@@ -192,6 +202,10 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** frota por tipo de caminhão (frota mista); vazio = um tipo só (classe e número de caminhões das premissas) */
+  fleetTypes?: FleetType[];
+  /** frota mista: o sistema distribui os tipos pelo menor custo por tonelada ('auto') ou o usuário define por rota ('manual') */
+  mixMode?: 'auto' | 'manual';
   /** posicionamento do caminhão sob o equipamento de carga do local (min), somado às caçambadas */
   loaderSpotMin?: number;
   /** rede de fluxos: locais (as rotas são as movimentações entre eles) */

@@ -182,6 +182,7 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                 <th className="px-1 py-1 font-medium">De</th>
                 <th className="px-1 py-1 font-medium">Para</th>
                 <th className="px-1 py-1 font-medium">Material</th>
+                <th className="px-1 py-1 font-medium">Via</th>
                 <th className="px-1 py-1 font-medium">DMT (m)</th>
                 <th className="px-1 py-1 font-medium">Massa fixa (t seca)</th>
                 <th className="px-1 py-1 font-medium">Peso</th>
@@ -218,6 +219,12 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                     <td className="px-1 py-1">
                       <select className={cell} value={k} aria-label="Material" onChange={(e) => setRoute(r.id, { kind: e.target.value as RouteKind, targetMass: undefined })}>
                         {mats.map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-1 py-1">
+                      <select className={`${cell} w-28`} value={r.roadType ?? 'interna'} aria-label="Via" title="Estrada pública: só caminhões rodoviários do catálogo entram nesta movimentação (frota mista)" onChange={(e) => setRoute(r.id, { roadType: e.target.value as 'interna' | 'estrada' })}>
+                        <option value="interna">Interna</option>
+                        <option value="estrada">Estrada pública</option>
                       </select>
                     </td>
                     <td className="px-1 py-1"><input type="number" step={10} className={`${num} w-24`} value={r.distance} aria-label="DMT" onChange={(e) => setRoute(r.id, { distance: Math.max(0, Number(e.target.value) || 0) })} /></td>

@@ -23,6 +23,7 @@ import { processPct } from './process';
 import { networkBalance, networkOn } from './network';
 import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
+import { mixedOn, syncMix } from './mix';
 
 /** Tempo de troca de caminhão sob o equipamento de carga (posicionamento), em minutos. */
 export const TRUCK_EXCHANGE_MIN = 0.6;
@@ -136,7 +137,19 @@ export interface LoaderAnalysis {
   passesStatus: 'ok' | 'poucas' | 'muitas';
 }
 
+export interface MixPart {
+  classId: string;
+  name: string;
+  count: number;
+  payloadT: number;
+  cycleMin: number;
+  truckMonthT: number;
+  capacityWetT: number;
+}
+
 export interface RouteAnalysis {
+  /** frota mista: desempenho de cada tipo de caminhão nesta rota */
+  mix?: MixPart[];
   id: string;
   name: string;
   kind: RouteKind;
@@ -491,6 +504,43 @@ export function analyzeRoute(
   targetDryT: number,
   overrides: { payloadT?: number; volumeM3?: number; trucks?: number; df?: number; uf?: number; eo?: number; queueMin?: number; speedFactor?: number; extraHours?: number } = {},
 ): RouteAnalysis {
+  // frota mista: cada tipo tem carga útil e ciclo próprios; a capacidade da rota é a soma por tipo
+  const mixEntries = Object.entries(route.mix ?? {}).filter(([, n]) => n > 0);
+  if (mixEntries.length && overrides.payloadT === undefined && overrides.trucks === undefined) {
+    const cat = catalogOf(premises).trucks;
+    const parts = mixEntries
+      .map(([id, n]) => ({ n, cls: cat.find((c) => c.id === id) }))
+      .filter((x): x is { n: number; cls: TruckClass } => !!x.cls)
+      .map(({ n, cls }) => ({ n, cls, a: analyzeRoute({ ...route, mix: undefined, truckCount: n }, premises, targetDryT, { ...overrides, payloadT: cls.payloadT, volumeM3: cls.volumeM3 || undefined, trucks: n }) }));
+    if (parts.length) {
+      const nTot = parts.reduce((a, p) => a + p.n, 0);
+      const base = [...parts].sort((x, y) => y.n - x.n)[0].a;
+      const transportCapacityWetT = parts.reduce((a, p) => a + p.a.transportCapacityWetT, 0) - parts.slice(1).reduce((a, p) => a + p.a.extraCapacityWetT, 0);
+      const truckMonthT = parts.reduce((a, p) => a + p.n * p.a.truckMonthT, 0) / Math.max(1, nTot);
+      const truckRateTph = parts.reduce((a, p) => a + p.n * p.a.truckRateTph, 0) / Math.max(1, nTot);
+      const payloadT = parts.reduce((a, p) => a + p.n * p.a.payloadT, 0) / Math.max(1, nTot);
+      const cycleAvg = parts.reduce((a, p) => a + p.n * p.a.cycle.totalMin, 0) / Math.max(1, nTot);
+      const trucksNeededExact = truckMonthT > 0 ? base.targetWetT / truckMonthT : 0;
+      const loaderCap = base.loader ? base.loader.capacityWetT : Infinity;
+      const capacityWetT = Math.min(transportCapacityWetT, loaderCap);
+      return {
+        ...base,
+        payloadT,
+        truckRateTph,
+        truckMonthT,
+        trucksAllocated: nTot,
+        trucksNeededExact,
+        trucksNeeded: Math.ceil(trucksNeededExact - 1e-6),
+        transportCapacityWetT,
+        capacityWetT,
+        limitedBy: loaderCap < transportCapacityWetT ? 'carga' : 'transporte',
+        ratio: base.targetWetT > 0 ? capacityWetT / base.targetWetT : capacityWetT > 0 ? Infinity : 1,
+        cycle: { ...base.cycle, totalMin: cycleAvg },
+        idleTrucks: Math.max(0, nTot - Math.ceil(trucksNeededExact - 1e-6)),
+        mix: parts.map((p) => ({ classId: p.cls.id, name: `${p.cls.manufacturer ? `${p.cls.manufacturer} ` : ''}${p.cls.name}`, count: p.n, payloadT: p.a.payloadT, cycleMin: p.a.cycle.totalMin, truckMonthT: p.a.truckMonthT, capacityWetT: p.n * p.a.truckMonthT })),
+      };
+    }
+  }
   const kind = routeKind(route);
   const area = kind === 'product' || kind === 'tailings' ? 'planta' : 'mina';
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : DEFAULT_LOOSE_DENSITY;
@@ -1250,6 +1300,8 @@ export function adjustFleetToTarget(routes: Route[], premises: DetailedPremises)
  * primeiro para a rota mais longe da meta (ROM no empate). Devolve null quando nada muda.
  */
 export function syncAutoFleet(routes: Route[], premises: DetailedPremises): Route[] | null {
+  // frota mista (ou saída dela): a composição por tipo decide os caminhões de cada rota
+  if (mixedOn(premises) || routes.some((r) => r.mix)) return syncMix(routes, premises);
   const auto = routes.filter((r) => r.active && (r.fleetMode === 'inteiro' || r.fleetMode === 'exato'));
   if (!auto.length) return null;
   const targets = routeTargets(routes, premises);

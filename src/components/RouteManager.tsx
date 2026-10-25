@@ -610,6 +610,18 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
           <span className="text-black/50"> · tem </span>
           <b className="font-mono">{fmtTrucks(a.trucksAllocated)}</b>
         </p>
+        {a.mix && (
+          <p className="text-sm">
+            <span className="text-black/50">Frota mista </span>
+            {a.mix.map((m, i) => (
+              <span key={m.classId}>
+                {i > 0 && <span className="text-black/30"> + </span>}
+                <b className="font-mono">{m.count}</b> <span className="text-black/60">{m.name}</span>
+                <span className="text-black/40"> ({n1(m.payloadT)} t, ciclo {n1(m.cycleMin)} min, {t0(m.capacityWetT)} t/mês)</span>
+              </span>
+            ))}
+          </p>
+        )}
         {a.loading && (
           <p className="text-sm">
             <span className="text-black/50">Caçambadas </span>

@@ -1,5 +1,6 @@
 import CatalogEditor from './CatalogEditor';
 import NetworkEditor from './NetworkEditor';
+import FleetTypesEditor from './FleetTypesEditor';
 import { processPct } from '@/engine/process';
 import React, { useMemo } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns";
@@ -473,6 +474,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
           <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-3">Locais e movimentações (rede de fluxos)</h3>
           <NetworkEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+        </div>
+      )}
+
+      {/* Frota por tipo (frota mista) */}
+      {routes && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-3">Frota por tipo de caminhão</h3>
+          <FleetTypesEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
         </div>
       )}
 
