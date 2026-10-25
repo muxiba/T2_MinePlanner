@@ -307,6 +307,8 @@ export interface DetailedPremises {
   defaultLoaderClassId?: string;
   /** frota por tipo de caminhão (frota mista); vazio = um tipo só (classe e número de caminhões das premissas) */
   fleetTypes?: FleetType[];
+  /** frota otimizada: ocupação máxima de um caminhão/equipamento que divide o tempo entre fluxos (%) */
+  shareMaxPct?: number;
   /** frota mista: o sistema distribui os tipos pelo menor custo por tonelada ('auto') ou o usuário define por rota ('manual') */
   mixMode?: 'auto' | 'manual' | 'estatistico';
   /** posicionamento do caminhão sob o equipamento de carga do local (min), somado às caçambadas */

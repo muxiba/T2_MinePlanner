@@ -3,6 +3,8 @@ import { FileDown, FileText } from 'lucide-react';
 import type { DetailedPremises, Route } from '@/types';
 import { buildFleetReport, type FleetReport } from '@/engine/fleetReport';
 import { flowSvg } from '@/components/FlowDiagram';
+import { FleetScenariosView } from '@/components/FleetScenariosView';
+import { fleetScenarios } from '@/engine/optimize';
 import { downloadMemo, f0, f1, f2, fbrl, fp, kv, memoDocument, note, p, table, t } from '@/sim/memo';
 
 /** Frota necessária: o resultado consolidado do planejamento (caminhões por tipo e movimentação, carga por local, horas e custo). */
@@ -11,6 +13,24 @@ const t0 = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString('pt
 const n1 = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const typesTxt = (m: FleetReport['movements'][number]) => m.types.filter((x) => x.count > 0).map((x) => `${x.count.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}× ${x.name}`).join(' + ') || '—';
+
+/** Seção do memorial: frota exata, inteira por fluxo e otimizada. */
+export function scenariosSection(routes: Route[], premises: DetailedPremises) {
+  const s = fleetScenarios(routes, premises);
+  const rows = [...s.trucks.map((r) => ({ k: 'Caminhão', r })), ...s.loaders.map((r) => ({ k: 'Carga', r }))];
+  const shared = s.shared.filter((u) => u.parts.length > 1);
+  return {
+    title: 'Cenários da frota: exata, inteira por fluxo e otimizada',
+    body:
+      table(
+        ['Equipamento', 'Modelo', 'Exata', 'Inteiro por fluxo', 'Otimizada', 'Disponível'],
+        rows.map(({ k, r }) => [k, t(r.model), f2(r.exact), f0(r.perFlow), f0(r.optimized), r.available === null ? '—' : f0(r.available)]),
+        { foot: ['Total', '', f2(s.totals.trucks.exact + s.totals.loaders.exact), f0(s.totals.trucks.perFlow + s.totals.loaders.perFlow), f0(s.totals.trucks.optimized + s.totals.loaders.optimized), ''] },
+      ) +
+      (shared.length ? p('Compartilhados no cenário otimizado: ' + shared.map((u) => t(`1 ${u.kind === 'caminhao' ? 'caminhão' : 'equipamento'} ${u.model} (${Math.round(u.load * 100)}%): ${u.parts.map((x) => `${x.name} (${x.frac.toLocaleString('pt-BR', { maximumFractionDigits: 2 })})`).join(' + ')}`)).join('; ') + '.') : '') +
+      note(`Exata: frota quebrada que bate a meta. Inteiro por fluxo: cada fluxo com equipamentos só dele, arredondados para cima. Otimizada: equipamentos com ocupação baixa dividem o tempo com outro fluxo (mesmo tipo de caminhão; carga no mesmo local), até ${premises.shareMaxPct ?? 100}% de ocupação.`),
+  };
+}
 
 export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises, routes: Route[] = []) {
   const fig = flowSvg(routes, premises);
@@ -45,6 +65,7 @@ export function fleetReportHtml(rep: FleetReport, premises: DetailedPremises, ro
             { foot: ['Total', '', '', f0(T.massWetT), '', '', f0(T.trucksRequired), '', f0(T.truckHours), fbrl(T.costMonth), f2(T.massWetT > 0 ? T.costMonth / T.massWetT : 0)] },
           ) + note('Necessários = meta úmida ÷ t/mês de um caminhão (carga útil × 60 ÷ ciclo × horas efetivas), arredondado para cima; em frota mista, a composição de cada movimentação. Custo = caminhões × custo horário do modelo × horas efetivas.'),
       },
+      scenariosSection(routes, premises),
       {
         title: 'Caminhões por tipo',
         body: table(['Modelo', 'Necessários', 'Disponíveis', 'Saldo'], rep.byType.map((b) => [t(b.name), f0(b.required), f0(b.available), f0(b.available - b.required)])),
@@ -137,6 +158,10 @@ const FleetRequirement: React.FC<{ routes: Route[]; premises: DetailedPremises }
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="mt-5 border-t border-black/5 pt-4">
+        <h4 className="mb-2 font-semibold">Cenários: exata, inteira por fluxo e otimizada</h4>
+        <FleetScenariosView routes={routes} premises={premises} />
       </div>
       {rep.shared && (
         <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">

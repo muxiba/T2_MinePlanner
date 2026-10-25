@@ -77,9 +77,11 @@ export function autoMix(routes: Route[], premises: DetailedPremises, fractional 
   });
   rows.sort((a, b) => b.demand - a.demand);
   // estatístico: caminhões compartilhados entre as rotas (fração de caminhão por rota); senão, caminhões inteiros por rota
-  const need = (x: number) => (fractional ? Math.ceil(x * 100 - 1e-6) / 100 : Math.ceil(x - 1e-6));
+  // cada rota segue o seu botão: inteiro acima → caminhões inteiros; frota exata → fração; sem escolha → o modo da frota mista
   const out = new Map<string, Record<string, number>>();
   for (const row of rows) {
+    const frac = row.r.fleetMode === 'exato' ? true : row.r.fleetMode === 'inteiro' ? false : fractional;
+    const need = (x: number) => (frac ? Math.ceil(x * 100 - 1e-6) / 100 : Math.ceil(x - 1e-6));
     let remaining = row.wet;
     const m: Record<string, number> = {};
     for (const c of row.cells) {
@@ -135,7 +137,8 @@ export function syncMix(routes: Route[], premises: DetailedPremises): Route[] | 
     const total = Math.round(Object.values(m).reduce((a, b) => a + b, 0) * 100) / 100;
     if (JSON.stringify(m) === JSON.stringify(r.mix ?? {}) && total === r.truckCount) return r;
     changed = true;
-    return { ...r, mix: m, truckCount: total, fleetMode: 'manual' as const };
+    // mantém o botão da rota (inteiro acima / exata); a composição é sempre automática
+    return { ...r, mix: m, truckCount: total, fleetMode: r.fleetMode === 'inteiro' || r.fleetMode === 'exato' ? r.fleetMode : ('manual' as const) };
   });
   return changed ? next : null;
 }
@@ -144,5 +147,6 @@ export function syncMix(routes: Route[], premises: DetailedPremises): Route[] | 
 export function typeTotals(routes: Route[], premises: DetailedPremises) {
   const sum = new Map<string, number>();
   for (const r of routes) if (r.active) for (const [k, v] of Object.entries(r.mix ?? {})) sum.set(k, (sum.get(k) ?? 0) + v);
-  return new Map([...sum].map(([k, v]) => [k, (premises.mixMode ?? 'auto') === 'estatistico' ? Math.max(0, Math.ceil(v - 1e-6)) : v]));
+  void premises;
+  return new Map([...sum].map(([k, v]) => [k, Math.max(0, Math.ceil(v - 1e-6))]));
 }

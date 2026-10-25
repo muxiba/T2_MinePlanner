@@ -50,8 +50,12 @@ describe('frota mista estatística', () => {
   it('frações de caminhão por rota; frota do tipo = soma arredondada para cima', async () => {
     const { typeTotals } = await import('./mix');
     const p = { ...P, fleetTypes: [{ classId: 'rod-40', count: 8 }, { classId: 'rod-30', count: 1 }], mixMode: 'estatistico' as const };
-    let routes = INITIAL_ROUTES.map((r) => ({ ...r }));
+    let routes = INITIAL_ROUTES.map((r) => ({ ...r, fleetMode: 'manual' as const }));
     for (let i = 0; i < 4; i++) routes = syncAutoFleet(routes, p) ?? routes;
+    // rota com “inteiro acima” recebe caminhões inteiros mesmo no estatístico
+    let ints = INITIAL_ROUTES.map((r) => ({ ...r, fleetMode: 'inteiro' as const }));
+    for (let i = 0; i < 4; i++) ints = syncAutoFleet(ints, p) ?? ints;
+    for (const r of ints.filter((x) => x.active)) expect(Math.abs(r.truckCount - Math.round(r.truckCount))).toBeLessThan(1e-9);
     const fa = analyzeFleet(routes, p);
     for (const a of fa.routes) {
       expect(a.ratio).toBeGreaterThanOrEqual(0.999);
@@ -77,5 +81,31 @@ describe('velocidade por tipo e equipamento padrão', () => {
     expect(fa.loaderNeeds.length).toBeGreaterThan(0);
     const pt = { ...pn, nodes: net.nodes.map((n) => ({ ...n, loaderClassId: 'tempo' })) };
     expect(analyzeFleet(net.routes, pt).loaderNeeds.length).toBe(0);
+  });
+});
+
+describe('cenários de frota', () => {
+  it('otimizada agrupa as sobras: nunca mais que inteira por fluxo, nunca menos que a exata arredondada', async () => {
+    const { fleetScenarios } = await import('./optimize');
+    const s = fleetScenarios(INITIAL_ROUTES, { ...P, truckCount: 9 });
+    const t = s.totals.trucks;
+    expect(t.optimized).toBeLessThanOrEqual(t.perFlow);
+    expect(t.optimized).toBeGreaterThanOrEqual(Math.ceil(t.exact - 1e-6));
+    for (const u of s.shared) expect(u.load).toBeLessThanOrEqual(1 + 1e-9);
+  });
+});
+
+describe('pente fino', () => {
+  it('ciclo informado trava a velocidade; a correção destrava', async () => {
+    const { diagnose } = await import('./diagnostics');
+    const routes = INITIAL_ROUTES.map((r, i) => (i === 0 ? { ...r, cycleMode: 'informed' as const, cycleTime: 30, fleetMode: 'manual' as const } : r));
+    const d = diagnose(routes, P).find((x) => x.id === 'ciclo-informado')!;
+    expect(!!d).toBe(true);
+    const fixed = d.fix!(routes, P).routes!;
+    const t = routeTargets(fixed, P).get(fixed[0].id)!;
+    const slow = analyzeRoute(fixed[0], P, t).trucksNeededExact;
+    const fast = analyzeRoute(fixed[0], { ...P, velocidadeCheio: P.velocidadeCheio * 2, velocidadeVazio: P.velocidadeVazio * 2 }, t).trucksNeededExact;
+    expect(fast).toBeLessThan(slow);
+    expect(diagnose(fixed, P).some((x) => x.id === 'ciclo-informado')).toBe(false);
   });
 });

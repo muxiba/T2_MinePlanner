@@ -1,4 +1,6 @@
 import { LoaderNeedsTable } from './LoaderSetupEditor';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { FleetScenariosView } from './FleetScenariosView';
 import React, { useMemo } from 'react';
 import { processPct } from '@/engine/process';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
@@ -166,6 +168,8 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
         </p>
       )}
 
+      <DiagnosticsPanel routes={routes} premises={premises} setRoutes={(r) => setRoutes(r)} setPremises={(fn) => setPremises(fn)} />
+
       {/* ------------------------------ frota ------------------------------ */}
       <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
@@ -238,6 +242,11 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
             </p>
           </div>
         )}
+      </section>
+
+      <section className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+        <h4 className="mb-2 font-bold text-black/80">Cenários da frota: exata, inteira por fluxo e otimizada</h4>
+        <FleetScenariosView routes={routes} premises={premises} setPremises={(fn) => setPremises(fn)} onApplyExact={() => applyMode('all', 'exato')} />
       </section>
 
       <ExtraFleetManager routes={routes} premises={premises} setPremises={setPremises} analysis={analysis} />

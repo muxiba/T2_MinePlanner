@@ -8,6 +8,7 @@ import { buildFleetReport } from '@/engine/fleetReport';
 import { fleetTypesOf, hourlyCost, mixedOn } from '@/engine/mix';
 import { transportMode, transportTargetMonth } from '@/engine/network';
 import { mapSvg } from '@/sim/mapSvg';
+import { fleetScenarios } from '@/engine/optimize';
 import { t0, n1, n2, pc, KIND_COLOR, FlowBox, Arrow, HoursCascade, CycleBars, StageBar } from './parts';
 
 /**
@@ -431,6 +432,7 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
               ))}
             </tbody>
           </table>
+          <ScenariosTable routes={routes} premises={p} />
         </RSection>
       )}
 
@@ -486,6 +488,47 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
       </p>
     </div>,
     document.body,
+  );
+};
+
+const ScenariosTable: React.FC<{ routes: Route[]; premises: DetailedPremises }> = ({ routes, premises }) => {
+  const s = useMemo(() => fleetScenarios(routes, premises), [routes, premises]);
+  const rows = [...s.trucks.map((r) => ({ k: 'Caminhão', r })), ...s.loaders.map((r) => ({ k: 'Carga', r }))];
+  if (!rows.length) return null;
+  const shared = s.shared.filter((u) => u.parts.length > 1);
+  return (
+    <div className="avoid mt-3">
+      <p className="mb-1 text-[9pt] font-semibold">Cenários: exata, inteira por fluxo e otimizada</p>
+      <table className="w-full text-[8.5pt]">
+        <thead>
+          <tr className="border-b border-black/15 text-left text-black/50">
+            <th className="py-1 font-medium">Equipamento</th>
+            <th className="py-1 font-medium">Modelo</th>
+            <th className="py-1 text-right font-medium">Exata</th>
+            <th className="py-1 text-right font-medium">Inteiro por fluxo</th>
+            <th className="py-1 text-right font-medium">Otimizada</th>
+            <th className="py-1 text-right font-medium">Disponível</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ k, r }) => (
+            <tr key={k + r.model} className="border-b border-black/5">
+              <td className="py-1">{k}</td>
+              <td className="py-1">{r.model}</td>
+              <td className="py-1 text-right font-mono">{n2(r.exact)}</td>
+              <td className="py-1 text-right font-mono">{r.perFlow}</td>
+              <td className="py-1 text-right font-mono font-bold">{r.optimized}</td>
+              <td className="py-1 text-right font-mono">{r.available ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {shared.length > 0 && (
+        <p className="mt-1 text-[8.5pt] text-black/60">
+          Compartilhados: {shared.map((u) => `1 ${u.kind === 'caminhao' ? 'caminhão' : 'equipamento'} ${u.model} (${Math.round(u.load * 100)}%): ${u.parts.map((x) => `${x.name} (${n2(x.frac)})`).join(' + ')}`).join('; ')}.
+        </p>
+      )}
+    </div>
   );
 };
 
