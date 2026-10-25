@@ -44,6 +44,8 @@ export interface Route {
   toId?: string;
   /** geometria do DXF por período: polígonos de origem e destino e polilinha do trajeto (vale até ser trocada) */
   geo?: RouteGeo[];
+  /** nomes dos períodos da geometria (índice = período − 1); a quantidade de períodos é o tamanho da lista */
+  geoLabels?: string[];
   /** paradas no trajeto (pesagem, inspeção, abastecimento...), sem massa */
   stops?: RouteStop[];
   /** tempos próprios desta movimentação (min); vazio = os das premissas / do equipamento do local */
@@ -100,7 +102,9 @@ export interface RouteGeo {
   origin?: [number, number][];
   dest?: [number, number][];
   path?: { x: number; y: number; z: number }[];
-  files?: { origin?: string; dest?: string; path?: string };
+  /** posição de cada parada no trajeto (id da parada → ponto) */
+  stops?: Record<string, { x: number; y: number; z?: number }>;
+  files?: { origin?: string; dest?: string; path?: string; stops?: Record<string, string> };
 }
 
 /** Parada no trajeto de uma movimentação: o caminhão para (com fila, se o posto estiver ocupado) e segue. */

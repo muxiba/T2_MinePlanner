@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ArrowLeftRight, Download, FileText, FileUp, Mountain, Pause, Play, Plus, Route as RouteIcon, Trash2 } from 'lucide-react';
 import type { DetailedPremises, Route } from '@/types';
-import { geoFor } from '@/engine/geo';
+import { geoFor, geoPeriodCount } from '@/engine/geo';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { CONFIG_PRESETS, HIGHWAY_SPEED, ROAD_TRUCK_SPEED, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
@@ -97,12 +97,17 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
         seen.add(`${id}-${fill}`);
         polys.push({ ring, fill, stroke, label: nodes.find((n) => n.id === id)?.name });
       };
+      for (const st of r.stops ?? []) {
+        const pt = g.stops[st.id];
+        if (pt) polys.push({ ring: [[pt.x - 12, pt.y - 12], [pt.x + 12, pt.y - 12], [pt.x + 12, pt.y + 12], [pt.x - 12, pt.y + 12]], fill: 'rgba(186,117,23,0.35)', stroke: '#854F0B', label: st.name });
+      }
       add(g.origin, r.fromId, 'rgba(24,95,165,0.14)', '#185FA5');
       add(g.dest, r.toId, 'rgba(59,109,17,0.14)', '#3B6D11');
     }
     return polys.length ? { polygons: polys } : undefined;
   }, [routes, premises.nodes, stored.geoPeriod]);
-  const geoPeriods = Math.max(1, ...(routes ?? []).flatMap((r) => (r.geo ?? []).map((g) => g.period)));
+  const geoPeriods = Math.max(1, ...(routes ?? []).map((r) => geoPeriodCount(r)));
+  const geoLabel = (p: number) => (routes ?? []).find((r) => r.geoLabels?.[p - 1])?.geoLabels?.[p - 1] ?? stored.plan?.periods?.[p - 1]?.label ?? `Período ${p}`;
   const linked = linkOn(model);
   const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
   const lockIf = (on: boolean) => (linked && on ? LOCK : undefined);
@@ -499,7 +504,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
             <label className="mt-2 flex items-center gap-2 text-sm text-black/65">
               Mapa e trajetos do período
               <select className="rounded-lg border border-black/10 bg-white px-2 py-1 text-sm" value={model.geoPeriod ?? 1} aria-label="Período da geometria" onChange={(e) => setModel({ ...model, geoPeriod: Number(e.target.value) })}>
-                {Array.from({ length: geoPeriods }, (_, i) => i + 1).map((p) => <option key={p} value={p}>{model.plan?.periods?.[p - 1]?.label ?? `Período ${p}`}</option>)}
+                {Array.from({ length: geoPeriods }, (_, i) => i + 1).map((p) => <option key={p} value={p}>{geoLabel(p)}</option>)}
               </select>
               <span className="text-xs text-black/45">os DXF de cada movimentação (Premissas → tabela de transporte ou desenho)</span>
             </label>

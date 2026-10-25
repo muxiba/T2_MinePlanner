@@ -8,7 +8,7 @@
  */
 import type { DetailedPremises, Route } from '@/types';
 import { fleetTypesOf, mixedOn } from '@/engine/mix';
-import { geoFor } from '@/engine/geo';
+import { distanceAlong, geoFor, pathLength } from '@/engine/geo';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { interferenceMin, lossesOf } from '@/engine/losses';
 import { processPct } from '@/engine/process';
@@ -333,8 +333,12 @@ export function withPremises(model: SimModel, premises: DetailedPremises, edges?
     stops: (() => {
       const r = c.edgeId ? netRoutes?.find((x) => x.id === c.edgeId) : undefined;
       if (!r?.stops?.length) return undefined;
+      // posição: ponto do DXF da parada sobre o trajeto do período; sem eles, a distância informada ÷ DMT
+      const g = geoFor(r, model.geoPeriod ?? 1);
+      const PL = g.path && g.path.length > 1 ? pathLength(g.path) : 0;
       const L = Math.max(1, r.distance || 1);
-      return r.stops.map((x) => ({ name: x.name, weigh: x.kind === 'pesagem', frac: Math.min(1, Math.max(0, (x.distM || 0) / L)), stopMin: Math.max(0, x.stopMin || 0), dir: x.dir, posts: Math.max(1, x.posts || 1) }));
+      const fracOf = (x: (typeof r.stops)[number]) => (PL > 0 && g.stops[x.id] ? distanceAlong(g.path!, g.stops[x.id]) / PL : (x.distM || 0) / L);
+      return r.stops.map((x) => ({ name: x.name, weigh: x.kind === 'pesagem', frac: Math.min(1, Math.max(0, fracOf(x))), stopMin: Math.max(0, x.stopMin || 0), dir: x.dir, posts: Math.max(1, x.posts || 1) }));
     })(),
   }));
   const dests = [...new Set(model.circuits.map((c) => c.destination))];

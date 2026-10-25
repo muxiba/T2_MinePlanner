@@ -24,3 +24,22 @@ describe('geometria das movimentações (DXF)', () => {
     expect(geoFor(r, 2).from.origin).toBe(1);
   });
 });
+
+describe('paradas e períodos da geometria', () => {
+  it('ponto da parada vira distância pelo trajeto; apagar período puxa os seguintes', async () => {
+    const { setStopGeo, removeGeoPeriod, geoPeriodCount, readPointDxf } = await import('./geo');
+    const path = readPathDxf(dxf(lw([[0, 0], [300, 0], [300, 400]], false)))!;
+    const pt = readPointDxf(dxf(['0', 'POINT', '8', '0', '10', '305', '20', '200', '30', '0'].join('\n')))!;
+    expect(pt.x).toBe(305);
+    let r = setGeo({ ...INITIAL_ROUTES[0], stops: [{ id: 's1', name: 'Balança', kind: 'pesagem' as const, distM: 0, stopMin: 2, dir: 'ambos' as const }] }, 1, 'path', path);
+    r = setStopGeo(r, 1, 's1', pt, 'balanca.dxf');
+    expect(r.stops![0].distM).toBe(500);
+    r = setGeo(r, 3, 'origin', [[0, 0], [1, 0], [1, 1]], 'x.dxf');
+    r = { ...r, geoLabels: ['Ano 1', 'Ano 2', 'Ano 3'] };
+    expect(geoPeriodCount(r)).toBe(3);
+    r = removeGeoPeriod(r, 2);
+    expect(geoPeriodCount(r)).toBe(2);
+    expect(r.geo!.some((g) => g.period === 2 && g.origin)).toBe(true);
+    expect(r.geoLabels).toEqual(['Ano 1', 'Ano 3']);
+  });
+});

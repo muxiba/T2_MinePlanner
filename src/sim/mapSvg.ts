@@ -28,7 +28,7 @@ export function mapSvg(model: SimModel | undefined, routes: Route[], premises: D
     if (g.path && g.path.length > 1) {
       const cum = cumulative(g.path);
       const L = cum[cum.length - 1] || 1;
-      paths.push({ pts: g.path, color: COLORS[i % COLORS.length], label: r.name, stops: (r.stops ?? []).map((s) => ({ p: pointAt(g.path!, cum, Math.min(L, Math.max(0, (s.distM / Math.max(1, r.distance)) * L))), name: s.name })) });
+      paths.push({ pts: g.path, color: COLORS[i % COLORS.length], label: r.name, stops: (r.stops ?? []).map((s) => ({ p: g.stops[s.id] ? { x: g.stops[s.id].x, y: g.stops[s.id].y, z: g.stops[s.id].z ?? 0 } : pointAt(g.path!, cum, Math.min(L, Math.max(0, (s.distM / Math.max(1, r.distance)) * L))), name: s.name })) });
     }
   });
   // circuitos da simulação sem DXF na movimentação: usa as rotas importadas na simulação
