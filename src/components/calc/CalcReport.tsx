@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { processPct } from '@/engine/process';
 import { createPortal } from 'react-dom';
 import type { DetailedPremises } from '@/types';
 import { fmtTrucks, KIND_LABELS, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
@@ -53,8 +54,9 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
   const premisesRows: [string, string][] = [
     ['Meta de ROM (consumo da planta)', `${t0(p.targetMonthlyROM)} t seca/mês`],
     ['Processo', p.processType === 'umido' ? 'A úmido' : 'A seco'],
-    ['Recuperação mássica (produto)', `${n1(p.rmGlobal)}%`],
-    ['Rejeito', `${n1(p.rejeitoTotal)}%`],
+    ['Recuperação mássica (produto)', `${n1(processPct(p).rm)}%`],
+    ['Rejeito', `${n1(processPct(p).rej)}%`],
+    ['Perda de processo (não transportada)', `${n1(processPct(p).loss)}%`],
     ['Umidade natural / perdas', `${n1(p.umidadeNatural)}% / ${n1(p.perdaMaterial)}%`],
     ['Taxa de alimentação da planta', `${t0(p.plantFeedRateTPH)} t/h`],
     ['DF / UF da mina', `${n1(p.dfMina)}% / ${n1(p.ufMina)}%`],
@@ -145,8 +147,8 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
           <FlowBox color="#334155" title="Planta" main={`${t0(plantStage?.capacityT ?? 0)} t de capacidade`} lines={[`${t0(p.plantFeedRateTPH)} t/h × ${t0(a.planta.effective)} h efetivas`, plantStage ? `${pc(plantStage.ratio)} da alimentação necessária` : '']} warn={!!plantStage && plantStage.ratio < 0.999} />
           <Arrow />
           <div className="flex flex-1 flex-col gap-1.5">
-            <FlowBox color="#2563eb" title={`Produto (${n1(p.rmGlobal)}%)`} main={`${t0(prodDry)} t seca`} lines={['expedição']} />
-            {p.processType === 'umido' && <FlowBox color="#d97706" title={`Rejeito (${n1(p.rejeitoTotal)}%)`} main={`${t0(tailDry)} t seca`} lines={['disposição']} />}
+            <FlowBox color="#2563eb" title={`Produto (${n1(processPct(p).rm)}%)`} main={`${t0(prodDry)} t seca`} lines={['expedição']} />
+            {p.processType === 'umido' && <FlowBox color="#d97706" title={`Rejeito (${n1(processPct(p).rej)}%)`} main={`${t0(tailDry)} t seca`} lines={['disposição']} />}
           </div>
         </div>
       </RSection>

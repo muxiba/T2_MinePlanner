@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { processPct } from '@/engine/process';
 import { Route, DailyLog, DetailedPremises } from "../types";
 import { Save, AlertTriangle, CheckCircle2, Info, Trash2, Download, Calendar as CalendarIcon, Clock, Truck, Plus } from "lucide-react";
 import { format } from "date-fns";
@@ -85,8 +86,8 @@ const ProductionLogging: React.FC<ProductionLoggingProps> = ({ routes, logs, set
     if (daysCount <= 0) return;
 
     const avgROM = totalROM / daysCount;
-    const avgPlanta = avgROM * (premises.rmGlobal / 100);
-    const avgRejeito = avgROM * (premises.rejeitoTotal / 100);
+    const avgPlanta = avgROM * (processPct(premises).rm / 100);
+    const avgRejeito = avgROM * (processPct(premises).rej / 100);
 
     // Find target route
     const targetRoute = routes.find(r => r.active);

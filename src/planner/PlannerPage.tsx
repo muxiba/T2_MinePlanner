@@ -26,7 +26,8 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
-import { analyzeFleet, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, syncAutoFleet } from '@/engine/fleet';
+import { analyzeFleet, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, routeKind, syncAutoFleet } from '@/engine/fleet';
+import { ensureNetwork } from '@/engine/network';
 import SummaryView from '@/components/summary/SummaryView';
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
 import { generatePortableHTML } from '@/utils/export';
@@ -125,6 +126,12 @@ const PlannerPage: React.FC = () => {
     // cada fluxo das premissas (ROM, produto, rejeito, estéril) ganha sua rota; apagada, não volta
     const withFlows = ensureFlowRoutes(routes, premises);
     if (withFlows) return setRoutes(withFlows);
+    // rede de fluxos: planos antigos ganham os locais padrão; rotas novas são ligadas aos locais pelo fluxo
+    const net = ensureNetwork(routes, premises, routeKind);
+    if (net) {
+      setPremises((prev) => ({ ...prev, nodes: net.nodes }));
+      return setRoutes(net.routes);
+    }
     // fluxo que deixou de existir (ex.: desmarcou “possui estéril”) volta a ser criado se reaparecer
     const req = requiredFlows(premises);
     if (premises.dismissedFlows?.some((k) => !req.includes(k))) {
@@ -408,7 +415,7 @@ const PlannerPage: React.FC = () => {
                 />
               )}
               {activeTab === 'routes' && <RouteManager routes={routes} setRoutes={setRoutes} results={results} premises={premises} setPremises={setPremises} />}
-              {activeTab === 'premises' && <PremisesForm premises={premises} setPremises={setPremises} setRoutes={setRoutes} results={results} />}
+              {activeTab === 'premises' && <PremisesForm premises={premises} setPremises={setPremises} setRoutes={setRoutes} routes={routes} results={results} />}
               {activeTab === 'logging' && (
                 <ProductionLogging routes={routes} logs={productionLogs} setLogs={setProductionLogs} results={results} premises={premises} onReset={resetSimulation} />
               )}

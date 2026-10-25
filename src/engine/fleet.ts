@@ -19,6 +19,8 @@
  *
  * Todas as funções são puras (sem React), para poderem ser testadas isoladamente.
  */
+import { processPct } from './process';
+import { networkBalance, networkOn } from './network';
 import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
 
@@ -247,12 +249,12 @@ export const FLOW_ORDER: RouteKind[] = ['rom', 'product', 'tailings', 'waste'];
 
 /** Massas secas de cada fluxo pelas premissas (t/mês). */
 export function flowTargets(premises: DetailedPremises): Record<RouteKind, number> {
-  const seco = premises.processType === 'seco';
+  const pp = processPct(premises);
   const rom = premises.targetMonthlyROM || 0;
   return {
     rom,
-    product: (rom * (seco ? 100 : premises.rmGlobal || 0)) / 100,
-    tailings: seco ? 0 : (rom * (premises.rejeitoTotal || 0)) / 100,
+    product: (rom * pp.rm) / 100,
+    tailings: (rom * pp.rej) / 100,
     waste: premises.hasWasteRock ? premises.targetMonthlyWasteRock || 0 : 0,
   };
 }
@@ -315,15 +317,26 @@ export function checkFlows(routes: Route[], premises: DetailedPremises): FlowChe
   // produto e rejeito seguem o ROM que de fato vai para a planta
   const romAssigned = active.filter((r) => routeKind(r) === 'rom').reduce((a, r) => a + (targets.get(r.id) || 0), 0);
   const romBase = romAssigned || t.rom;
-  const seco = premises.processType === 'seco';
+  const pp = processPct(premises);
   const expected: Record<RouteKind, number> = {
     rom: t.rom,
-    product: (romBase * (seco ? 100 : premises.rmGlobal || 0)) / 100,
-    tailings: seco ? 0 : (romBase * (premises.rejeitoTotal || 0)) / 100,
+    product: (romBase * pp.rm) / 100,
+    tailings: (romBase * pp.rej) / 100,
     waste: t.waste,
   };
+  const net = networkOn(premises) && routes.some((r) => r.fromId) ? networkBalance(routes, premises, routeKind) : null;
+  if (net) {
+    expected.product = (net.romToPlants * pp.rm) / 100;
+    expected.tailings = (net.romToPlants * pp.rej) / 100;
+  }
+  const typeOf = (id?: string) => premises.nodes?.find((n) => n.id === id)?.type;
+  const fromSource = (r: Route, k: RouteKind) => {
+    if (!net) return true;
+    const t = typeOf(r.fromId);
+    return (k === 'rom' || k === 'waste') ? t === 'frente' : t === 'planta';
+  };
   return FLOW_ORDER.map((kind) => {
-    const rs = active.filter((r) => routeKind(r) === kind);
+    const rs = active.filter((r) => routeKind(r) === kind && fromSource(r, kind));
     const assigned = rs.reduce((a, r) => a + (targets.get(r.id) || 0), 0);
     const target = expected[kind];
     let status: FlowCheck['status'] = 'ok';
@@ -433,9 +446,9 @@ function cycleFor(route: Route, premises: DetailedPremises, loadMin: number): Cy
 
 /** Distribui a meta mensal (seca) entre as rotas de cada tipo, respeitando massas fixadas nas rotas. */
 export function routeTargets(routes: Route[], premises: DetailedPremises): Map<string, number> {
-  const seco = premises.processType === 'seco';
-  const rm = seco ? 100 : premises.rmGlobal;
-  const rej = seco ? 0 : premises.rejeitoTotal;
+  // rede de fluxos (locais e movimentações): balanço de massa por local
+  if (networkOn(premises) && routes.some((r) => r.fromId)) return networkBalance(routes, premises, routeKind).edges;
+  const { rm, rej } = processPct(premises);
   const active = routes.filter((r) => r.active);
   const byKind = (k: RouteKind) => active.filter((r) => routeKind(r) === k);
   const out = new Map<string, number>();

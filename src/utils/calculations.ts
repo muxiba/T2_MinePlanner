@@ -1,5 +1,7 @@
+import { processPct } from "../engine/process";
 import { DetailedPremises, Route, ProductionData, DailyLog, OperationalDiagnostic } from "../types";
-import { analyzeRoute, routeKind, routeRates, wetFromDry } from "../engine/fleet";
+import { analyzeRoute, routeKind, routeRates, routeTargets, wetFromDry } from "../engine/fleet";
+import { networkBalance, networkOn } from "../engine/network";
 
 export function calculateRouteProduction(route: Route, premises: DetailedPremises, effectiveHoursPerMonth: number): ProductionData {
   if (!route.active) {
@@ -60,9 +62,9 @@ export function calculateRouteProduction(route: Route, premises: DetailedPremise
   if (baseSeca === 0) {
     const routeNameLower = route.name.toLowerCase();
     if (routeNameLower.includes('terminal')) {
-      baseSeca = premises.targetMonthlyROM * (premises.rmGlobal / 100);
+      baseSeca = premises.targetMonthlyROM * (processPct(premises).rm / 100);
     } else if (routeNameLower.includes('baia')) {
-      baseSeca = premises.targetMonthlyROM * (premises.rejeitoTotal / 100);
+      baseSeca = premises.targetMonthlyROM * (processPct(premises).rej / 100);
     } else {
       baseSeca = premises.targetMonthlyROM;
     }
@@ -141,9 +143,7 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const activeRoutes = routes.filter(r => r.active);
   
   // Dry Process Adjustment
-  const isSeco = premises.processType === 'seco';
-  const rmGlobal = isSeco ? 100 : premises.rmGlobal;
-  const rejeitoTotal = isSeco ? 0 : premises.rejeitoTotal;
+  const { rm: rmGlobal, rej: rejeitoTotal } = processPct(premises);
 
   // EO is DF * UF as per user request
   const eoMinaFactor = (premises.dfMina / 100) * (premises.ufMina / 100);
@@ -157,6 +157,7 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
 
   // Categorize routes for target distribution and correct hours
   const categorize = (r: Route) => routeKind(r);
+  const engineTargets = routeTargets(routes, premises);
 
   const romRoutes = activeRoutes.filter(r => categorize(r) === 'rom');
   const productRoutes = activeRoutes.filter(r => categorize(r) === 'product');
@@ -174,8 +175,9 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     const wSum = autoRoutes.reduce((a, r) => a + w(r), 0);
     
     return group.map(r => {
-      let target = r.targetMass;
-      if (!target) {
+      // mesma massa do 2. Dimensionamento (fluxos e rede de locais)
+      let target = engineTargets.get(r.id) ?? r.targetMass;
+      if (target === undefined) {
         // Distribute remaining target equally among auto routes
         target = wSum > 0 ? (remainingTarget * w(r)) / wSum : 0;
       }
@@ -188,9 +190,9 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
 
   const romResults = distributeTarget(romRoutes, premises.targetMonthlyROM, effectiveHoursPerMonthMina);
   
-  // Calculate total actual ROM being moved (sum of individual fronts)
-  // This will be the basis for product and tailings generation
-  const totalActualROMTarget = romResults.reduce((acc, r) => acc + (r.targetMass || 0), 0);
+  // ROM que entra na planta: base do produto e do rejeito (na rede, conta só a entrada nas plantas, não as pernas intermediárias)
+  const net = networkOn(premises) && routes.some((r) => r.fromId) ? networkBalance(routes, premises, routeKind) : null;
+  const totalActualROMTarget = net ? net.romToPlants : romResults.reduce((acc, r) => acc + (r.targetMass || 0), 0);
 
   const productResults = distributeTarget(productRoutes, totalActualROMTarget * (rmGlobal / 100), effectiveHoursPerMonthPlanta);
   const tailingsResults = distributeTarget(tailingsRoutes, totalActualROMTarget * (rejeitoTotal / 100), effectiveHoursPerMonthPlanta);
@@ -475,8 +477,8 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   
   const isTargetUnreachable = requiredHourlyProduction > plantCapacityTPH;
   const productionLoss = isTargetUnreachable ? remainingTarget - (plantCapacityTPH * effectiveHoursPerDayPlanta * remainingDays) : 0;
-  const productionLossPlanta = productionLoss * (premises.rmGlobal / 100);
-  const productionLossRejeito = productionLoss * (premises.rejeitoTotal / 100);
+  const productionLossPlanta = productionLoss * (rmGlobal / 100);
+  const productionLossRejeito = productionLoss * (rejeitoTotal / 100);
 
   // Re-planning suggestions
   if (isTargetUnreachable) {

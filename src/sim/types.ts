@@ -90,6 +90,8 @@ export interface Circuit {
   tonnesDryOverride?: number;
   /** false = caminhões digitados; padrão = calculados pela meta do período */
   autoTrucks?: boolean;
+  /** movimentação da rede de fluxos (id da rota do 2. Dimensionamento) que este circuito representa */
+  edgeId?: string;
   /** configuração fixa deste circuito (ex.: rodoviário no trecho fora da mina); vazio = a configuração comparada */
   configId?: string;
 }

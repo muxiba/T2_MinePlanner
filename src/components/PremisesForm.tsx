@@ -1,4 +1,6 @@
 import CatalogEditor from './CatalogEditor';
+import NetworkEditor from './NetworkEditor';
+import { processPct } from '@/engine/process';
 import React, { useMemo } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -12,6 +14,8 @@ interface PremisesFormProps {
   setPremises: (premises: DetailedPremises | ((prev: DetailedPremises) => DetailedPremises)) => void;
   setRoutes: (routes: Route[] | ((prev: Route[]) => Route[])) => void;
   results: any;
+  /** rotas = movimentações da rede de fluxos */
+  routes?: Route[];
 }
 
 const months = [
@@ -23,11 +27,15 @@ const years = [2024, 2025, 2026, 2027, 2028];
 const fmt2 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt3 = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
 
-const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setRoutes, results }) => {
+const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setRoutes, results, routes }) => {
   const handleChange = (field: keyof DetailedPremises, value: any) => {
     const newPremises = { ...premises, [field]: value };
 
     // Automatically calculate fleet capacities based on Plant Capacity
+    // a úmido: ao mudar a RM, o rejeito vira 100 − RM (editável depois; a diferença aparece como perda de processo)
+    if (field === "rmGlobal" && newPremises.processType !== "seco") {
+      newPremises.rejeitoTotal = Math.max(0, Math.round((100 - Number(value || 0)) * 100) / 100);
+    }
     if (field === "plantFeedRateTPH" || field === "rmGlobal" || field === "rejeitoTotal" || field === "processType" || field === "dfMina" || field === "ufMina" || field === "dfPlanta" || field === "ufPlanta") {
       // Calculate EO as DF * UF
       newPremises.eoMina = (newPremises.dfMina / 100) * (newPremises.ufMina / 100) * 100;
@@ -204,6 +212,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
   // taxas de transporte necessárias: mesma base da Produção Planejada (seca ÷ horas efetivas) convertida para úmida
   const tr = results.transportTph;
   const derivedTph: Record<string, number> = {
+    __perda: processPct(premises).loss,
     fleetCapacityMinaTPH: tr.rom,
     fleetCapacityBaiaTPH: tr.tailings,
     fleetCapacityTerminalTPH: tr.product,
@@ -257,8 +266,11 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
             { label: "A Seco (Sem Rejeito)", value: "seco" }
           ] 
         },
-        { label: "RM Global (%)", key: "rmGlobal", disabled: premises.processType === 'seco' },
-        { label: "Rejeito Total (%)", key: "rejeitoTotal", disabled: premises.processType === 'seco' },
+        premises.processType === 'seco'
+          ? { label: "RM — recuperação mássica a seco (%)", key: "rmDry" }
+          : { label: "RM Global (%)", key: "rmGlobal" },
+        { label: premises.processType === 'seco' ? "Rejeito Total (%) — não há no processo a seco" : "Rejeito Total (%) — preenchido com 100 − RM, editável", key: "rejeitoTotal", disabled: premises.processType === 'seco' },
+        { label: "Perda de processo (%) — não transportada", key: "__perda", readOnly: true },
         { label: "Umidade Natural (%)", key: "umidadeNatural" },
         { label: "Perda Material (%)", key: "perdaMaterial" },
         {
@@ -356,7 +368,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
         <h3 className="text-sm font-bold uppercase tracking-widest text-emerald-400 mb-2">Produção Planejada Detalhada</h3>
         <p className="mb-5 text-xs text-white/50">
-          Massa seca: ROM = consumo da planta; produto = ROM × RM {fmt2(premises.processType === 'seco' ? 100 : premises.rmGlobal)}%; rejeito = ROM × {fmt2(premises.processType === 'seco' ? 0 : premises.rejeitoTotal)}%.
+          Massa seca: ROM = consumo da planta; produto = ROM × RM {fmt2(processPct(premises).rm)}%; rejeito = ROM × {fmt2(processPct(premises).rej)}%{processPct(premises).loss > 0.005 ? `; perda de processo ${fmt2(processPct(premises).loss)}% (não transportada)` : ''}.
           t/h = massa do mês ÷ horas efetivas (mina para ROM e estéril, planta para produto e rejeito). A frota transporta a massa úmida: seca × {fmt3(results.transportTph.factor)} ({premises.moistureMode === 'base_umida' ? `÷ (1 − ${fmt2(premises.umidadeNatural)}%) × (1 + ${fmt2(premises.perdaMaterial)}%)` : `1 + ${fmt2(premises.umidadeNatural)}% + ${fmt2(premises.perdaMaterial)}%`}). Os campos de transporte necessário (Mina e Transporte/Frota) são a coluna “t/h úmida”.
         </p>
         <div className="overflow-x-auto">
@@ -436,14 +448,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                       ))}
                     </select>
                   ) : field.readOnly ? (
-                    <div className="w-full bg-black/5 border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono text-black/40">
+                    <div className={`w-full border rounded-xl px-4 py-2.5 text-sm font-mono ${field.key === "__perda" && derivedTph.__perda > 0.005 ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-black/5 border-black/5 text-black/40"}`}>
                       {((field.key in derivedTph ? derivedTph[field.key] : (premises[field.key as keyof DetailedPremises] as number)) ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   ) : (
                     <input
                       type="number"
                       disabled={field.disabled}
-                      value={(premises[field.key as keyof DetailedPremises] as number | undefined) ?? 0}
+                      value={(premises[field.key as keyof DetailedPremises] as number | undefined) ?? (field.key === "rmDry" ? 100 : 0)}
                       onChange={(e) => handleChange(field.key as keyof DetailedPremises, parseFloat(e.target.value) || 0)}
                       className={`w-full border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all ${field.highlight ? 'bg-red-50/50 border-red-100 font-bold text-red-600' : 'bg-[#F8F9FA]'} ${field.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     />
@@ -454,6 +466,14 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
           </div>
         ))}
       </div>
+
+      {/* Locais e movimentações */}
+      {routes && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">
+          <h3 className="text-sm font-bold uppercase tracking-widest text-black/40 mb-3">Locais e movimentações (rede de fluxos)</h3>
+          <NetworkEditor premises={premises} setPremises={(fn) => setPremises(fn)} routes={routes} setRoutes={(fn) => setRoutes(fn)} />
+        </div>
+      )}
 
       {/* Catálogo de equipamentos */}
       <details className="bg-white p-6 rounded-2xl shadow-sm border border-black/5">

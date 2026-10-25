@@ -5,7 +5,7 @@ import type { DetailedPremises, Route } from '@/types';
 import type { AggregateStats, Circuit, Receiving, Scenario, SimModel, SimRoute, TruckConfig } from '@/sim/types';
 import { routeLength, routeProfile, readRouteDxf } from '@/sim/dxf';
 import { CONFIG_PRESETS, HIGHWAY_SPEED, ROAD_TRUCK_SPEED, defaultCircuit, defaultReceiving, emptyModel } from '@/sim/defaults';
-import { catalogOf } from '@/engine/fleet';
+import { catalogOf, routeKind, routeTargets } from '@/engine/fleet';
 import { defaultFinance, defaultTruckFinance, financeFromCatalog } from '@/sim/econ';
 import { configFor, limitsOf, payloadFor, travelTimes, type RunResult, type SweepPoint } from '@/sim/des';
 import { DOT_KINDS, makeAnimator } from '@/sim/animation';
@@ -71,20 +71,22 @@ interface Props {
 
 const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRoutes, canEdit, storageKey }) => {
   const stored: SimModel = premises.simulation ?? emptyModel();
+  // massas das movimentações da rede (2. Dimensionamento): circuitos ligados a uma movimentação usam a massa dela
+  const edges = useMemo(() => (routes ? routeTargets(routes, premises) : undefined), [routes, premises]);
   // modelo efetivo: DF, UF, horas, velocidades, tempos e caminhão vêm das Premissas Fundamentais
   const model: SimModel = useMemo(() => {
-    let m = withReferenceCosts(withPremises(stored, premises));
+    let m = withReferenceCosts(withPremises(stored, premises, edges));
     // receita e custos fixos de referência aplicados uma vez nos planos que já tinham financeiro
     if (m.finance && !m.finance.refApplied) {
       m = { ...m, finance: { ...m.finance, refApplied: true, revenuePerT: m.finance.revenuePerT || REVENUE_REF_PER_T, revenueMaterial: m.finance.revenueMaterial || 'Produto', overheadPerYear: m.finance.overheadPerYear || 964_000 } };
     }
     return m;
-  }, [stored, premises]);
+  }, [stored, premises, edges]);
   const setModel = (m: SimModel) => setPremises({ ...premises, simulation: m });
   const linked = linkOn(model);
   const LOCK = 'Vem das Premissas Fundamentais. Para editar aqui, desligue “Usar as Premissas Fundamentais” na aba Circuito.';
   const lockIf = (on: boolean) => (linked && on ? LOCK : undefined);
-  const calc = useMemo(() => circuitTargets(model, premises), [model, premises]);
+  const calc = useMemo(() => circuitTargets(model, premises, edges), [model, premises, edges]);
   const per = circuitPeriod(model, premises);
   const [tab, setTab] = useState<Tab>('modelo');
 
@@ -580,7 +582,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   if (premises.processType !== 'seco') {
                     rows.push(['Produto', d.produto, `ROM × RM global ${n1(sh.rm * 100)}%`]);
                     rows.push(['Rejeito filtrado', d.rejeito, `ROM × rejeito total ${n1(sh.rej * 100)}%`]);
-                  } else rows.push(['Produto (processo a seco)', d.produto, 'ROM × 100%, sem rejeito']);
+                  } else rows.push(['Produto (processo a seco)', d.produto, `ROM × RM ${n1(sh.rm * 100)}%, sem rejeito`]);
                   if (d.esteril > 0) rows.push(['Estéril', d.esteril, `ROM × REM ${n1(sh.rem)} (premissas)`]);
                   return (
                     <>
@@ -721,6 +723,28 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                     <div key={c.id} className="rounded-xl border border-black/[0.06] p-4">
                       <p className="mb-3 font-medium">{c.name}</p>
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                        {routes && routes.length > 0 && (
+                          <div className="col-span-2">
+                            <label className="mb-1 block text-xs text-black/55">Movimentação da rede (Premissas)</label>
+                            <select
+                              className={inputCls}
+                              value={c.edgeId ?? ''}
+                              aria-label={`Movimentação do circuito ${c.name}`}
+                              onChange={(e) => {
+                                const r = routes.find((x) => x.id === e.target.value);
+                                const kind = r ? routeKind(r) : undefined;
+                                const map = { rom: 'rom', product: 'produto', tailings: 'rejeito', waste: 'esteril' } as const;
+                                setCircuit(c.id, r ? { edgeId: r.id, flow: map[kind!], tonnesDryOverride: undefined } : { edgeId: undefined });
+                              }}
+                            >
+                              <option value="">Nenhuma (meta pelo fluxo)</option>
+                              {routes.filter((r) => r.active).map((r) => (
+                                <option key={r.id} value={r.id}>{r.name} · {t0(edges?.get(r.id) ?? 0)} t/mês</option>
+                              ))}
+                            </select>
+                            <p className="mt-0.5 text-[11px] text-black/45">Ligado a uma movimentação, o circuito usa a massa dela no balanço da rede.</p>
+                          </div>
+                        )}
                         <div>
                           <label className="mb-1 block text-xs text-black/55">Fluxo</label>
                           <select className={inputCls} value={flow} onChange={(e) => setCircuit(c.id, { flow: e.target.value as Flow })}>

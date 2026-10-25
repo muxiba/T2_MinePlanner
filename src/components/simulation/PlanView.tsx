@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { processPct } from '@/engine/process';
 import clsx from 'clsx';
 import { AlertTriangle, Download, FileUp, Layers, MapPin, Play, Plus, Trash2, Upload } from 'lucide-react';
 import type { SimModel } from '@/sim/types';
@@ -1204,8 +1205,8 @@ const PeriodsTable: React.FC<{
     return { p, kind, calDays, romT, h, f };
   });
   const s = rows[Math.min(sel, rows.length - 1)];
-  const rm = premises ? (premises.processType === 'seco' ? 100 : premises.rmGlobal) / 100 : 0;
-  const rej = premises ? (premises.processType === 'seco' ? 0 : premises.rejeitoTotal) / 100 : 0;
+  const rm = premises ? processPct(premises).rm / 100 : 0;
+  const rej = premises ? processPct(premises).rej / 100 : 0;
   return (
     <div className="mt-5 border-t border-black/5 pt-4">
       <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
@@ -1351,7 +1352,7 @@ const ProductionCurve: React.FC<{ values: number[]; labels: string[]; premises?:
     const tot = sum ?? total;
     onChange(Array.from({ length: n }, () => Math.round(tot / n / 1000) * 1000));
   };
-  const rm = premises ? (premises.processType === 'seco' ? 100 : premises.rmGlobal) / 100 : 0;
+  const rm = premises ? processPct(premises).rm / 100 : 0;
   return (
     <div className="mb-4 rounded-xl border border-black/[0.06] bg-[#FAFBFB] p-3">
       <div className="mb-2 flex flex-wrap items-end gap-3">

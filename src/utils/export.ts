@@ -1,4 +1,5 @@
 import { DetailedPremises, Route, DailyLog } from "../types";
+import { processPct } from '@/engine/process';
 
 export const generatePortableHTML = (
   premises: DetailedPremises,
@@ -232,8 +233,8 @@ export const generatePortableHTML = (
                 let target = r.targetMass;
                 if (!target) {
                     const n = r.name.toLowerCase();
-                    if (n.includes('terminal')) target = currentTarget * (premises.rmGlobal / 100);
-                    else if (n.includes('baia')) target = currentTarget * (premises.rejeitoTotal / 100);
+                    if (n.includes('terminal')) target = currentTarget * (processPct(premises).rm / 100);
+                    else if (n.includes('baia')) target = currentTarget * (processPct(premises).rej / 100);
                     else target = currentTarget;
                 }
                 const res = calculateRouteProduction({ ...r, targetMass: target }, premises, effectiveHoursMina);

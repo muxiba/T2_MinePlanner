@@ -9,6 +9,7 @@
 import type { DetailedPremises } from '@/types';
 import { catalogOf, wetFromDry } from '@/engine/fleet';
 import { interferenceMin, lossesOf } from '@/engine/losses';
+import { processPct } from '@/engine/process';
 import { ROAD_TRUCK_SPEED, defaultReceiving } from './defaults';
 import { configFor, limitsOf, loadTime, payloadFor, travelTimes } from './des';
 import { defaultCalendar, type MinePlan, type MonthCal, type Movement, type Period } from './plan';
@@ -151,10 +152,10 @@ export const wetFactor = (p: DetailedPremises) => wetFromDry(1, p.umidadeNatural
 
 /** Frações do ROM: produto (RM global), rejeito (rejeito total) e estéril (REM das premissas). Processo a seco: 100% produto, sem rejeito. */
 export function flowShares(p: DetailedPremises) {
-  const seco = p.processType === 'seco';
+  const pp = processPct(p);
   return {
-    rm: (seco ? 100 : p.rmGlobal || 0) / 100,
-    rej: (seco ? 0 : p.rejeitoTotal || 0) / 100,
+    rm: pp.rm / 100,
+    rej: pp.rej / 100,
     rem: p.hasWasteRock && p.targetMonthlyROM > 0 ? (p.targetMonthlyWasteRock || 0) / p.targetMonthlyROM : 0,
   };
 }
@@ -251,7 +252,7 @@ const weighOf = (p: DetailedPremises) => (p.weighingTimeLoaded || 0) + (p.weighi
  * Modelo efetivo: aplica as premissas sobre o modelo salvo. Idempotente.
  * Campos derivados das premissas não são editáveis enquanto a ligação estiver ligada.
  */
-export function withPremises(model: SimModel, premises: DetailedPremises): SimModel {
+export function withPremises(model: SimModel, premises: DetailedPremises, edges?: EdgeMasses): SimModel {
   if (!linkOn(model)) return model;
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : 2.0;
   const prevP = model.configs.find((c) => c.id === PREMISES_CONFIG_ID);
@@ -289,7 +290,7 @@ export function withPremises(model: SimModel, premises: DetailedPremises): SimMo
   });
   let out: SimModel = { ...base, circuits, receiving };
   // trucks automáticos e meta do período (aba Circuito)
-  const calc = circuitTargets(out, premises);
+  const calc = circuitTargets(out, premises, edges);
   out = {
     ...out,
     circuits: out.circuits.map((c, i) => (c.autoTrucks === false || !calc[i] ? c : { ...c, trucks: Math.max(1, calc[i].trucks) })),
@@ -370,7 +371,10 @@ export function circuitPeriod(model: SimModel, premises: DetailedPremises) {
 }
 
 /** Meta de cada circuito no período, ciclo analítico e caminhões necessários (igual ao Dimensionamento). */
-export function circuitTargets(model: SimModel, premises: DetailedPremises): CircuitCalc[] {
+/** Massas secas por mês de cada movimentação da rede (id da rota → t), do 2. Dimensionamento. */
+export type EdgeMasses = Map<string, number>;
+
+export function circuitTargets(model: SimModel, premises: DetailedPremises, edges?: EdgeMasses): CircuitCalc[] {
   if (!model.circuits.length) return [];
   const per = circuitPeriod(model, premises);
   const flows = flowDryTonnes(premises, per.romT);
@@ -395,7 +399,9 @@ export function circuitTargets(model: SimModel, premises: DetailedPremises): Cir
   return model.circuits.map((c) => {
     const flow = flowOf(c);
     const sharePct = flow === 'outro' ? 1 : (c.share ?? 1) / (shareSum[flow] || 1);
-    const fromFlow = flow === 'outro' ? c.tonnesManual ?? 0 : (flow === 'rom' ? flows.rom : derived[flow]) * sharePct;
+    // movimentação da rede ligada ao circuito: massa da movimentação no mês × (ROM do período ÷ ROM do mês)
+    const edgeT = c.edgeId && edges?.has(c.edgeId) ? (edges.get(c.edgeId)! * per.romT) / Math.max(1, premises.targetMonthlyROM || per.romT) : undefined;
+    const fromFlow = edgeT !== undefined ? edgeT : flow === 'outro' ? c.tonnesManual ?? 0 : (flow === 'rom' ? flows.rom : derived[flow]) * sharePct;
     const overridden = c.tonnesDryOverride !== undefined && flow !== 'outro';
     const tonnesDry = overridden ? c.tonnesDryOverride! : fromFlow;
     const tonnes = tonnesDry * k;

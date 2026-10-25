@@ -39,6 +39,31 @@ export interface Route {
   utilization?: number;
   /** Peso na divisão da massa do fluxo entre rotas do mesmo fluxo (padrão 1). */
   share?: number;
+  /** rede de fluxos: local de origem e de destino (FlowNode.id) */
+  fromId?: string;
+  toId?: string;
+}
+
+/** Tipos de local da rede de fluxos. */
+export type NodeType = 'frente' | 'planta' | 'estoque' | 'expedicao' | 'rejeito' | 'esteril';
+
+/** Local da rede de fluxos (frente de lavra, planta, estoque, expedição, baia/pilha de rejeito, pilha de estéril). */
+export interface FlowNode {
+  id: string;
+  name: string;
+  type: NodeType;
+  /** frente: parte do ROM total (peso; padrão 1 = partes iguais entre as frentes) */
+  romShare?: number;
+  /** frente: estéril desta frente (t seca/mês); vazio = divide a meta de estéril entre as frentes com rota de estéril */
+  wasteT?: number;
+  /** formação (+) ou consumo (−) de estoque no mês (t seca), em locais de passagem */
+  stockChangeT?: number;
+  /** carregamento dos caminhões que saem deste local: id do catálogo, 'silo' (sem equipamento) ou vazio (tempo de carga das premissas) */
+  loaderClassId?: string;
+  /** equipamentos de carga disponíveis no local (vazio = o sistema calcula o necessário) */
+  loaderCount?: number;
+  /** disponibilidade física do equipamento de carga (%) */
+  loaderDf?: number;
 }
 
 export type RouteKind = 'rom' | 'product' | 'tailings' | 'waste';
@@ -138,6 +163,8 @@ export interface DetailedPremises {
   eoPlanta: number; // 72%
   
   rmGlobal: number; // 45%
+  /** recuperação mássica no processo a seco (%); padrão 100 */
+  rmDry?: number;
   rejeitoTotal: number; // 55%
   
   umidadeNatural: number; // 9%
@@ -165,6 +192,8 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** rede de fluxos: locais (as rotas são as movimentações entre eles) */
+  nodes?: FlowNode[];
   /** Fluxos cuja rota automática o usuário apagou (não são recriados enquanto o fluxo existir). */
   dismissedFlows?: RouteKind[];
 

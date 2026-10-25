@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { processPct } from '@/engine/process';
 import { CalcReport } from './calc/CalcReport';
 import { AlertTriangle, CheckCircle2, Download, Printer, RotateCcw, Trash2, Info } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js';
@@ -156,8 +157,8 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
           />
           <Arrow />
           <div className="flex min-w-[200px] flex-1 flex-col gap-2">
-            <FlowBox color="#2563eb" title={`Produto (${n1(premises.rmGlobal)}%)`} main={`${t0(prodDry)} t seca`} lines={['expedição']} />
-            {premises.processType === 'umido' && <FlowBox color="#d97706" title={`Rejeito (${n1(premises.rejeitoTotal)}%)`} main={`${t0(tailDry)} t seca`} lines={['disposição']} />}
+            <FlowBox color="#2563eb" title={`Produto (${n1(processPct(premises).rm)}%)`} main={`${t0(prodDry)} t seca`} lines={['expedição']} />
+            {premises.processType === 'umido' && <FlowBox color="#d97706" title={`Rejeito (${n1(processPct(premises).rej)}%)`} main={`${t0(tailDry)} t seca`} lines={['disposição']} />}
           </div>
         </div>
       </Section>

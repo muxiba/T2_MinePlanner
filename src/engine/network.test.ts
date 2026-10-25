@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest';
+import { ensureNetwork, networkBalance } from './network';
+import { routeKind, routeTargets } from './fleet';
+import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
+import type { FlowNode, Route } from '../types';
+
+const P = { ...DEFAULT_PREMISES, targetMonthlyROM: 184407, rmGlobal: 45.11, rejeitoTotal: 54.89, processType: 'umido' as const, hasWasteRock: false };
+const R = (id: string, name: string, kind: Route['kind'], fromId: string, toId: string, extra: Partial<Route> = {}): Route => ({ ...INITIAL_ROUTES[0], id, name, kind, fromId, toId, targetMass: undefined, share: undefined, ...extra });
+
+describe('rede de fluxos', () => {
+  it('plano antigo: a rede criada sozinha dá as mesmas massas', () => {
+    const before = routeTargets(INITIAL_ROUTES, P);
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const after = routeTargets(net.routes, { ...P, nodes: net.nodes });
+    for (const r of INITIAL_ROUTES) expect(after.get(r.id)!).toBeCloseTo(before.get(r.id)!, 3);
+    expect(net.nodes.map((n) => n.type).sort()).toEqual(['expedicao', 'frente', 'planta', 'rejeito']);
+  });
+
+  it('duas frentes, duas plantas, produto por estoque e limpeza da baia', () => {
+    const nodes: FlowNode[] = [
+      { id: 'fA', name: 'Frente A', type: 'frente', romShare: 60 },
+      { id: 'fB', name: 'Frente B', type: 'frente', romShare: 40 },
+      { id: 'p1', name: 'Planta 1', type: 'planta' },
+      { id: 'p2', name: 'Planta 2', type: 'planta' },
+      { id: 'est', name: 'Estoque de produto', type: 'estoque', stockChangeT: 5000 },
+      { id: 'exp', name: 'Terminal', type: 'expedicao' },
+      { id: 'baia', name: 'Baia', type: 'rejeito' },
+      { id: 'pr', name: 'Pilha de rejeito', type: 'rejeito' },
+    ];
+    const routes = [
+      R('a1', 'A → P1', 'rom', 'fA', 'p1'),
+      R('b2', 'B → P2', 'rom', 'fB', 'p2'),
+      R('p1e', 'P1 → estoque', 'product', 'p1', 'est'),
+      R('p2e', 'P2 → estoque', 'product', 'p2', 'est'),
+      R('ee', 'estoque → terminal', 'product', 'est', 'exp'),
+      R('p1b', 'P1 → baia', 'tailings', 'p1', 'baia'),
+      R('p2r', 'P2 → pilha', 'tailings', 'p2', 'pr'),
+      R('bl', 'baia → pilha (limpeza)', 'tailings', 'baia', 'pr', { targetMass: 20000 }),
+    ];
+    const res = networkBalance(routes, { ...P, nodes }, routeKind);
+    const e = (id: string) => res.edges.get(id)!;
+    expect(e('a1')).toBeCloseTo(184407 * 0.6, 3);
+    expect(e('b2')).toBeCloseTo(184407 * 0.4, 3);
+    expect(e('p1e') + e('p2e')).toBeCloseTo(184407 * 0.4511, 3);
+    expect(e('ee')).toBeCloseTo(184407 * 0.4511 - 5000, 3);
+    expect(e('p1b')).toBeCloseTo(184407 * 0.6 * 0.5489, 3);
+    expect(e('bl')).toBe(20000);
+    expect(res.romToPlants).toBeCloseTo(184407, 3);
+    expect(res.issues.some((i) => i.text.includes('forma 5.000'))).toBe(true);
+    expect(res.issues.some((i) => i.level === 'erro')).toBe(false);
+  });
+
+  it('avisa produto da planta sem destino', () => {
+    const nodes: FlowNode[] = [{ id: 'f', name: 'F', type: 'frente' }, { id: 'p', name: 'Planta', type: 'planta' }];
+    const res = networkBalance([R('r', 'F → P', 'rom', 'f', 'p')], { ...P, nodes }, routeKind);
+    expect(res.issues.some((i) => i.level === 'erro' && i.text.includes('produto sem movimentação'))).toBe(true);
+  });
+});

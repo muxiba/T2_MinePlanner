@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { processPct } from '@/engine/process';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
 import type { DetailedPremises, Route, RouteKind } from '../types';
 import { FLOW_ORDER, catalogOf, loaderFromCatalog, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
@@ -520,7 +521,7 @@ const RouteResult: React.FC<{ a: RouteAnalysis; open: boolean; onToggle: () => v
   const u = premises.umidadeNatural;
   const p = premises.perdaMaterial;
   const lines: [string, string, string][] = [
-    ['Meta seca', `${t0(a.targetDryT)} t`, a.kind === 'rom' ? 'Consumo da planta (ou massa da frente)' : a.kind === 'product' ? `ROM × RM global (${n1(premises.rmGlobal)}%)` : a.kind === 'tailings' ? `ROM × rejeito (${n1(premises.rejeitoTotal)}%)` : 'Meta de estéril'],
+    ['Meta seca', `${t0(a.targetDryT)} t`, a.kind === 'rom' ? 'Consumo da planta (ou massa da frente)' : a.kind === 'product' ? `ROM × RM (${n1(processPct(premises).rm)}%)` : a.kind === 'tailings' ? `ROM × rejeito (${n1(processPct(premises).rej)}%)` : 'Meta de estéril'],
     [
       'Meta úmida (transportada)',
       `${t0(a.targetWetT)} t`,
