@@ -183,7 +183,7 @@ export const LoaderTimesEditor: React.FC<Props> = ({ premises, setPremises }) =>
 export const LoaderNeedsTable: React.FC<Props & { routes: Route[] }> = ({ premises, setPremises, routes }) => {
   const cat = catalogOf(premises);
   const fa = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
-  const nodes = (premises.nodes ?? []).filter((n) => routes.some((r) => r.active && (r.fromId === n.id || (n.type === 'planta' && r.toId === n.id))));
+  const nodes = (premises.nodes ?? []).filter((n) => routes.some((r) => r.active && (r.fromId === n.id || ((n.type === 'planta' || !!n.transfer) && r.toId === n.id))));
   const [editing, setEditing] = useState<string | null>(null);
   const own = fa.loaderNeeds.filter((l) => l.source === 'rota');
   if (!nodes.length && !own.length) return <p className="text-sm text-black/50">Nenhuma movimentação ativa. Crie as movimentações em 1. Premissas → Locais e movimentações{premises.flowMode === 'transporte' ? ' (ou na tabela de movimentações de transporte em Processo e massas)' : ''}.</p>;
@@ -235,6 +235,7 @@ export const LoaderNeedsTable: React.FC<Props & { routes: Route[] }> = ({ premis
                       <tr className={`${idx === 0 ? 'border-t border-black/10' : ''} align-top`}>
                         <td className="py-1.5 pr-2 font-medium">
                           {idx === 0 ? n.name : ''}
+                          {idx === 0 && n.transfer && <span className="block text-[11px] font-normal text-amber-700">transbordo{n.transfer.process ? ` · ${n.transfer.process}` : ''}{n.transfer.discardPct ? ` · descarte ${n.transfer.discardPct}%` : ''}</span>}
                           {idx === 0 && (
                             <button type="button" onClick={() => add(n)} className="mt-1 flex items-center gap-1 rounded-md border border-dashed border-black/15 px-2 py-0.5 text-[11px] font-normal text-black/60 hover:bg-black/5">
                               <Plus size={11} /> equipamento
@@ -248,7 +249,7 @@ export const LoaderNeedsTable: React.FC<Props & { routes: Route[] }> = ({ premis
                           <div className="flex flex-col gap-1">
                             <select className={sel} value={role} aria-label={`Função do equipamento em ${n.name}`} onChange={(ev) => patch(n.id, e.id, { role: ev.target.value as NodeLoader['role'], routeIds: undefined })}>
                               <option value="caminhoes">Carregar caminhões</option>
-                              {n.type === 'planta' && <option value="alimentacao">Alimentar a planta (sem caminhão)</option>}
+                              {(n.type === 'planta' || n.transfer) && <option value="alimentacao">{n.transfer ? 'Alimentar a planta móvel (sem caminhão)' : 'Alimentar a planta (sem caminhão)'}</option>}
                             </select>
                             {role === 'caminhoes' && outs.length > 1 && (
                               <select className={sel} value={e.routeIds?.[0] ?? ''} aria-label={`Saída atendida em ${n.name}`} onChange={(ev) => patch(n.id, e.id, { routeIds: ev.target.value ? [ev.target.value] : undefined })}>

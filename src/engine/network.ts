@@ -140,8 +140,12 @@ export function transportBalance(routes: Route[], premises: DetailedPremises): N
   const fixedSum = fromOrigins.reduce((a, r) => a + (fixed(r) ?? 0), 0);
   const blanks = fromOrigins.filter((r) => fixed(r) === null);
   const wSum = blanks.reduce((a, r) => a + w(r), 0) || 1;
-  for (const r of fromOrigins) edges.set(r.id, fixed(r) ?? (meta.monthT > 0 ? (Math.max(0, meta.monthT - fixedSum) * w(r)) / wSum : 0));
-  // 2) saídas dos pontos de passagem: em branco = o que entra − variação de estoque − saídas informadas, pelo peso
+  // com descarte nos transbordos, as origens em branco movem mais para entregar a meta (ajuste iterativo)
+  let boost = 1;
+  const isDest = (id?: string) => nodes.find((n) => n.id === id)?.group === 'destino';
+  for (let pass = 0; pass < 8; pass++) {
+  for (const r of fromOrigins) edges.set(r.id, fixed(r) ?? (meta.monthT > 0 ? (Math.max(0, meta.monthT * boost - fixedSum) * w(r)) / wSum : 0));
+  // 2) saídas dos pontos de passagem: em branco = o que entra × (1 − descarte) − variação de estoque − saídas informadas, pelo peso
   for (let it = 0; it < 12; it++) {
     for (const n of nodes.filter((x) => x.group === 'passagem')) {
       const outs = active.filter((r) => r.fromId === n.id);
@@ -150,9 +154,14 @@ export function transportBalance(routes: Route[], premises: DetailedPremises): N
       const fx = outs.reduce((a, r) => a + (fixed(r) ?? 0), 0);
       const bl = outs.filter((r) => fixed(r) === null);
       const ws = bl.reduce((a, r) => a + w(r), 0) || 1;
-      const rest = Math.max(0, inT - (n.stockChangeT ?? 0) - fx);
+      const rest = Math.max(0, inT * (1 - Math.min(100, Math.max(0, n.transfer?.discardPct ?? 0)) / 100) - (n.stockChangeT ?? 0) - fx);
       for (const r of outs) edges.set(r.id, fixed(r) ?? (rest * w(r)) / ws);
     }
+  }
+    if (!(meta.monthT > 0) || !blanks.length || !nodes.some((n) => (n.transfer?.discardPct ?? 0) > 0)) break;
+    const got = active.filter((r) => isDest(r.toId)).reduce((a, r) => a + (edges.get(r.id) ?? 0), 0);
+    if (got <= 0 || Math.abs(got - meta.monthT) < 0.5) break;
+    boost *= meta.monthT / got;
   }
   for (const r of active) {
     if (!((edges.get(r.id) ?? 0) > 0)) issues.push({ routeId: r.id, level: 'erro', text: `${r.name}: informe a massa do mês (t seca) ou a meta de transporte.` });
@@ -175,7 +184,7 @@ export function transportBalance(routes: Route[], premises: DetailedPremises): N
     const keptT = zero();
     keptT.rom = Math.max(0, inT.rom - outT.rom);
     if (pass && (inT.rom > 0.5 || outT.rom > 0.5)) {
-      const diff = inT.rom - outT.rom - (n.stockChangeT ?? 0);
+      const diff = inT.rom * (1 - Math.min(100, Math.max(0, n.transfer?.discardPct ?? 0)) / 100) - outT.rom - (n.stockChangeT ?? 0);
       if (Math.abs(diff) > 0.5) issues.push({ nodeId: n.id, level: 'aviso', text: `${n.name}: entram ${Math.round(inT.rom).toLocaleString('pt-BR')} t e saem ${Math.round(outT.rom).toLocaleString('pt-BR')} t${n.stockChangeT ? ` (variação de estoque ${Math.round(n.stockChangeT).toLocaleString('pt-BR')} t)` : ''}: ${diff > 0 ? 'sobram' : 'faltam'} ${Math.round(Math.abs(diff)).toLocaleString('pt-BR')} t.` });
     }
     return { node: n, inT, genT, outT, availT: { ...outT }, keptT };
@@ -197,14 +206,18 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
   const frentes = nodes.filter((n) => n.type === 'frente');
   const romFrentes = frentes.filter((n) => outsOf(n.id, 'rom').length) .length ? frentes.filter((n) => outsOf(n.id, 'rom').length) : frentes;
   const wSum = romFrentes.reduce((a, n) => a + (n.romShare ?? 1), 0) || 1;
-  const romTotal = premises.targetMonthlyROM || 0;
+  const romTarget = premises.targetMonthlyROM || 0;
+  // transbordo com descarte: a mina precisa mover mais ROM para a planta receber o consumo (ajuste iterativo abaixo)
+  let romTotal = romTarget;
+  const hasDiscard = nodes.some((n) => (n.transfer?.discardPct ?? 0) > 0);
   const wasteTotal = premises.hasWasteRock ? premises.targetMonthlyWasteRock || 0 : 0;
   const wasteFrentes = frentes.filter((n) => outsOf(n.id, 'waste').length);
   const wasteFixed = wasteFrentes.reduce((a, n) => a + (n.wasteT ?? 0), 0);
   const wasteAuto = wasteFrentes.filter((n) => n.wasteT === undefined);
   const gen = new Map<string, Record<RouteKind, number>>();
   for (const n of nodes) gen.set(n.id, zero());
-  for (const n of romFrentes) gen.get(n.id)!.rom = (romTotal * (n.romShare ?? 1)) / wSum;
+  const setRomGen = () => { for (const n of romFrentes) gen.get(n.id)!.rom = (romTotal * (n.romShare ?? 1)) / wSum; };
+  setRomGen();
   for (const n of wasteFrentes) gen.get(n.id)!.waste = n.wasteT ?? (wasteAuto.length ? Math.max(0, wasteTotal - wasteFixed) / wasteAuto.length : 0);
 
   const distribute = (list: Route[], total: number) => {
@@ -219,6 +232,7 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
 
   // relaxação: as massas das pernas a jusante dependem das de montante (cadeias de até ~20 pernas)
   const avail = new Map<string, Record<RouteKind, number>>();
+  const relax = () => {
   for (let iter = 0; iter < 25; iter++) {
     let changed = false;
     for (const n of nodes) {
@@ -232,9 +246,12 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
       const av = zero();
       // a variação de estoque vale para o material principal que passa pelo local
       const main = MATS.filter((m) => outsOf(n.id, m).length).sort((a, b) => inT[b] + g[b] - (inT[a] + g[a]))[0];
+      const d = Math.min(100, Math.max(0, n.transfer?.discardPct ?? 0)) / 100;
       for (const m of MATS) {
         const base = isSource(n.type, m) ? g[m] : n.type === 'planta' && m === 'rom' ? 0 : inT[m];
-        av[m] = Math.max(0, base - (m === main ? n.stockChangeT ?? 0 : 0));
+        // transbordo: segue (1 − descarte) do ROM; o descarte pode sair como estéril/descarte ou ficar no local
+        const eff = n.transfer && m === 'rom' ? base * (1 - d) : n.transfer && m === 'waste' ? base + inT.rom * d : base;
+        av[m] = Math.max(0, eff - (m === main ? n.stockChangeT ?? 0 : 0));
       }
       avail.set(n.id, av);
       for (const m of MATS) {
@@ -247,6 +264,16 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
     }
     if (!changed && iter > 0) break;
   }
+  };
+  relax();
+  if (hasDiscard && romTarget > 0)
+    for (let k = 0; k < 8; k++) {
+      const toPlants = nodes.filter((n) => n.type === 'planta').reduce((a, n) => a + insOf(n.id, 'rom').reduce((b, r) => b + (edges.get(r.id) ?? 0), 0), 0);
+      if (toPlants <= 0 || Math.abs(toPlants - romTarget) < 0.5) break;
+      romTotal *= romTarget / toPlants;
+      setRomGen();
+      relax();
+    }
 
   const balances: NodeBalance[] = nodes.map((n) => {
     const inT = zero();
@@ -258,7 +285,8 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
     }
     const g = gen.get(n.id)!;
     const av = avail.get(n.id) ?? zero();
-    for (const m of MATS) keptT[m] = (n.type === 'planta' && m === 'rom' ? inT.rom : isSource(n.type, m) ? g[m] : inT[m]) - outT[m];
+    const d = Math.min(100, Math.max(0, n.transfer?.discardPct ?? 0)) / 100;
+    for (const m of MATS) keptT[m] = (n.type === 'planta' && m === 'rom' ? inT.rom : isSource(n.type, m) ? g[m] : n.transfer && m === 'rom' ? inT.rom * (1 - d) : n.transfer && m === 'waste' ? inT.waste + inT.rom * d : inT[m]) - outT[m];
     return { node: n, inT, genT: g, outT, availT: av, keptT };
   });
 
@@ -275,14 +303,25 @@ export function networkBalance(routes: Route[], premises: DetailedPremises, kind
         issues.push({ nodeId: n.id, level: 'aviso', text: `${n.name}: faltam ${fmt(has - fixed)} t de ${MATERIAL_LABELS[m].toLowerCase()} — as massas digitadas somam menos que o disponível; deixe uma movimentação sem massa para receber o saldo.` });
       // material que deveria seguir e não tem para onde ir
       const stays = b.keptT[m] - (m === MATS.filter((x) => outsOf(n.id, x).length)[0] ? n.stockChangeT ?? 0 : 0);
-      if (!outs.length && !isFinal(n.type, m) && stays > 1 && (isSource(n.type, m) || n.type === 'estoque'))
+      if (!outs.length && !isFinal(n.type, m) && stays > 1 && (isSource(n.type, m) || n.type === 'estoque') && !(n.transfer && m === 'waste'))
         issues.push({ nodeId: n.id, level: 'erro', text: `${n.name}: ${fmt(stays)} t de ${MATERIAL_LABELS[m].toLowerCase()} sem movimentação de saída.` });
+    }
+    if (n.transfer) {
+      const d = Math.min(100, Math.max(0, n.transfer.discardPct ?? 0));
+      const disc = (b.inT.rom * d) / 100;
+      if (d > 0) issues.push({ nodeId: n.id, level: 'aviso', text: `${n.name}: ${fmt(d)}% de descarte (${n.transfer.discardName || 'descarte'}) — ${fmt(disc)} t ${b.outT.waste > 0.5 ? 'saem pelas movimentações de descarte' : 'ficam em pilha no local'}; seguem ${fmt(b.inT.rom - disc)} t.` });
+      const effH = (premises.dailyCalendar ?? []).reduce((a, x) => a + (x.hoursMina || 0), 0) * ((premises.dfMina || 0) / 100) * ((premises.ufMina || 0) / 100);
+      const tph = effH > 0 ? b.inT.rom / effH : 0;
+      if (n.transfer.capacityTph && tph > n.transfer.capacityTph + 0.01)
+        issues.push({ nodeId: n.id, level: 'erro', text: `${n.name}: recebe ${fmt(tph)} t/h e a capacidade é ${fmt(n.transfer.capacityTph)} t/h (fator limitante).` });
     }
     if (n.type === 'estoque' && Math.abs(n.stockChangeT ?? 0) > 0.5) issues.push({ nodeId: n.id, level: 'aviso', text: `${n.name}: ${n.stockChangeT! > 0 ? 'forma' : 'consome'} ${fmt(Math.abs(n.stockChangeT!))} t de estoque no mês.` });
   }
   const romToPlants = balances.filter((b) => b.node.type === 'planta').reduce((a, b) => a + b.inT.rom, 0);
-  if (romTotal > 0 && Math.abs(romToPlants - romTotal) > 1 + romTotal * 0.0005)
-    issues.push({ level: 'aviso', text: `Entram ${fmt(romToPlants)} t de ROM nas plantas, contra ${fmt(romTotal)} t do consumo da planta nas premissas.` });
+  if (romTarget > 0 && Math.abs(romToPlants - romTarget) > 1 + romTarget * 0.0005)
+    issues.push({ level: 'aviso', text: `Entram ${fmt(romToPlants)} t de ROM nas plantas, contra ${fmt(romTarget)} t do consumo da planta nas premissas.` });
+  if (hasDiscard && romTotal > romTarget + 1)
+    issues.push({ level: 'aviso', text: `Para a planta receber ${fmt(romTarget)} t, as frentes movem ${fmt(romTotal)} t de ROM (${fmt(romTotal - romTarget)} t a mais por causa do descarte nos transbordos).` });
   const dangling = routes.filter((r) => r.active && (!r.fromId || !r.toId));
   for (const r of dangling) issues.push({ routeId: r.id, level: 'erro', text: `${r.name}: escolha a origem e o destino da movimentação.` });
   return { edges, nodes: balances, issues, romToPlants };

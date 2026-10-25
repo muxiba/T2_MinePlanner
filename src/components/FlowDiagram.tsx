@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Trash2, X } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind, RouteStop } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance, transportMode } from '@/engine/network';
-import { switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
+import { splitAtTransfer, switchFlowMode, setWasteOn, type FlowMode } from '@/engine/flowMode';
 import TransportTable from './TransportTable';
 import StopsEditor from './StopsEditor';
 import GeoImport from './GeoImport';
@@ -17,18 +17,19 @@ import { processPct } from '@/engine/process';
  * É a mesma rede da tabela: locais = premises.nodes, setas = rotas com fromId/toId.
  */
 
-export type Group = 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
+export type Group = 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino' | 'transbordo';
 const T_GROUPS: Group[] = ['origem', 'passagem', 'destino'];
 
-const GROUP_LABEL: Record<Group, string> = { mina: 'Mina (ROM)', planta: 'Planta(s)', produto: 'Produto(s)', rejeito: 'Rejeito', esteril: 'Estéril', origem: 'Origens', passagem: 'Pontos de passagem', destino: 'Destinos' };
+const GROUP_LABEL: Record<Group, string> = { mina: 'Mina (ROM)', planta: 'Planta(s)', produto: 'Produto(s)', rejeito: 'Rejeito', esteril: 'Estéril', origem: 'Origens', passagem: 'Pontos de passagem', destino: 'Destinos', transbordo: 'Transbordos' };
 /** material que entra em cada bloco */
-const GROUP_MAT: Record<Group, RouteKind> = { mina: 'rom', planta: 'rom', produto: 'product', rejeito: 'tailings', esteril: 'waste', origem: 'rom', passagem: 'rom', destino: 'rom' };
+const GROUP_MAT: Record<Group, RouteKind> = { mina: 'rom', planta: 'rom', produto: 'product', rejeito: 'tailings', esteril: 'waste', origem: 'rom', passagem: 'rom', destino: 'rom', transbordo: 'rom' };
 const MAT_COLOR: Record<RouteKind, string> = { rom: '#185FA5', product: '#3B6D11', tailings: '#A32D2D', waste: '#6B6A64' };
 /** o que dá para criar em cada bloco */
-const ADD: Record<Group, { type: NodeType; label: string; name: string }[]> = {
+const ADD: Record<Group, { type: NodeType; label: string; name: string; transfer?: boolean }[]> = {
   mina: [
     { type: 'frente', label: 'frente', name: 'Frente' },
-    { type: 'estoque', label: 'pilha / estoque', name: 'Pilha de ROM' },
+    { type: 'estoque', label: 'pilha', name: 'Pilha de ROM' },
+    { type: 'estoque', label: 'transbordo', name: 'Peneiramento móvel', transfer: true },
   ],
   planta: [{ type: 'planta', label: 'planta', name: 'Planta' }],
   produto: [
@@ -38,8 +39,12 @@ const ADD: Record<Group, { type: NodeType; label: string; name: string }[]> = {
   rejeito: [{ type: 'rejeito', label: 'baia / pilha', name: 'Baia' }],
   esteril: [{ type: 'esteril', label: 'pilha', name: 'PDE' }],
   origem: [{ type: 'frente', label: 'origem', name: 'Origem' }],
-  passagem: [{ type: 'estoque', label: 'ponto de passagem', name: 'Pátio' }],
+  passagem: [
+    { type: 'estoque', label: 'pátio', name: 'Pátio' },
+    { type: 'estoque', label: 'transbordo', name: 'Transbordo', transfer: true },
+  ],
   destino: [{ type: 'expedicao', label: 'destino', name: 'Destino' }],
+  transbordo: [{ type: 'estoque', label: 'transbordo', name: 'Peneiramento móvel', transfer: true }],
 };
 
 /** Bloco de cada local: pelo tipo; estoque pelo grupo gravado ou pelo material que chega/sai dele. */
@@ -124,8 +129,12 @@ export interface FlowLayout {
 
 /** Posição dos blocos, dos locais e das setas (usada no desenho da tela e no do PDF). */
 export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<typeof networkBalance>, showWaste: boolean, showTail: boolean, transport = false): FlowLayout {
-    const by: Record<Group, FlowNode[]> = { mina: [], planta: [], produto: [], rejeito: [], esteril: [], origem: [], passagem: [], destino: [] };
-    for (const n of nodes) by[groupOf(n, routes)].push(n);
+    const by: Record<Group, FlowNode[]> = { mina: [], planta: [], produto: [], rejeito: [], esteril: [], origem: [], passagem: [], destino: [], transbordo: [] };
+    // no processo, os transbordos da mina (peneiramento móvel etc.) ficam numa coluna própria entre a mina e a planta
+    for (const n of nodes) {
+      const g = groupOf(n, routes);
+      by[!transport && g === 'mina' && n.transfer ? 'transbordo' : g].push(n);
+    }
     // dentro do bloco: frentes antes das pilhas; estoques antes do terminal (ordem do fluxo)
     const order: Partial<Record<NodeType, number>> = { frente: 0, estoque: 1, planta: 0, expedicao: 2, rejeito: 1, esteril: 0 };
     for (const g of Object.keys(by) as Group[]) by[g].sort((a, b) => (order[a.type] ?? 1) - (order[b.type] ?? 1));
@@ -149,10 +158,13 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
       box.esteril = { x: 300, y: top, w: W + 20, h: h('esteril') };
       yMina = top + h('esteril') + 40;
     }
+    const sh = by.transbordo.length ? 370 : 0;
     box.mina = { x: COL.mina, y: yMina, w: W + 20, h: h('mina') };
-    box.planta = { x: COL.planta, y: yMina + Math.max(0, (h('mina') - h('planta')) / 2), w: W + 20, h: h('planta') };
-    box.produto = { x: COL.right, y: top, w: W + 20, h: h('produto') };
-    if (showTail) box.rejeito = { x: COL.right, y: Math.max(top + h('produto') + 40, box.planta.y + box.planta.h / 2 + 10), w: W + 20, h: h('rejeito') };
+    if (sh) box.transbordo = { x: COL.planta, y: yMina + Math.max(0, (h('mina') - h('transbordo')) / 2), w: W + 20, h: h('transbordo') };
+    box.planta = { x: COL.planta + sh, y: yMina + Math.max(0, (h('mina') - h('planta')) / 2), w: W + 20, h: h('planta') };
+    box.produto = { x: COL.right + sh, y: top, w: W + 20, h: h('produto') };
+    if (showTail) box.rejeito = { x: COL.right + sh, y: Math.max(top + h('produto') + 40, box.planta.y + box.planta.h / 2 + 10), w: W + 20, h: h('rejeito') };
+    Wd += sh;
     }
     const pos = new Map<string, { x: number; y: number; w: number; h: number; g: Group }>();
     for (const g of Object.keys(box) as Group[]) {
@@ -327,6 +339,15 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
     setSel(null);
     setLink(null);
   };
+  /** parada vira transbordo: novo local no caminho e a movimentação em duas pernas */
+  const toTransfer = (routeId: string, stopId: string) => {
+    if (!confirm('Transformar esta parada em transbordo? O caminhão passa a bascular aqui e outro caminhão leva até o destino: a movimentação vira duas pernas, e o transbordo vira um local com equipamento de carga (Carga e ciclo).')) return;
+    const x = splitAtTransfer(premises, routes, routeId, stopId);
+    if (!x) return;
+    setPremises(() => x.premises);
+    setRoutes(() => x.routes);
+    setSel({ kind: 'node', id: x.premises.nodes![x.premises.nodes!.length - 1].id });
+  };
   const cleanup = () => {
     const unused = nodes.filter((n) => !routes.some((r) => r.fromId === n.id || r.toId === n.id));
     if (!unused.length || !confirm(`Apagar ${unused.length} local(is) sem movimentação: ${unused.map((n) => n.name).join(', ')}?`)) return;
@@ -347,10 +368,10 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
   /* ------------------------------ ações ------------------------------ */
   const setNode = (id: string, patch: Partial<FlowNode>) => setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
   const setRoute = (id: string, patch: Partial<Route>) => setRoutes((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  const addNode = (g: Group, type: NodeType, name: string) => {
+  const addNode = (g: Group, type: NodeType, name: string, transfer = false) => {
     const id = newId(type);
-    const count = nodes.filter((n) => n.type === type && groupOf(n, routes) === g).length + 1;
-    setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id, name: `${name} ${count}`, type, ...(type === 'estoque' || T_GROUPS.includes(g) ? { group: g } : {}) }] }));
+    const count = nodes.filter((n) => n.type === type && groupOf(n, routes) === (g === 'transbordo' ? 'mina' : g) && !!n.transfer === transfer).length + 1;
+    setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id, name: `${name} ${count}`, type, ...(type === 'estoque' || T_GROUPS.includes(g) ? { group: g === 'transbordo' ? 'mina' : g } : {}), ...(transfer ? { transfer: { discardPct: 0, process: name } } : {}) }] }));
     setSel({ kind: 'node', id });
   };
   const removeNode = (id: string) => {
@@ -445,7 +466,12 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
       const o = b?.outT.rom ?? 0;
       return i > 0.5 && o > 0.5 ? `recebe ${t0(i)} · envia ${t0(o)} t` : o > 0.5 ? `envia ${t0(o)} t` : i > 0.5 ? `recebe ${t0(i)} t` : 'sem movimentação';
     }
-    if (n.type === 'frente') return `${Math.round(((n.romShare ?? 1) / shareSum) * 100)}% do ROM · ${t0(((premises.targetMonthlyROM || 0) * (n.romShare ?? 1)) / shareSum)} t`;
+    if (n.type === 'frente') return `${Math.round(((n.romShare ?? 1) / shareSum) * 100)}% do ROM · ${t0(balOf(n.id)?.genT.rom ?? ((premises.targetMonthlyROM || 0) * (n.romShare ?? 1)) / shareSum)} t`;
+    if (n.transfer) {
+      const b = balOf(n.id);
+      const inT = b ? Object.values(b.inT).reduce((a, v) => a + v, 0) : 0;
+      return `${n.transfer.discardPct ? `descarte ${n.transfer.discardPct}% · ` : ''}${n.transfer.capacityTph ? `${t0(n.transfer.capacityTph)} t/h · ` : ''}recebe ${t0(inT)} t`;
+    }
     if (n.type === 'planta') return pp.seco ? `RM ${pp.rm.toLocaleString('pt-BR')}% · a seco` : `RM ${pp.rm.toLocaleString('pt-BR')}% · rejeito ${pp.rej.toLocaleString('pt-BR')}%`;
     const b = balOf(n.id);
     const inT = b ? Object.values(b.inT).reduce((s, v) => s + v, 0) : 0;
@@ -474,6 +500,11 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
         {tm && !layout.box.passagem && (
           <button type="button" onClick={() => addNode('passagem', 'estoque', 'Pátio')} className="rounded-lg border border-black/10 px-3 py-1 text-sm text-black/65 hover:bg-black/5" title="Local intermediário com estoque (recebe e despacha massa). Pesagem, pedágio e inspeção são paradas no trajeto da movimentação.">
             + ponto de passagem (estoque)
+          </button>
+        )}
+        {tm && !layout.box.passagem && (
+          <button type="button" onClick={() => addNode('passagem', 'estoque', 'Transbordo', true)} className="rounded-lg border border-black/10 px-3 py-1 text-sm text-black/65 hover:bg-black/5" title="Local onde o caminhão bascula e outro caminhão segue (pode descartar uma parte, ex.: peneiramento)">
+            + transbordo
           </button>
         )}
         {nodes.some((n) => !routes.some((r) => r.fromId === n.id || r.toId === n.id)) && (
@@ -563,7 +594,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                     const bw = (b.w - 20 - (n - 1) * 6) / n;
                     const x = b.x + 10 + i * (bw + 6);
                     return (
-                      <g key={a.type + a.label} role="button" tabIndex={0} aria-label={`Adicionar ${a.label} em ${GROUP_LABEL[g]}`} className="cursor-pointer" onClick={() => addNode(g, a.type, a.name)} onKeyDown={(e) => e.key === 'Enter' && addNode(g, a.type, a.name)}>
+                      <g key={a.type + a.label} role="button" tabIndex={0} aria-label={`Adicionar ${a.label} em ${GROUP_LABEL[g]}`} className="cursor-pointer" onClick={() => addNode(g, a.type, a.name, a.transfer)} onKeyDown={(e) => e.key === 'Enter' && addNode(g, a.type, a.name, a.transfer)}>
                         <rect x={x} y={b.y + b.h - FOOT + 2} width={bw} height={22} rx={6} fill="#fff" stroke="#15567F" strokeOpacity={0.35} strokeDasharray="3 3" />
                         <text x={x + bw / 2} y={b.y + b.h - FOOT + 17} textAnchor="middle" fill="#15567F" fontSize={11.5}>+ {a.label}</text>
                       </g>
@@ -666,6 +697,23 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
               </div>
               <div className="space-y-3">
                 <label className="block text-xs text-black/55">Nome<input className={`${cell} mt-1`} value={selNode.name} onChange={(e) => setNode(selNode.id, { name: e.target.value })} /></label>
+                {selNode.type === 'estoque' && (
+                  <div className={`rounded-lg p-2.5 ${selNode.transfer ? 'bg-amber-50' : 'bg-black/[0.03]'}`}>
+                    <label className="flex items-center gap-2 text-xs font-medium text-black/70">
+                      <input type="checkbox" checked={!!selNode.transfer} onChange={(e) => setNode(selNode.id, { transfer: e.target.checked ? { discardPct: 0, process: selNode.name } : undefined })} />
+                      Transbordo / processamento no caminho (ex.: peneiramento móvel)
+                    </label>
+                    {selNode.transfer && (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <label className="block text-xs text-black/55">Descarte (% do que chega)<input type="number" min={0} max={100} step={0.5} className={`${num} mt-1`} value={selNode.transfer.discardPct} onChange={(e) => setNode(selNode.id, { transfer: { ...selNode.transfer!, discardPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) } })} /></label>
+                        <label className="block text-xs text-black/55">Material descartado<input className={`${cell} mt-1`} value={selNode.transfer.discardName ?? ''} placeholder="over, finos…" onChange={(e) => setNode(selNode.id, { transfer: { ...selNode.transfer!, discardName: e.target.value } })} /></label>
+                        <label className="block text-xs text-black/55">Capacidade (t/h, seca)<input type="number" min={0} step={10} className={`${num} mt-1`} value={selNode.transfer.capacityTph ?? ''} placeholder="sem limite" onChange={(e) => setNode(selNode.id, { transfer: { ...selNode.transfer!, capacityTph: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) } })} /></label>
+                        <label className="block text-xs text-black/55">Processo<input className={`${cell} mt-1`} value={selNode.transfer.process ?? ''} placeholder="peneiramento" onChange={(e) => setNode(selNode.id, { transfer: { ...selNode.transfer!, process: e.target.value } })} /></label>
+                        <p className="col-span-2 text-[11px] text-black/50">O descarte fica em pilha no local ou sai por uma movimentação de descarte (ligue o transbordo à pilha de estéril / descarte). No processo, as frentes movem mais ROM para a planta receber o consumo. O equipamento que carrega os caminhões da perna seguinte (ou alimenta a planta móvel) fica em Carga e ciclo.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!tm && selNode.type === 'frente' && (
                   <label className="block text-xs text-black/55">
                     Parte do ROM (peso)
@@ -726,11 +774,12 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                 <label className="col-span-2 block text-xs text-black/55">Nome<input className={`${cell} mt-1`} value={selStop.name} aria-label="Nome da parada" onChange={(e) => setStop({ name: e.target.value })} /></label>
                 <label className="block text-xs text-black/55">
                   Tipo
-                  <select className={`${cell} mt-1`} value={selStop.kind} onChange={(e) => setStop({ kind: e.target.value as RouteStop['kind'] })}>
+                  <select className={`${cell} mt-1`} value={selStop.kind} onChange={(e) => (e.target.value === 'transbordo' ? toTransfer(stopRoute.id, selStop.id) : setStop({ kind: e.target.value as RouteStop['kind'] }))}>
                     <option value="pesagem">Pesagem</option>
                     <option value="inspecao">Inspeção</option>
                     <option value="abastecimento">Abastecimento</option>
                     <option value="outro">Outra (pedágio, portaria…)</option>
+                    <option value="transbordo">Transbordo (bascula e outro caminhão segue)</option>
                   </select>
                 </label>
                 <label className="block text-xs text-black/55">
@@ -786,7 +835,7 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                 <p className="rounded-lg bg-black/[0.03] px-3 py-2 text-sm">Massa no mês: <b className="font-mono">{selRoute.active ? t0(res.edges.get(selRoute.id) ?? 0) : '—'} t seca</b></p>
                 <div>
                   <p className="mb-1 text-xs text-black/55">Paradas no trajeto</p>
-                  <StopsEditor route={selRoute} compact onChange={(stops) => setRoute(selRoute.id, { stops })} />
+                  <StopsEditor route={selRoute} compact onChange={(stops) => setRoute(selRoute.id, { stops })} onTransfer={(sid) => toTransfer(selRoute.id, sid)} />
                 </div>
                 <details>
                   <summary className="cursor-pointer text-xs text-black/55">Mapa (DXF) de origem, destino e trajeto{selRoute.geo?.length ? ' · importado' : ''}</summary>

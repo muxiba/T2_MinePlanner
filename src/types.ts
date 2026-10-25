@@ -94,6 +94,16 @@ export interface FlowNode {
   group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
   /** equipamentos de carga do local (vazio = um equipamento: o escolhido em loaderClassId ou o padrão) */
   loaders?: NodeLoader[];
+  /** transbordo / processamento no caminho (ex.: peneiramento móvel): parte do material é descartada no local */
+  transfer?: {
+    /** % do que chega que é descartado (over ou finos da peneira); o restante segue */
+    discardPct: number;
+    /** capacidade de processamento (t/h, seca); vazio = sem limite */
+    capacityTph?: number;
+    /** nome do processo (ex.: peneiramento) e do material descartado (ex.: over) */
+    process?: string;
+    discardName?: string;
+  };
 }
 
 /** Geometria de uma movimentação em um período (1 = primeiro); campos vazios = iguais ao período anterior. */

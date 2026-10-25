@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import StopsEditor from './StopsEditor';
+import { splitAtTransfer } from '@/engine/flowMode';
 import GeoImport from './GeoImport';
 import { Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, Route } from '@/types';
@@ -141,7 +142,17 @@ const TransportTable: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   <tr className="bg-black/[0.02]">
                     <td colSpan={14} className="px-2 py-2">
                       <p className="mb-1 text-xs text-black/55">Paradas no trajeto de <b>{r.name}</b> (DMT {t0(r.distance)} m):</p>
-                      <StopsEditor route={r} onChange={(stops) => setRoute(r.id, { stops })} />
+                      <StopsEditor
+                        route={r}
+                        onChange={(stops) => setRoute(r.id, { stops })}
+                        onTransfer={(sid) => {
+                          if (!confirm('Transformar esta parada em transbordo? O caminhão bascula aqui e outro caminhão leva até o destino: a movimentação vira duas pernas.')) return;
+                          const x = splitAtTransfer(premises, routes, r.id, sid);
+                          if (!x) return;
+                          setPremises(() => x.premises);
+                          setRoutes(() => x.routes);
+                        }}
+                      />
                       <p className="mb-1 mt-3 text-xs text-black/55">Mapa (DXF) de origem, destino e trajeto:</p>
                       <GeoImport route={r} periods={periods} onChange={(nr) => setRoutes((rs) => rs.map((x) => (x.id === r.id ? nr : x)))} />
                     </td>

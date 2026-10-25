@@ -139,3 +139,28 @@ describe('meta de transporte', () => {
     expect(networkBalance(routes, p, routeKind).issues.length).toBe(0);
   });
 });
+
+describe('transbordo com descarte', () => {
+  it('a mina move mais ROM para a planta receber o consumo; o descarte fica no transbordo ou sai como estéril', async () => {
+    const { splitAtTransfer } = await import('./flowMode');
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const rom = net.routes.find((r) => routeKind(r) === 'rom')!;
+    const withStop = net.routes.map((r) => (r.id === rom.id ? { ...r, distance: 2000, stops: [{ id: 's1', name: 'Peneiramento', kind: 'outro' as const, distM: 800, stopMin: 1, dir: 'ida' as const }] } : r));
+    const sp = splitAtTransfer({ ...P, nodes: net.nodes }, withStop, rom.id, 's1')!;
+    const tb = sp.premises.nodes!.find((n) => n.transfer)!;
+    const legs = sp.routes.filter((r) => r.toId === tb.id || r.fromId === tb.id);
+    expect(legs.map((r) => r.distance).sort()).toEqual([1200, 800]);
+    expect(legs.find((r) => r.fromId === tb.id)!.id).toBe(rom.id);
+    const p = { ...sp.premises, nodes: sp.premises.nodes!.map((n) => (n.id === tb.id ? { ...n, transfer: { discardPct: 20 } } : n)) };
+    const res = networkBalance(sp.routes, p, routeKind);
+    const legA = legs.find((r) => r.toId === tb.id)!;
+    expect(res.edges.get(legA.id)!).toBeCloseTo(P.targetMonthlyROM / 0.8, -1);
+    expect(res.edges.get(rom.id)!).toBeCloseTo(P.targetMonthlyROM, -1);
+    expect(res.issues.some((x) => x.level === 'erro')).toBe(false);
+    // descarte como movimentação para a PDE
+    const pde: FlowNode = { id: 'pde', name: 'PDE', type: 'esteril' };
+    const disc = R('disc', 'Peneiramento → PDE', 'waste', tb.id, 'pde');
+    const res2 = networkBalance([...sp.routes, disc], { ...p, nodes: [...p.nodes!, pde] }, routeKind);
+    expect(res2.edges.get('disc')!).toBeCloseTo((P.targetMonthlyROM / 0.8) * 0.2, -1);
+  });
+});

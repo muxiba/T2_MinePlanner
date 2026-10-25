@@ -8,7 +8,7 @@ const KIND: Record<RouteStop['kind'], string> = { pesagem: 'Pesagem', inspecao: 
 const cell = 'w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-sm';
 const num = 'rounded-lg border border-black/10 bg-white px-2 py-1 text-sm text-right font-mono';
 
-const StopsEditor: React.FC<{ route: Route; onChange: (stops: RouteStop[] | undefined) => void; compact?: boolean }> = ({ route, onChange, compact }) => {
+const StopsEditor: React.FC<{ route: Route; onChange: (stops: RouteStop[] | undefined) => void; compact?: boolean; onTransfer?: (stopId: string) => void }> = ({ route, onChange, compact, onTransfer }) => {
   const list = route.stops ?? [];
   const set = (id: string, patch: Partial<RouteStop>) => onChange(list.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   const add = () =>
@@ -38,8 +38,9 @@ const StopsEditor: React.FC<{ route: Route; onChange: (stops: RouteStop[] | unde
                 <tr key={s.id} className="border-t border-black/5">
                   <td className="px-1 py-1"><input className={cell} value={s.name} aria-label="Nome da parada" onChange={(e) => set(s.id, { name: e.target.value })} /></td>
                   <td className="px-1 py-1">
-                    <select className={cell} value={s.kind} aria-label="Tipo da parada" onChange={(e) => set(s.id, { kind: e.target.value as RouteStop['kind'] })}>
+                    <select className={cell} value={s.kind} aria-label="Tipo da parada" onChange={(e) => (e.target.value === 'transbordo' ? onTransfer?.(s.id) : set(s.id, { kind: e.target.value as RouteStop['kind'] }))}>
                       {(Object.keys(KIND) as RouteStop['kind'][]).map((k) => <option key={k} value={k}>{KIND[k]}</option>)}
+                      {onTransfer && <option value="transbordo">Transbordo (bascula e outro caminhão segue)</option>}
                     </select>
                   </td>
                   <td className="px-1 py-1 text-right">
