@@ -69,6 +69,14 @@ export function catalogOf(premises: DetailedPremises): EquipmentCatalog {
   return { trucks: fill(c.trucks, DEFAULT_CATALOG.trucks), loaders: fill(c.loaders, DEFAULT_CATALOG.loaders) };
 }
 
+/** Equipamento de carga do local de origem da rota (rede de fluxos), quando é um modelo do catálogo. */
+export function nodeLoaderOf(route: Route, premises: DetailedPremises): LoaderSetup | null {
+  const n = premises.nodes?.find((x) => x.id === route.fromId);
+  if (!n?.loaderClassId || n.loaderClassId === 'silo') return null;
+  const l = catalogOf(premises).loaders.find((x) => x.id === n.loaderClassId);
+  return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: n.loaderCount ?? 1, bucketM3: l.bucketM3, fillFactor: 90, cycleSec: l.cycleSec, availability: n.loaderDf ?? premises.dfMina ?? 85 } : null;
+}
+
 /** Equipamento de carga de uma rota a partir de um modelo do catálogo. */
 export function loaderFromCatalog(l: LoaderClass, premises: DetailedPremises, count = 1): LoaderSetup {
   return { name: l.name, count, bucketM3: l.bucketM3, fillFactor: 90, cycleSec: l.cycleSec, availability: premises.dfMina || 85 };
@@ -147,6 +155,8 @@ export interface RouteAnalysis {
   trucksNeeded: number;
   transportCapacityWetT: number;
   loader: LoaderAnalysis | null;
+  /** carregamento usado no ciclo (equipamento da rota ou do local de origem) */
+  loading: { name: string; passes: number; loadMin: number; source: 'rota' | 'local' } | null;
   capacityWetT: number;
   limitedBy: 'transporte' | 'carga';
   /** capacidade / necessidade (1 = atende exato) */
@@ -223,6 +233,8 @@ export interface FleetAnalysis {
   };
   actions: Action[];
   classComparison: { routeId: string; routeName: string; options: ClassOption[] } | null;
+  /** equipamentos de carga necessários por local (rede) e por rota com equipamento próprio */
+  loaderNeeds: LoaderNeed[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -491,8 +503,10 @@ export function analyzeRoute(
     density,
   );
 
-  const loading = route.loader ? loaderLoading(route.loader, payloadT, density) : null;
-  const loadMin = loading ? loading.loadMin : Math.max(premises.loadingTime, 0);
+  // equipamento de carga: o da rota (dedicado) ou o do local de origem na rede (compartilhado; só define o tempo de carga)
+  const nodeL = route.loader ? null : nodeLoaderOf(route, premises);
+  const loading = route.loader ? loaderLoading(route.loader, payloadT, density) : nodeL ? loaderLoading(nodeL, payloadT, density) : null;
+  const loadMin = loading ? loading.loadMin + (nodeL ? Math.max(0, premises.loaderSpotMin ?? 0.5) : 0) : Math.max(premises.loadingTime, 0);
 
   const speedFactor = overrides.speedFactor ?? 1;
   const effPremises = speedFactor === 1 ? premises : { ...premises, velocidadeCheio: premises.velocidadeCheio * speedFactor, velocidadeVazio: premises.velocidadeVazio * speedFactor };
@@ -562,6 +576,7 @@ export function analyzeRoute(
     trucksNeeded,
     transportCapacityWetT,
     loader,
+    loading: loading ? { name: route.loader?.name ?? nodeL!.name, passes: loading.passes, loadMin, source: route.loader ? 'rota' : 'local' } : null,
     capacityWetT,
     limitedBy,
     ratio,
@@ -683,7 +698,105 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
     fleet: { allocated, needed, neededExact, premise: premises.truckCount || 0, idle, extraEquivalent, spare },
     actions,
     classComparison,
+    loaderNeeds: loaderSizing(routes, premises, analyses),
   };
+}
+
+export interface LoaderNeed {
+  /** local da rede (ou rota, quando o equipamento é próprio da rota) */
+  where: string;
+  source: 'local' | 'rota';
+  nodeId?: string;
+  routeIds: string[];
+  loaderName: string;
+  /** caçambadas por caminhão (média ponderada) */
+  passes: number;
+  /** tempo de carga por caminhão (min, média ponderada) */
+  loadMin: number;
+  /** caminhões carregados por mês */
+  trucksLoaded: number;
+  /** horas de carga necessárias no mês */
+  busyH: number;
+  /** horas efetivas de um equipamento no mês (calendário × DF × UF) */
+  effHPerUnit: number;
+  neededExact: number;
+  needed: number;
+  available: number | null;
+  /** ocupação dos equipamentos disponíveis (ou dos necessários) */
+  utilization: number;
+}
+
+/**
+ * Quantos equipamentos de carga cada local precisa: horas de carga no mês (caminhões carregados × tempo de carga)
+ * ÷ horas efetivas de um equipamento (calendário × DF do equipamento × UF da área).
+ */
+export function loaderSizing(routes: Route[], premises: DetailedPremises, analyses: RouteAnalysis[]): LoaderNeed[] {
+  const out: LoaderNeed[] = [];
+  const byId = new Map(analyses.map((a) => [a.id, a]));
+  const active = routes.filter((r) => r.active && byId.has(r.id));
+  const areaOf = (k: RouteKind) => (k === 'product' || k === 'tailings' ? 'planta' : 'mina');
+  const uf = (area: 'mina' | 'planta') => (area === 'mina' ? premises.ufMina : premises.ufPlanta) || 100;
+  for (const n of premises.nodes ?? []) {
+    const l = n.loaderClassId && n.loaderClassId !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === n.loaderClassId) : null;
+    if (!l) continue;
+    const rs = active.filter((r) => r.fromId === n.id && !r.loader);
+    if (!rs.length) continue;
+    let trucks = 0;
+    let busyMin = 0;
+    let passesW = 0;
+    for (const r of rs) {
+      const a = byId.get(r.id)!;
+      const t = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
+      trucks += t;
+      busyMin += t * (a.loading?.loadMin ?? 0);
+      passesW += t * (a.loading?.passes ?? 0);
+    }
+    const area = areaOf(routeKind(rs[0]));
+    const effH = sumCalendarHours(premises, area) * ((n.loaderDf ?? premises.dfMina ?? 85) / 100) * (uf(area) / 100);
+    const busyH = busyMin / 60;
+    const neededExact = effH > 0 ? busyH / effH : 0;
+    const available = n.loaderCount ?? null;
+    out.push({
+      where: n.name,
+      source: 'local',
+      nodeId: n.id,
+      routeIds: rs.map((r) => r.id),
+      loaderName: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`,
+      passes: trucks ? passesW / trucks : 0,
+      loadMin: trucks ? busyMin / trucks : 0,
+      trucksLoaded: trucks,
+      busyH,
+      effHPerUnit: effH,
+      neededExact,
+      needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)),
+      available,
+      utilization: effH > 0 ? busyH / (effH * Math.max(1, available ?? Math.ceil(neededExact - 1e-6))) : 0,
+    });
+  }
+  for (const r of active.filter((x) => x.loader)) {
+    const a = byId.get(r.id)!;
+    if (!a.loader) continue;
+    const t = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
+    const busyH = (t * a.loader.loadMin) / 60;
+    const effH = a.loader.hours.effective;
+    const neededExact = effH > 0 ? busyH / effH : 0;
+    out.push({
+      where: r.name,
+      source: 'rota',
+      routeIds: [r.id],
+      loaderName: a.loader.name,
+      passes: a.loader.passes,
+      loadMin: a.loader.loadMin,
+      trucksLoaded: t,
+      busyH,
+      effHPerUnit: effH,
+      neededExact,
+      needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)),
+      available: a.loader.count,
+      utilization: effH > 0 ? busyH / (effH * Math.max(1, a.loader.count)) : 0,
+    });
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */

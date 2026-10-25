@@ -192,6 +192,8 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** posicionamento do caminhão sob o equipamento de carga do local (min), somado às caçambadas */
+  loaderSpotMin?: number;
   /** rede de fluxos: locais (as rotas são as movimentações entre eles) */
   nodes?: FlowNode[];
   /** Fluxos cuja rota automática o usuário apagou (não são recriados enquanto o fluxo existir). */

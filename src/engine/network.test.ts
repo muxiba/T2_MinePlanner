@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ensureNetwork, networkBalance } from './network';
-import { routeKind, routeTargets } from './fleet';
+import { analyzeFleet, routeKind, routeTargets } from './fleet';
 import { DEFAULT_PREMISES, INITIAL_ROUTES } from '../constants';
 import type { FlowNode, Route } from '../types';
 
@@ -54,5 +54,20 @@ describe('rede de fluxos', () => {
     const nodes: FlowNode[] = [{ id: 'f', name: 'F', type: 'frente' }, { id: 'p', name: 'Planta', type: 'planta' }];
     const res = networkBalance([R('r', 'F → P', 'rom', 'f', 'p')], { ...P, nodes }, routeKind);
     expect(res.issues.some((i) => i.level === 'erro' && i.text.includes('produto sem movimentação'))).toBe(true);
+  });
+
+  it('equipamentos de carga por local: horas de carga ÷ horas efetivas de um equipamento', () => {
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const frente = net.nodes.find((n) => n.type === 'frente')!;
+    const nodes = net.nodes.map((n) => (n.id === frente.id ? { ...n, loaderClassId: 'esc-35', loaderDf: 85 } : n));
+    const a = analyzeFleet(net.routes, { ...P, nodes, looseDensity: 2 });
+    const need = a.loaderNeeds.find((x) => x.nodeId === frente.id)!;
+    const rom = a.routes.find((r) => r.kind === 'rom')!;
+    // 40 t ÷ (2,0 m³ × 90% × 2,0 t/m³) = 11,1 → 12 caçambadas de 22 s = 4,4 min + 0,5 min de posicionamento
+    expect(rom.loading!.passes).toBe(12);
+    expect(rom.loading!.loadMin).toBeCloseTo(4.9, 6);
+    const trucks = rom.targetWetT / rom.payloadT;
+    expect(need.busyH).toBeCloseTo((trucks * 4.9) / 60, 6);
+    expect(need.needed).toBe(Math.ceil(need.busyH / need.effHPerUnit - 1e-6));
   });
 });

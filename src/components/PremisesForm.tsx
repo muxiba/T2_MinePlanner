@@ -308,6 +308,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
         { label: "Pesagem Carregado (min)", key: "weighingTimeLoaded" },
         { label: "Pesagem Vazio (min)", key: "weighingTimeEmpty" },
         { label: "Fila por Ciclo (min)", key: "queueMin" },
+        { label: "Posicionamento na carga com equipamento do local (min)", key: "loaderSpotMin" },
       ]
     }
   ];
@@ -455,7 +456,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                     <input
                       type="number"
                       disabled={field.disabled}
-                      value={(premises[field.key as keyof DetailedPremises] as number | undefined) ?? (field.key === "rmDry" ? 100 : 0)}
+                      value={(premises[field.key as keyof DetailedPremises] as number | undefined) ?? (field.key === "rmDry" ? 100 : field.key === "loaderSpotMin" ? 0.5 : 0)}
                       onChange={(e) => handleChange(field.key as keyof DetailedPremises, parseFloat(e.target.value) || 0)}
                       className={`w-full border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all ${field.highlight ? 'bg-red-50/50 border-red-100 font-bold text-red-600' : 'bg-[#F8F9FA]'} ${field.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     />
