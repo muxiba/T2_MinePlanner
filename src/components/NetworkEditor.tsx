@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance } from '@/engine/network';
-import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
-import { LoaderSelect } from './LoaderSetupEditor';
+import { routeKind } from '@/engine/fleet';
+import { LoadUsesSummary } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
 /**
@@ -141,14 +141,10 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                       ) : <span className="text-xs text-black/30">—</span>}
                     </td>
                     <td className="px-1 py-1">
-                      {hasOut ? (
-                        <LoaderSelect premises={premises} className={cell} value={nodeLoaderEntries(n)[0]?.classId} label="Carregamento" onChange={(v) => setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === n.id ? withFirstEntry(x, { classId: v }) : x)) }))} />
-                      ) : <span className="text-xs text-black/30">sem saída de caminhões</span>}
+                      <LoadUsesSummary premises={premises} node={n} routes={routes} />
                     </td>
                     <td className="px-1 py-1">
-                      {hasOut && (entryClassId(nodeLoaderEntries(n)[0] ?? {}, premises) ?? 'silo') !== 'silo' ? (
-                        <input type="number" min={0} step={1} className={`${num} w-20`} value={nodeLoaderEntries(n)[0]?.count ?? ''} placeholder="calcular" aria-label="Equipamentos disponíveis" onChange={(e) => { const c = e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))); setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === n.id ? withFirstEntry(x, { count: c }) : x)) })); }} />
-                      ) : <span className="text-xs text-black/30">—</span>}
+                      <span className="text-xs text-black/30">—</span>
                     </td>
                     <td className="px-1 py-1">
                       <button type="button" onClick={() => removeNode(n.id)} className="rounded-lg p-1.5 text-black/35 hover:bg-red-50 hover:text-red-600" aria-label={`Apagar ${n.name}`}><Trash2 size={14} /></button>

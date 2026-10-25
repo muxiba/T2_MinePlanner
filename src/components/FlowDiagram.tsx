@@ -6,8 +6,8 @@ import { splitAtTransfer, switchFlowMode, setWasteOn, type FlowMode } from '@/en
 import TransportTable from './TransportTable';
 import StopsEditor from './StopsEditor';
 import GeoImport from './GeoImport';
-import { entryClassId, nodeLoaderEntries, routeKind, withFirstEntry } from '@/engine/fleet';
-import { LoaderSelect } from './LoaderSetupEditor';
+import { routeKind } from '@/engine/fleet';
+import { LoadUsesSummary } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
 /**
@@ -731,18 +731,10 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                     <span className="mt-0.5 block text-[11px] text-black/45">+ forma estoque (sai menos), − consome estoque (sai mais)</span>
                   </label>
                 )}
-                {routes.some((r) => r.fromId === selNode.id) && (
-                  <>
-                    <label className="block text-xs text-black/55">
-                      Carregamento dos caminhões
-                      <LoaderSelect premises={premises} className={`${cell} mt-1`} value={nodeLoaderEntries(selNode)[0]?.classId} label="Carregamento dos caminhões" onChange={(v) => setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === selNode.id ? withFirstEntry(x, { classId: v }) : x)) }))} />
-                      {nodeLoaderEntries(selNode).length > 1 && <span className="mt-0.5 block text-[11px] text-black/45">+{nodeLoaderEntries(selNode).length - 1} equipamento(s) neste local — veja em Carga e ciclo</span>}
-                    </label>
-                    {(entryClassId(nodeLoaderEntries(selNode)[0] ?? {}, premises) ?? 'silo') !== 'silo' && (
-                      <label className="block text-xs text-black/55">Equipamentos disponíveis<input type="number" min={0} step={1} className={`${num} mt-1`} value={nodeLoaderEntries(selNode)[0]?.count ?? ''} placeholder="o sistema calcula" onChange={(e) => { const c = e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))); setPremises((p) => ({ ...p, nodes: (p.nodes ?? []).map((x) => (x.id === selNode.id ? withFirstEntry(x, { count: c }) : x)) })); }} /></label>
-                    )}
-                  </>
-                )}
+                <div className="rounded-lg bg-black/[0.03] px-3 py-2">
+                  <p className="mb-1 text-xs text-black/55">Equipamentos de carga</p>
+                  <LoadUsesSummary premises={premises} node={selNode} routes={routes} />
+                </div>
                 {(() => {
                   const b = balOf(selNode.id);
                   if (!b) return null;

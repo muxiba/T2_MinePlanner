@@ -92,8 +92,10 @@ export interface FlowNode {
   loaderDf?: number;
   /** bloco do desenho em que fica: no processo (mina = pilha de ROM, produto, rejeito ou estéril); no modo só transporte (origem, passagem, destino) */
   group?: 'mina' | 'planta' | 'produto' | 'rejeito' | 'esteril' | 'origem' | 'passagem' | 'destino';
-  /** equipamentos de carga do local (vazio = um equipamento: o escolhido em loaderClassId ou o padrão) */
+  /** equipamentos de carga do local (formato antigo; convertido em loadUses) */
   loaders?: NodeLoader[];
+  /** carga por uso: 'feed' (alimentar a planta / planta móvel) ou o id de cada movimentação que sai do local */
+  loadUses?: Record<string, LoadUse>;
   /** transbordo / processamento no caminho (ex.: peneiramento móvel): parte do material é descartada no local */
   transfer?: {
     /** % do que chega que é descartado (over ou finos da peneira); o restante segue */
@@ -130,6 +132,16 @@ export interface RouteStop {
   dir: 'ida' | 'volta' | 'ambos';
   /** postos de atendimento (ex.: 1 balança) */
   posts?: number;
+}
+
+/** Como um uso de carga é atendido: equipamento próprio, o mesmo de outro uso do local, o tempo das premissas ou silo/correia. */
+export interface LoadUse {
+  mode: 'own' | 'share' | 'tempo' | 'silo';
+  /** equipamento próprio: id do catálogo (vazio = o padrão de Transporte / Frota) e quantidade disponível (vazio = calcular) */
+  classId?: string;
+  count?: number;
+  /** usa o mesmo equipamento de outro uso do local ('feed' ou id da movimentação) */
+  shareWith?: string;
 }
 
 /** Equipamento de carga de um local: carrega os caminhões de algumas (ou todas as) saídas, ou alimenta a planta. */

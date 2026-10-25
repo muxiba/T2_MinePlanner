@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pencil, Plus, Trash2, X } from 'lucide-react';
-import type { DetailedPremises, FlowNode, LoaderClass, NodeLoader, Route } from '@/types';
-import { DEFAULT_LOOSE_DENSITY, analyzeFleet, catalogOf, entryClassId, loaderCycleSec, loaderLoading, nodeLoaderEntries } from '@/engine/fleet';
+import type { DetailedPremises, FlowNode, LoadUse, LoaderClass, Route } from '@/types';
+import { DEFAULT_LOOSE_DENSITY, analyzeFleet, catalogOf, entryClassId, loadOwner, loadUseKeys, loadUseOf, loaderCycleSec, loaderLoading, nodeLoaderEntries, routeTargets, useClassId } from '@/engine/fleet';
 import { fleetTypesOf } from '@/engine/mix';
 
 /**
@@ -77,7 +77,12 @@ const HEAD_CELLS = ['Caçamba (m³)', 'Enchimento (%)', 'Carregar (s)', 'Giro ca
 
 /** Equipamentos em uso (escolhidos em algum local ou como padrão). */
 const usedLoaderIds = (premises: DetailedPremises) =>
-  new Set([...(premises.nodes ?? []).flatMap((n) => nodeLoaderEntries(n).map((e) => entryClassId(e, premises))), premises.defaultLoaderClassId].filter((x): x is string => !!x && x !== 'silo'));
+  new Set(
+    [
+      ...(premises.nodes ?? []).flatMap((n) => [...Object.values(n.loadUses ?? {}).map((u) => useClassId(u, premises)), ...nodeLoaderEntries(n).map((e) => entryClassId(e, premises))]),
+      premises.defaultLoaderClassId,
+    ].filter((x): x is string => !!x && x !== 'silo'),
+  );
 
 /** Tempos de cada equipamento e caçambadas por tipo de caminhão. */
 export const LoaderTimesEditor: React.FC<Props> = ({ premises, setPremises }) => {
@@ -179,181 +184,250 @@ export const LoaderTimesEditor: React.FC<Props> = ({ premises, setPremises }) =>
   );
 };
 
-/** Equipamentos de carga por local: lista com tipo, função (carregar caminhões de quais saídas, ou alimentar a planta), quantidade e necessários. */
+const GROUP_ORDER: Record<string, number> = { origem: 0, mina: 1, transbordo: 2, passagem: 3, planta: 4, produto: 5, rejeito: 6, esteril: 7, destino: 8 };
+
+/**
+ * Equipamentos de carga por local e por fluxo, na ordem da rede: em cada local, “Alimentar” (planta e transbordo)
+ * e uma linha por movimentação que sai dele. Cada linha tem equipamento próprio, usa o mesmo de outra linha
+ * do local (as horas se somam), o tempo das premissas ou silo / correia.
+ */
 export const LoaderNeedsTable: React.FC<Props & { routes: Route[] }> = ({ premises, setPremises, routes }) => {
   const cat = catalogOf(premises);
   const fa = useMemo(() => analyzeFleet(routes, premises), [routes, premises]);
-  const nodes = (premises.nodes ?? []).filter((n) => routes.some((r) => r.active && (r.fromId === n.id || ((n.type === 'planta' || !!n.transfer) && r.toId === n.id))));
+  const masses = useMemo(() => routeTargets(routes, premises), [routes, premises]);
   const [editing, setEditing] = useState<string | null>(null);
+  const all = premises.nodes ?? [];
+  const nodes = all
+    .filter((n) => loadUseKeys(n, routes).length && (routes.some((r) => r.active && r.fromId === n.id) || routes.some((r) => r.active && r.toId === n.id)))
+    .map((n, i) => ({ n, i, g: GROUP_ORDER[(n.transfer && n.type === 'estoque' && n.group !== 'passagem' ? 'transbordo' : n.group && GROUP_ORDER[n.group] !== undefined ? n.group : n.type === 'frente' ? 'mina' : n.type === 'planta' ? 'planta' : n.type === 'expedicao' ? 'produto' : n.type === 'rejeito' ? 'rejeito' : n.type === 'esteril' ? 'esteril' : 'mina')] ?? 9 }))
+    .sort((a, b) => a.g - b.g || a.i - b.i)
+    .map((x) => x.n);
   const own = fa.loaderNeeds.filter((l) => l.source === 'rota');
   if (!nodes.length && !own.length) return <p className="text-sm text-black/50">Nenhuma movimentação ativa. Crie as movimentações em 1. Premissas → Locais e movimentações{premises.flowMode === 'transporte' ? ' (ou na tabela de movimentações de transporte em Processo e massas)' : ''}.</p>;
+  const nameCount = new Map<string, number>();
+  for (const n of nodes) nameCount.set(n.name, (nameCount.get(n.name) ?? 0) + 1);
+  const seen = new Map<string, number>();
 
-  const setEntries = (nodeId: string, fn: (list: NodeLoader[]) => NodeLoader[]) =>
+  const setUse = (n: FlowNode, key: string, patch: Partial<LoadUse>) =>
     setPremises((p) => ({
       ...p,
-      nodes: (p.nodes ?? []).map((n) => (n.id === nodeId ? { ...n, loaders: fn(nodeLoaderEntries(n)), loaderClassId: undefined, loaderCount: undefined } : n)),
+      nodes: (p.nodes ?? []).map((x) => {
+        if (x.id !== n.id) return x;
+        // grava todos os usos atuais (inclusive os que vinham do formato antigo) e aplica a mudança
+        const keys = loadUseKeys(x, routes);
+        const uses: Record<string, LoadUse> = {};
+        for (const k of keys) uses[k] = loadUseOf(x, k, keys);
+        uses[key] = { ...uses[key], ...patch };
+        if (patch.mode && patch.mode !== 'share') delete uses[key].shareWith;
+        return { ...x, loadUses: uses, loaders: undefined, loaderClassId: undefined, loaderCount: undefined };
+      }),
     }));
-  const patch = (nodeId: string, id: string, x: Partial<NodeLoader>) => setEntries(nodeId, (list) => list.map((e) => (e.id === id ? { ...e, ...x } : e)));
-  const add = (n: FlowNode) => setEntries(n.id, (list) => [...list, { id: `${n.id}-l${Math.random().toString(36).slice(2, 6)}`, role: 'caminhoes' }]);
-  const del = (n: FlowNode, e: NodeLoader) => {
-    if (!confirm('Apagar este equipamento do local?')) return;
-    setEntries(n.id, (list) => list.filter((x) => x.id !== e.id));
+  const useLabel = (key: string) => (key === 'feed' ? 'Alimentar' : `Carga → ${all.find((x) => x.id === routes.find((r) => r.id === key)?.toId)?.name ?? routes.find((r) => r.id === key)?.name ?? ''}`);
+  const matOf = (key: string) => {
+    const r = routes.find((x) => x.id === key);
+    return r ? (r.materialName || ({ rom: 'ROM', product: 'produto', tailings: 'rejeito', waste: 'estéril / descarte' } as Record<string, string>)[r.kind ?? 'rom']) : '';
   };
+  const totals = new Map<string, { needed: number; available: number; anyAvail: boolean }>();
+  for (const l of fa.loaderNeeds) {
+    const t = totals.get(l.loaderName) ?? { needed: 0, available: 0, anyAvail: false };
+    t.needed += l.needed;
+    if (l.available !== null) {
+      t.available += l.available;
+      t.anyAvail = true;
+    }
+    totals.set(l.loaderName, t);
+  }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1150px] text-sm">
-        <thead>
-          <tr className="border-b border-black/10 text-left text-xs text-black/45">
-            <th className="py-1.5 pr-2 font-medium">Local</th>
-            <th className="py-1.5 pr-2 font-medium">Equipamento</th>
-            <th className="py-1.5 pr-2 font-medium">Função / atende</th>
-            <th className="py-1.5 pr-2 text-right font-medium">Caçambadas</th>
-            <th className="py-1.5 pr-2 text-right font-medium">Carga (min) / produção</th>
-            <th className="py-1.5 pr-2 text-right font-medium">Horas de uso</th>
-            <th className="py-1.5 pr-2 text-right font-medium">Necessários</th>
-            <th className="py-1.5 pr-2 text-right font-medium">Disponíveis</th>
-            <th className="py-1.5 text-right font-medium">Ocupação</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {nodes.map((n) => {
-            const entries = nodeLoaderEntries(n);
-            const outs = routes.filter((r) => r.active && r.fromId === n.id);
-            return (
-              <React.Fragment key={n.id}>
-                {entries.map((e, idx) => {
-                  const lid = entryClassId(e, premises);
-                  const effL = lid && lid !== 'silo' ? cat.loaders.find((l) => l.id === lid) : undefined;
-                  const need = fa.loaderNeeds.find((l) => l.nodeId === n.id && l.entryId === e.id);
-                  const short = need && need.available !== null && need.available < need.needed;
-                  const role = e.role ?? 'caminhoes';
-                  const key = `${n.id}:${e.id}`;
-                  return (
-                    <React.Fragment key={e.id}>
-                      <tr className={`${idx === 0 ? 'border-t border-black/10' : ''} align-top`}>
-                        <td className="py-1.5 pr-2 font-medium">
-                          {idx === 0 ? n.name : ''}
-                          {idx === 0 && n.transfer && <span className="block text-[11px] font-normal text-amber-700">transbordo{n.transfer.process ? ` · ${n.transfer.process}` : ''}{n.transfer.discardPct ? ` · descarte ${n.transfer.discardPct}%` : ''}</span>}
-                          {idx === 0 && (
-                            <button type="button" onClick={() => add(n)} className="mt-1 flex items-center gap-1 rounded-md border border-dashed border-black/15 px-2 py-0.5 text-[11px] font-normal text-black/60 hover:bg-black/5">
-                              <Plus size={11} /> equipamento
-                            </button>
-                          )}
-                        </td>
-                        <td className="py-1.5 pr-2">
-                          <LoaderSelect premises={premises} value={e.classId} label={`Equipamento de carga em ${n.name}${idx ? ` (${idx + 1})` : ''}`} onChange={(v) => patch(n.id, e.id, { classId: v })} />
-                        </td>
-                        <td className="py-1.5 pr-2">
-                          <div className="flex flex-col gap-1">
-                            <select className={sel} value={role} aria-label={`Função do equipamento em ${n.name}`} onChange={(ev) => patch(n.id, e.id, { role: ev.target.value as NodeLoader['role'], routeIds: undefined })}>
-                              <option value="caminhoes">Carregar caminhões</option>
-                              {(n.type === 'planta' || n.transfer) && <option value="alimentacao">{n.transfer ? 'Alimentar a planta móvel (sem caminhão)' : 'Alimentar a planta (sem caminhão)'}</option>}
-                            </select>
-                            {role === 'caminhoes' && outs.length > 1 && (
-                              <select className={sel} value={e.routeIds?.[0] ?? ''} aria-label={`Saída atendida em ${n.name}`} onChange={(ev) => patch(n.id, e.id, { routeIds: ev.target.value ? [ev.target.value] : undefined })}>
-                                <option value="">Todas as saídas sem equipamento próprio</option>
-                                {outs.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                              </select>
-                            )}
-                          </div>
-                        </td>
-                        {need ? (
-                          <>
-                            <td className={`py-1.5 pr-2 text-right font-mono tabular-nums ${role === 'caminhoes' && (need.passes > 6.5 || need.passes < 2.5) ? 'text-amber-700' : ''}`}>{role === 'caminhoes' ? n1(need.passes) : '—'}</td>
-                            <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{role === 'caminhoes' ? `${n1(need.loadMin)} min` : `${t0(need.feedTph ?? 0)} t/h`}</td>
-                            <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(need.busyH)} h</td>
-                            <td className="py-1.5 pr-2 text-right font-mono font-bold tabular-nums">{need.needed} <span className="font-normal text-black/40">({n2(need.neededExact)})</span></td>
-                          </>
-                        ) : (
-                          <td colSpan={4} className="py-1.5 pr-2 text-xs text-black/45">
-                            {lid === 'silo' ? 'silo / correia: sem equipamento a dimensionar' : !lid ? 'tempo de carga das premissas: escolha um equipamento para dimensionar' : role === 'caminhoes' ? 'nenhuma saída atendida por este equipamento' : 'sem massa chegando à planta'}
+    <div className="space-y-3">
+      {nodes.map((n) => {
+        const keys = loadUseKeys(n, routes);
+        const k = (seen.get(n.name) ?? 0) + 1;
+        seen.set(n.name, k);
+        const dup = (nameCount.get(n.name) ?? 0) > 1;
+        const bal = fa.loaderNeeds.filter((l) => l.nodeId === n.id);
+        const inT = routes.filter((r) => r.active && r.toId === n.id).reduce((a, r) => a + (masses.get(r.id) ?? 0), 0);
+        const outT = routes.filter((r) => r.active && r.fromId === n.id).reduce((a, r) => a + (masses.get(r.id) ?? 0), 0);
+        const head = inT > 0.5 ? `recebe ${t0(inT)} t` : outT > 0.5 ? `gera ${t0(outT)} t` : '';
+        return (
+          <div key={n.id} className={`rounded-xl border p-3 ${n.transfer ? 'border-amber-200 bg-amber-50/30' : 'border-black/[0.08] bg-white'}`}>
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-semibold text-black/80">
+                {n.name}
+                {dup && <span className="ml-1 text-xs font-normal text-black/45">({n.type === 'frente' ? 'frente' : 'local'} {k})</span>}
+                {n.transfer && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">transbordo{n.transfer.discardPct ? ` · descarte ${n.transfer.discardPct}%` : ''}</span>}
+              </p>
+              <span className="text-xs text-black/50">{head}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] text-black/45">
+                    <th className="py-1 pr-2 font-medium">Uso</th>
+                    <th className="py-1 pr-2 font-medium">Como é atendido</th>
+                    <th className="py-1 pr-2 font-medium">Equipamento</th>
+                    <th className="py-1 pr-2 text-right font-medium">Disponíveis</th>
+                    <th className="py-1 pr-2 text-right font-medium">Caçambadas</th>
+                    <th className="py-1 pr-2 text-right font-medium">Carga / produção</th>
+                    <th className="py-1 pr-2 text-right font-medium">Horas</th>
+                    <th className="py-1 pr-2 text-right font-medium">Necessários</th>
+                    <th className="py-1 text-right font-medium">Ocupação</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {keys.map((key) => {
+                    const u = loadUseOf(n, key, keys);
+                    const owner = loadOwner(n, key, keys);
+                    const need = bal.find((l) => l.entryId === owner.key);
+                    const part = need?.perRoute?.find((p) => p.routeId === key);
+                    const lid = useClassId(owner.use, premises);
+                    const effL = lid && lid !== 'silo' ? cat.loaders.find((l) => l.id === lid) : undefined;
+                    const ownRows = keys.filter((x) => x !== key && loadUseOf(n, x, keys).mode === 'own');
+                    const ek = `${n.id}:${key}`;
+                    const isOwner = u.mode === 'own';
+                    return (
+                      <React.Fragment key={key}>
+                        <tr className="border-t border-black/5 align-middle">
+                          <td className="py-1.5 pr-2">
+                            <span className="font-medium">{useLabel(key)}</span>
+                            <span className="block text-[11px] text-black/45">{key === 'feed' ? (n.type === 'planta' ? 'pátio → alimentador da planta (sem caminhão)' : 'pátio → planta móvel (sem caminhão)') : `${matOf(key)} · ${t0(masses.get(key) ?? 0)} t`}</span>
                           </td>
-                        )}
-                        <td className="py-1.5 pr-2 text-right">
-                          {effL ? (
-                            <input type="number" min={0} step={1} className={`${box} w-20 ${short ? 'border-red-300 text-red-700' : ''}`} value={e.count ?? ''} placeholder="calcular" aria-label={`Equipamentos disponíveis em ${n.name}${idx ? ` (${idx + 1})` : ''}`} onChange={(ev) => patch(n.id, e.id, { count: ev.target.value === '' ? undefined : Math.max(0, Math.round(Number(ev.target.value))) })} />
-                          ) : <span className="text-black/30">—</span>}
-                        </td>
-                        <td className={`py-1.5 text-right font-mono tabular-nums ${need && need.utilization > 0.85 ? 'text-amber-700' : ''}`}>{need ? pc(need.utilization) : '—'}</td>
-                        <td className="py-1.5 pl-2 text-right whitespace-nowrap">
-                          {effL && (
-                            <button type="button" onClick={() => setEditing(editing === key ? null : key)} className="rounded p-1 text-black/40 hover:bg-black/5" aria-label={`Editar ${effL.name}`} title="Editar os tempos deste equipamento">
-                              {editing === key ? <X size={14} /> : <Pencil size={14} />}
-                            </button>
+                          <td className="py-1.5 pr-2">
+                            <select
+                              className={sel}
+                              value={u.mode === 'share' ? `share:${u.shareWith}` : u.mode}
+                              aria-label={`Como é atendido: ${useLabel(key)} em ${n.name}`}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v.startsWith('share:')) setUse(n, key, { mode: 'share', shareWith: v.slice(6) });
+                                else setUse(n, key, { mode: v as LoadUse['mode'] });
+                              }}
+                            >
+                              <option value="own">Equipamento próprio</option>
+                              {ownRows.map((x) => <option key={x} value={`share:${x}`}>Usa o mesmo de “{useLabel(x)}”</option>)}
+                              {key !== 'feed' && <option value="tempo">Tempo de carga das premissas</option>}
+                              <option value="silo">{key === 'feed' ? 'Sem equipamento (correia / silo)' : 'Silo / correia (sem equipamento)'}</option>
+                            </select>
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            {isOwner ? (
+                              <LoaderSelect premises={premises} value={u.classId} label={`Equipamento: ${useLabel(key)} em ${n.name}`} onChange={(v) => setUse(n, key, { classId: v === 'tempo' || v === 'silo' ? undefined : v, ...(v === 'tempo' || v === 'silo' ? { mode: v } : {}) })} />
+                            ) : u.mode === 'share' ? (
+                              <span className="text-xs text-black/55">{effL ? lname(effL) : '—'} <i className="text-black/40">(mesmo de “{useLabel(owner.key)}”)</i></span>
+                            ) : (
+                              <span className="text-xs text-black/40">—</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {isOwner && effL ? (
+                              <input type="number" min={0} step={1} className={`${box} w-20 ${need && need.available !== null && need.available < need.needed ? 'border-red-300 text-red-700' : ''}`} value={u.count ?? ''} placeholder="calcular" aria-label={`Disponíveis: ${useLabel(key)} em ${n.name}`} onChange={(e) => setUse(n, key, { count: e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))) })} />
+                            ) : <span className="text-black/30">—</span>}
+                          </td>
+                          {need && effL ? (
+                            <>
+                              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{key === 'feed' ? '—' : n1(need.passes)}</td>
+                              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{key === 'feed' ? `${t0(need.feedTph ?? 0)} t/h` : `${n1(need.loadMin)} min`}</td>
+                              <td className="whitespace-nowrap py-1.5 pr-2 text-right font-mono tabular-nums">{t0(part?.busyH ?? 0)} h{!isOwner && <span className="block text-[10px] text-black/40">soma no mesmo</span>}</td>
+                              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{isOwner ? <><b>{need.needed}</b> <span className="text-black/40">({n2(need.neededExact)})</span></> : <span className="text-black/45">+{n2(part?.neededExact ?? 0)}</span>}</td>
+                              <td className={`py-1.5 text-right font-mono tabular-nums ${isOwner && need.utilization > 0.85 ? 'text-amber-700' : ''}`}>{isOwner ? pc(need.utilization) : ''}</td>
+                            </>
+                          ) : (
+                            <td colSpan={5} className="py-1.5 pr-2 text-xs text-black/45">
+                              {u.mode === 'silo' ? (key === 'feed' ? 'alimentação sem equipamento a dimensionar' : 'carga por silo / correia') : u.mode === 'tempo' || !lid ? 'tempo de carga das premissas' : ''}
+                            </td>
                           )}
-                          <button type="button" onClick={() => del(n, e)} className="rounded p-1 text-black/40 hover:bg-red-50 hover:text-red-600" aria-label={`Apagar equipamento de ${n.name}${idx ? ` (${idx + 1})` : ''}`} title="Apagar este equipamento do local">
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                      {editing === key && effL && (
-                        <tr className="bg-black/[0.02]">
-                          <td colSpan={10} className="px-2 py-2">
-                            <p className="mb-1 text-xs text-black/55">Tempos de <b>{lname(effL)}</b> (vale para todos os locais que usam este equipamento):</p>
-                            <div className="overflow-x-auto">
-                              <table className="text-sm">
-                                <thead>
-                                  <tr className="text-left text-[11px] text-black/45">{HEAD_CELLS.map((h) => <th key={h} className="px-1 py-1 text-right font-medium">{h}</th>)}</tr>
-                                </thead>
-                                <tbody>
-                                  <tr><LoaderCells l={effL} premises={premises} setPremises={setPremises} /></tr>
-                                </tbody>
-                              </table>
-                            </div>
+                          <td className="py-1.5 pl-2 text-right">
+                            {isOwner && effL && (
+                              <button type="button" onClick={() => setEditing(editing === ek ? null : ek)} className="rounded p-1 text-black/40 hover:bg-black/5" aria-label={`Editar ${effL.name}`} title="Editar os tempos deste equipamento">
+                                {editing === ek ? <X size={14} /> : <Pencil size={14} />}
+                              </button>
+                            )}
                           </td>
                         </tr>
-                      )}
-                      {need?.perRoute && need.perRoute.length > 1 &&
-                        need.perRoute.map((pr) => (
-                          <tr key={pr.routeId} className="text-xs text-black/60">
-                            <td />
-                            <td className="py-1 pr-2 pl-2" colSpan={2}>↳ {pr.name} · {t0(pr.trucksLoaded)} caminhões/mês</td>
-                            <td />
-                            <td />
-                            <td className="py-1 pr-2 text-right font-mono tabular-nums">{t0(pr.busyH)} h</td>
-                            <td className="py-1 pr-2 text-right font-mono tabular-nums">{n2(pr.neededExact)}</td>
-                            <td />
-                            <td />
-                            <td />
+                        {editing === ek && effL && (
+                          <tr className="bg-black/[0.02]">
+                            <td colSpan={10} className="px-2 py-2">
+                              <p className="mb-1 text-xs text-black/55">Tempos de <b>{lname(effL)}</b> (vale para todos os usos com este modelo):</p>
+                              <div className="overflow-x-auto">
+                                <table className="text-sm">
+                                  <thead>
+                                    <tr className="text-left text-[11px] text-black/45">{HEAD_CELLS.map((h) => <th key={h} className="px-1 py-1 text-right font-medium">{h}</th>)}</tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr><LoaderCells l={effL} premises={premises} setPremises={setPremises} /></tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
                           </tr>
-                        ))}
-                    </React.Fragment>
-                  );
-                })}
-                {!entries.length && (
-                  <tr className="border-t border-black/10">
-                    <td className="py-1.5 pr-2 font-medium">{n.name}</td>
-                    <td colSpan={9} className="py-1.5 pr-2 text-xs text-black/45">
-                      Sem equipamento: vale o tempo de carga das premissas.{' '}
-                      <button type="button" onClick={() => add(n)} className="ml-1 rounded-md border border-dashed border-black/15 px-2 py-0.5 text-black/60 hover:bg-black/5">+ equipamento</button>
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            );
-          })}
-          {own.map((l) => (
-            <tr key={l.where} className="border-t border-black/10">
-              <td className="py-1.5 pr-2 font-medium">{l.where}<span className="block text-[11px] font-normal text-black/45">equipamento próprio da rota</span></td>
-              <td className="py-1.5 pr-2">{l.loaderName}</td>
-              <td className="py-1.5 pr-2 text-xs text-black/55">carregar caminhões desta rota</td>
-              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{n1(l.passes)}</td>
-              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{n1(l.loadMin)} min</td>
-              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{t0(l.busyH)} h</td>
-              <td className="py-1.5 pr-2 text-right font-mono font-bold tabular-nums">{l.needed} <span className="font-normal text-black/40">({n2(l.neededExact)})</span></td>
-              <td className="py-1.5 pr-2 text-right font-mono tabular-nums">{l.available ?? '—'}</td>
-              <td className="py-1.5 text-right font-mono tabular-nums">{pc(l.utilization)}</td>
-              <td />
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-[11px] text-black/45">
-        Cada local já vem com um equipamento (o padrão de Transporte / Frota). Use “+ equipamento” para ter outro no mesmo local: por exemplo, na planta, um para o produto, outro para o rejeito e uma pá para alimentar a planta. Um equipamento ligado a uma saída atende só ela; o equipamento “todas as saídas” atende as demais.
-        Necessários = horas de uso no mês ÷ horas efetivas de um equipamento (calendário × DF × UF). Carregar caminhões: horas = caminhões carregados × tempo de carga. Alimentar a planta: horas = massa que chega à planta ÷ produção do equipamento (caçamba × enchimento × densidade × 3.600 ÷ ciclo).
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+
+      {own.length > 0 && (
+        <div className="rounded-xl border border-black/[0.08] bg-white p-3 text-sm">
+          <p className="mb-1 font-semibold text-black/70">Rotas com equipamento próprio (2. Dimensionamento)</p>
+          {own.map((l) => <p key={l.where} className="text-xs text-black/60">{l.where}: {l.loaderName} — {l.needed} necessário(s), ocupação {pc(l.utilization)}</p>)}
+        </div>
+      )}
+
+      {totals.size > 0 && (
+        <div className="rounded-xl bg-black/[0.03] p-3">
+          <p className="mb-1 text-sm font-semibold text-black/70">Equipamentos de carga na operação</p>
+          <table className="w-full max-w-xl text-sm">
+            <thead>
+              <tr className="text-left text-[11px] text-black/45">
+                <th className="py-1 font-medium">Modelo</th>
+                <th className="py-1 text-right font-medium">Necessários</th>
+                <th className="py-1 text-right font-medium">Disponíveis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...totals].map(([name, t]) => (
+                <tr key={name} className="border-t border-black/5">
+                  <td className="py-1">{name}</td>
+                  <td className="py-1 text-right font-mono font-bold">{t.needed}</td>
+                  <td className={`py-1 text-right font-mono ${t.anyAvail && t.available < t.needed ? 'font-bold text-red-700' : ''}`}>{t.anyAvail ? t.available : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-[11px] text-black/45">
+        Cada linha é um uso de carga do local: alimentar a planta (ou a planta móvel do transbordo) e carregar os caminhões de cada movimentação que sai dele. Escolha equipamento próprio (tipo e quantidade), “usa o mesmo de” outra linha (as horas se somam no mesmo equipamento), o tempo de carga das premissas ou silo / correia.
+        Necessários = horas de uso no mês ÷ horas efetivas de um equipamento (calendário × DF × UF). Carregar: caminhões × tempo de carga. Alimentar: massa que chega ÷ produção do equipamento (caçamba × enchimento × densidade × 3.600 ÷ ciclo).
       </p>
     </div>
+  );
+};
+
+/** Resumo dos usos de carga de um local (desenho e tabela da rede); a edição fica em Carga e ciclo. */
+export const LoadUsesSummary: React.FC<{ premises: DetailedPremises; node: FlowNode; routes: Route[] }> = ({ premises, node, routes }) => {
+  const cat = catalogOf(premises);
+  const keys = loadUseKeys(node, routes);
+  if (!keys.length) return <span className="text-xs text-black/30">sem uso de carga</span>;
+  const label = (key: string) => (key === 'feed' ? 'Alimentar' : `Carga → ${(premises.nodes ?? []).find((x) => x.id === routes.find((r) => r.id === key)?.toId)?.name ?? ''}`);
+  return (
+    <ul className="space-y-0.5 text-xs text-black/65">
+      {keys.map((k) => {
+        const u = loadUseOf(node, k, keys);
+        const o = loadOwner(node, k, keys);
+        const id = useClassId(o.use, premises);
+        const l = id && id !== 'silo' ? cat.loaders.find((x) => x.id === id) : undefined;
+        const txt = u.mode === 'share' ? `mesmo de “${label(o.key)}”${l ? ` (${l.name})` : ''}` : u.mode === 'tempo' || (!id && u.mode === 'own') ? 'tempo de carga das premissas' : id === 'silo' ? (k === 'feed' ? 'sem equipamento' : 'silo / correia') : `${l?.name ?? id}${o.use.count !== undefined ? ` × ${o.use.count}` : ''}`;
+        return <li key={k}><b className="font-medium">{label(k)}</b>: {txt}</li>;
+      })}
+      <li className="text-[11px] text-black/40">editar em Premissas → Carga e ciclo</li>
+    </ul>
   );
 };

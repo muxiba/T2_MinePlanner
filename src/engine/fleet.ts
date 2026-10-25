@@ -21,7 +21,7 @@
  */
 import { processPct } from './process';
 import { networkBalance, networkOn, transportBalance, transportMode } from './network';
-import type { DetailedPremises, EquipmentCatalog, FlowNode, NodeLoader, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import type { DetailedPremises, EquipmentCatalog, FlowNode, LoadUse, NodeLoader, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
 import { mixedOn, syncMix } from './mix';
 
@@ -108,11 +108,55 @@ export function entryForRoute(n: FlowNode, routeId: string): NodeLoader | null {
   return list.find((e) => e.routeIds?.includes(routeId)) ?? list.find((e) => !e.routeIds?.length) ?? null;
 }
 
+/** Usos de carga do local: alimentar (planta e transbordo) e uma carga por movimentação ativa que sai dele. */
+export function loadUseKeys(n: FlowNode, routes: Route[]): string[] {
+  const keys = routes.filter((r) => r.active && r.fromId === n.id && !r.loader).map((r) => r.id);
+  return n.type === 'planta' || n.transfer ? ['feed', ...keys] : keys;
+}
+
+/** Uso de carga (o gravado ou o equivalente do formato antigo; sem nada: o equipamento padrão / alimentação sem equipamento). */
+export function loadUseOf(n: FlowNode, key: string, keys?: string[]): LoadUse {
+  const u = n.loadUses?.[key];
+  if (u) return u;
+  if (n.loaders || n.loaderClassId !== undefined || n.loaderCount !== undefined) {
+    const list = nodeLoaderEntries(n);
+    const e = key === 'feed' ? list.find((x) => x.role === 'alimentacao') : entryForRoute(n, key);
+    if (!e) return key === 'feed' ? { mode: 'silo' } : { mode: 'own' };
+    const mode = e.classId === 'tempo' ? 'tempo' : e.classId === 'silo' ? 'silo' : 'own';
+    // várias saídas no mesmo equipamento antigo: a primeira é a dona, as demais usam o mesmo
+    if (key !== 'feed' && mode === 'own' && keys) {
+      const first = keys.find((k) => k !== 'feed' && entryForRoute(n, k)?.id === e.id);
+      if (first && first !== key) return { mode: 'share', shareWith: first };
+    }
+    return { mode, classId: mode === 'own' ? e.classId : undefined, count: e.count };
+  }
+  return key === 'feed' ? { mode: 'silo' } : { mode: 'own' };
+}
+
+/** Dono do equipamento de um uso: segue “usa o mesmo de” (até 6 saltos) até um uso com equipamento próprio. */
+export function loadOwner(n: FlowNode, key: string, keys?: string[]): { key: string; use: LoadUse } {
+  let k = key;
+  let u = loadUseOf(n, k, keys);
+  for (let i = 0; i < 6 && u.mode === 'share' && u.shareWith && u.shareWith !== k; i++) {
+    k = u.shareWith;
+    u = loadUseOf(n, k, keys);
+  }
+  return { key: k, use: u.mode === 'share' ? { mode: 'tempo' } : u };
+}
+
+/** Modelo do equipamento de um uso (null = tempo das premissas; 'silo'). */
+export function useClassId(u: LoadUse, premises: Pick<DetailedPremises, 'defaultLoaderClassId'>): string | null {
+  if (u.mode === 'tempo') return null;
+  if (u.mode === 'silo') return 'silo';
+  return u.classId || premises.defaultLoaderClassId || null;
+}
+
 export function nodeLoaderOf(route: Route, premises: DetailedPremises): LoaderSetup | null {
   const n = premises.nodes?.find((x) => x.id === route.fromId);
-  const e = n ? entryForRoute(n, route.id) : null;
-  const id = e ? entryClassId(e, premises) : null;
-  if (!n || !e || !id || id === 'silo') return null;
+  const own = n ? loadOwner(n, route.id) : null;
+  const id = own ? useClassId(own.use, premises) : null;
+  if (!n || !own || !id || id === 'silo') return null;
+  const e = { count: own.use.count };
   const l = catalogOf(premises).loaders.find((x) => x.id === id);
   return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: e.count ?? 1, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85, spotMin: l.spotMin } : null;
 }
@@ -858,82 +902,93 @@ export function loaderSizing(routes: Route[], premises: DetailedPremises, analys
   const areaOf = (k: RouteKind) => (k === 'product' || k === 'tailings' ? 'planta' : 'mina');
   const uf = (area: 'mina' | 'planta') => (area === 'mina' ? premises.ufMina : premises.ufPlanta) || 100;
   const density = premises.looseDensity && premises.looseDensity > 0 ? premises.looseDensity : DEFAULT_LOOSE_DENSITY;
-  for (const n of premises.nodes ?? []) for (const e of nodeLoaderEntries(n)) {
-    const lid = entryClassId(e, premises);
-    const l = lid && lid !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === lid) : null;
-    if (!l) continue;
-    const lName = `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`;
-    if (e.role === 'alimentacao') {
-      // alimentação da planta: o equipamento retoma do pátio e alimenta o processo (sem caminhão), pela massa que chega ao local
-      const ins = active.filter((r) => r.toId === n.id);
-      const feedWetT = ins.reduce((acc, r) => acc + (byId.get(r.id)?.targetWetT ?? 0), 0);
-      const passT = Math.max(l.bucketM3, 0.01) * ((l.fillFactor ?? 90) / 100) * density;
-      const tph = (passT * 3600) / Math.max(1, loaderCycleSec(l));
-      const busyH = tph > 0 ? feedWetT / tph : 0;
-      const effH = sumCalendarHours(premises, 'planta') * ((l.dfPct ?? premises.dfPlanta ?? 85) / 100) * (uf('planta') / 100);
+  for (const n of premises.nodes ?? []) {
+    const keys = loadUseKeys(n, active);
+    // agrupa os usos pelo dono do equipamento (próprio ou “usa o mesmo de”)
+    const groups = new Map<string, string[]>();
+    for (const k of keys) {
+      const o = loadOwner(n, k, keys);
+      if (!keys.includes(o.key)) continue;
+      groups.set(o.key, [...(groups.get(o.key) ?? []), k]);
+    }
+    for (const [ownerKey, uses] of groups) {
+      const ou = loadOwner(n, ownerKey, keys).use;
+      const lid = useClassId(ou, premises);
+      const l = lid && lid !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === lid) : null;
+      if (!l) continue;
+      const lName = `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`;
+      let trucks = 0;
+      let busyMin = 0;
+      let passesW = 0;
+      let feedTph = 0;
+      let feedWetT = 0;
+      let truckMin = 0;
+      const perRoute: LoaderNeed['perRoute'] = [];
+      for (const k of uses) {
+        if (k === 'feed') {
+          // alimentação: retoma do pátio e alimenta a planta / planta móvel (sem caminhão), pela massa que chega ao local
+          const ins = active.filter((r) => r.toId === n.id);
+          const fw = ins.reduce((acc, r) => acc + (byId.get(r.id)?.targetWetT ?? 0), 0);
+          const passT = Math.max(l.bucketM3, 0.01) * ((l.fillFactor ?? 90) / 100) * density;
+          feedTph = (passT * 3600) / Math.max(1, loaderCycleSec(l));
+          feedWetT = fw;
+          const bH = feedTph > 0 ? fw / feedTph : 0;
+          busyMin += bH * 60;
+          perRoute.push({ routeId: 'feed', name: n.type === 'planta' ? 'Alimentar a planta' : 'Alimentar a planta móvel', trucksLoaded: 0, busyH: bH, neededExact: 0 });
+          continue;
+        }
+        const r = active.find((x) => x.id === k);
+        const a = r ? byId.get(r.id) : undefined;
+        if (!r || !a) continue;
+        let tR = 0;
+        let bR = 0;
+        if (a.mix?.length) {
+          const cap = a.mix.reduce((acc, m) => acc + m.capacityWetT, 0) || 1;
+          for (const m of a.mix) {
+            const t = m.payloadT > 0 ? (a.targetWetT * (m.capacityWetT / cap)) / m.payloadT : 0;
+            tR += t;
+            bR += t * (m.loadMin ?? a.loading?.loadMin ?? 0);
+            passesW += t * (m.passes ?? a.loading?.passes ?? 0);
+          }
+        } else {
+          tR = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
+          bR = tR * (a.loading?.loadMin ?? 0);
+          passesW += tR * (a.loading?.passes ?? 0);
+        }
+        trucks += tR;
+        busyMin += bR;
+        truckMin += bR;
+        perRoute.push({ routeId: r.id, name: r.name, trucksLoaded: tR, busyH: bR / 60, neededExact: 0 });
+      }
+      const onlyFeed = uses.every((k) => k === 'feed');
+      const area = onlyFeed || n.type === 'planta' ? 'planta' : areaOf(routeKind(active.find((x) => x.id === uses.find((k) => k !== 'feed'))!));
+      const effH = sumCalendarHours(premises, area) * ((n.loaderDf ?? l.dfPct ?? (area === 'planta' ? premises.dfPlanta : premises.dfMina) ?? 85) / 100) * (uf(area) / 100);
+      const busyH = busyMin / 60;
       const neededExact = effH > 0 ? busyH / effH : 0;
-      const available = e.count ?? null;
+      for (const pr of perRoute) pr.neededExact = effH > 0 ? pr.busyH / effH : 0;
+      const available = ou.count ?? null;
       out.push({
-        where: n.name, source: 'local', role: 'alimentacao', entryId: e.id, nodeId: n.id, routeIds: ins.map((r) => r.id), loaderName: lName,
-        passes: 0, loadMin: 0, trucksLoaded: 0, feedTph: tph, feedWetT, busyH, effHPerUnit: effH, neededExact,
-        needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)), available,
+        where: n.name,
+        source: 'local',
+        role: onlyFeed ? 'alimentacao' : 'caminhoes',
+        entryId: ownerKey,
+        nodeId: n.id,
+        routeIds: uses.filter((k) => k !== 'feed'),
+        perRoute,
+        loaderName: lName,
+        passes: trucks ? passesW / trucks : 0,
+        loadMin: trucks ? truckMin / trucks : 0,
+        trucksLoaded: trucks,
+        feedTph: feedTph || undefined,
+        feedWetT: feedWetT || undefined,
+        busyH,
+        effHPerUnit: effH,
+        neededExact,
+        needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)),
+        available,
         utilization: effH > 0 ? busyH / (effH * Math.max(1, available ?? Math.ceil(neededExact - 1e-6))) : 0,
       });
-      continue;
     }
-    const rs = active.filter((r) => r.fromId === n.id && !r.loader && entryForRoute(n, r.id)?.id === e.id);
-    if (!rs.length) continue;
-    let trucks = 0;
-    let busyMin = 0;
-    let passesW = 0;
-    const perRoute: LoaderNeed['perRoute'] = [];
-    for (const r of rs) {
-      const a = byId.get(r.id)!;
-      let tR = 0;
-      let bR = 0;
-      if (a.mix?.length) {
-        // frota mista: cada tipo carrega a sua parte da meta com as suas caçambadas
-        const cap = a.mix.reduce((s, m) => s + m.capacityWetT, 0) || 1;
-        for (const m of a.mix) {
-          const t = m.payloadT > 0 ? (a.targetWetT * (m.capacityWetT / cap)) / m.payloadT : 0;
-          tR += t;
-          bR += t * (m.loadMin ?? a.loading?.loadMin ?? 0);
-          passesW += t * (m.passes ?? a.loading?.passes ?? 0);
-        }
-      } else {
-        tR = a.payloadT > 0 ? a.targetWetT / a.payloadT : 0;
-        bR = tR * (a.loading?.loadMin ?? 0);
-        passesW += tR * (a.loading?.passes ?? 0);
-      }
-      trucks += tR;
-      busyMin += bR;
-      perRoute.push({ routeId: r.id, name: r.name, trucksLoaded: tR, busyH: bR / 60, neededExact: 0 });
-    }
-    const area = areaOf(routeKind(rs[0]));
-    const effH = sumCalendarHours(premises, area) * ((n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85) / 100) * (uf(area) / 100);
-    const busyH = busyMin / 60;
-    const neededExact = effH > 0 ? busyH / effH : 0;
-    for (const pr of perRoute) pr.neededExact = effH > 0 ? pr.busyH / effH : 0;
-    const available = e.count ?? null;
-    out.push({
-      where: n.name,
-      source: 'local',
-      role: 'caminhoes',
-      entryId: e.id,
-      nodeId: n.id,
-      routeIds: rs.map((r) => r.id),
-      perRoute,
-      loaderName: lName,
-      passes: trucks ? passesW / trucks : 0,
-      loadMin: trucks ? busyMin / trucks : 0,
-      trucksLoaded: trucks,
-      busyH,
-      effHPerUnit: effH,
-      neededExact,
-      needed: Math.max(busyH > 0 ? 1 : 0, Math.ceil(neededExact - 1e-6)),
-      available,
-      utilization: effH > 0 ? busyH / (effH * Math.max(1, available ?? Math.ceil(neededExact - 1e-6))) : 0,
-    });
   }
   for (const r of active.filter((x) => x.loader)) {
     const a = byId.get(r.id)!;

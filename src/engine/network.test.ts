@@ -105,9 +105,9 @@ describe('só transporte, equipamentos por local e estéril', () => {
     const nodes = net.nodes.map((n) => (n.id === planta.id ? { ...n, loaders: [{ id: 'a', classId: 'pa-35', routeIds: [prod.id] }, { id: 'b', classId: 'esc-35' }, { id: 'c', classId: 'pa-55', role: 'alimentacao' as const }] } : n));
     const fa = analyzeFleet(net.routes, { ...P, nodes });
     const needs = fa.loaderNeeds.filter((l) => l.nodeId === planta.id);
-    expect(needs.map((l) => l.entryId).sort()).toEqual(['a', 'b', 'c']);
-    expect(needs.find((l) => l.entryId === 'a')!.routeIds).toEqual([prod.id]);
-    expect(needs.find((l) => l.entryId === 'c')!.feedWetT!).toBeGreaterThan(0);
+    expect(needs.length).toBe(3);
+    expect(needs.find((l) => l.entryId === prod.id)!.routeIds).toEqual([prod.id]);
+    expect(needs.find((l) => l.entryId === 'feed')!.feedWetT!).toBeGreaterThan(0);
   });
 
   it('desmarcar estéril desativa as movimentações de estéril e marcar traz de volta', async () => {
@@ -162,5 +162,25 @@ describe('transbordo com descarte', () => {
     const disc = R('disc', 'Peneiramento → PDE', 'waste', tb.id, 'pde');
     const res2 = networkBalance([...sp.routes, disc], { ...p, nodes: [...p.nodes!, pde] }, routeKind);
     expect(res2.edges.get('disc')!).toBeCloseTo((P.targetMonthlyROM / 0.8) * 0.2, -1);
+  });
+});
+
+describe('carga por fluxo', () => {
+  it('usa o mesmo equipamento: horas de dois fluxos somam no mesmo equipamento', () => {
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const planta = net.nodes.find((n) => n.type === 'planta')!;
+    const prod = net.routes.find((r) => routeKind(r) === 'product')!;
+    const tail = net.routes.find((r) => routeKind(r) === 'tailings')!;
+    const sep = net.nodes.map((n) => (n.id === planta.id ? { ...n, loadUses: { feed: { mode: 'silo' as const }, [prod.id]: { mode: 'own' as const, classId: 'pa-35' }, [tail.id]: { mode: 'own' as const, classId: 'pa-35' } } } : n));
+    const shr = net.nodes.map((n) => (n.id === planta.id ? { ...n, loadUses: { feed: { mode: 'own' as const, classId: 'pa-55' }, [prod.id]: { mode: 'own' as const, classId: 'pa-35', count: 2 }, [tail.id]: { mode: 'share' as const, shareWith: prod.id } } } : n));
+    const a = analyzeFleet(net.routes, { ...P, nodes: sep }).loaderNeeds.filter((l) => l.nodeId === planta.id);
+    const b = analyzeFleet(net.routes, { ...P, nodes: shr }).loaderNeeds.filter((l) => l.nodeId === planta.id);
+    expect(a.length).toBe(2);
+    expect(b.length).toBe(2);
+    const shared = b.find((l) => l.entryId === prod.id)!;
+    expect(shared.routeIds.sort()).toEqual([prod.id, tail.id].sort());
+    expect(shared.busyH).toBeCloseTo(a.reduce((s, l) => s + l.busyH, 0), 1);
+    expect(shared.available).toBe(2);
+    expect(b.find((l) => l.entryId === 'feed')!.role).toBe('alimentacao');
   });
 });
