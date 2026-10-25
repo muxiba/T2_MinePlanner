@@ -21,7 +21,7 @@
  */
 import { processPct } from './process';
 import { networkBalance, networkOn } from './network';
-import type { DetailedPremises, EquipmentCatalog, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
+import type { DetailedPremises, EquipmentCatalog, FlowNode, ExtraFleetAllocation, LoaderClass, LoaderSetup, Route, RouteKind, TruckClass } from '../types';
 import { interferenceMin } from './losses';
 import { mixedOn, syncMix } from './mix';
 
@@ -78,10 +78,17 @@ export function loaderCycleSec(l: Pick<LoaderClass, 'cycleSec' | 'digSec' | 'swi
   return parts.some((v) => v && v > 0) ? sum : l.cycleSec;
 }
 
+/** Equipamento de carga efetivo do local: o escolhido nele ou o padrão de Transporte / Frota (null = tempo de carga das premissas). */
+export function effectiveLoaderId(n: Pick<FlowNode, 'loaderClassId'>, premises: Pick<DetailedPremises, 'defaultLoaderClassId'>): string | null {
+  if (n.loaderClassId === 'tempo') return null;
+  return n.loaderClassId || premises.defaultLoaderClassId || null;
+}
+
 export function nodeLoaderOf(route: Route, premises: DetailedPremises): LoaderSetup | null {
   const n = premises.nodes?.find((x) => x.id === route.fromId);
-  if (!n?.loaderClassId || n.loaderClassId === 'silo') return null;
-  const l = catalogOf(premises).loaders.find((x) => x.id === n.loaderClassId);
+  const id = n ? effectiveLoaderId(n, premises) : null;
+  if (!n || !id || id === 'silo') return null;
+  const l = catalogOf(premises).loaders.find((x) => x.id === id);
   return l ? { name: `${l.manufacturer ? `${l.manufacturer} ` : ''}${l.name}`, count: n.loaderCount ?? 1, bucketM3: l.bucketM3, fillFactor: l.fillFactor ?? 90, cycleSec: loaderCycleSec(l), availability: n.loaderDf ?? l.dfPct ?? premises.dfMina ?? 85, spotMin: l.spotMin } : null;
 }
 
@@ -512,7 +519,7 @@ export function analyzeRoute(
   route: Route,
   premises: DetailedPremises,
   targetDryT: number,
-  overrides: { payloadT?: number; volumeM3?: number; trucks?: number; df?: number; uf?: number; eo?: number; queueMin?: number; speedFactor?: number; extraHours?: number } = {},
+  overrides: { payloadT?: number; volumeM3?: number; trucks?: number; df?: number; uf?: number; eo?: number; queueMin?: number; speedFactor?: number; extraHours?: number; vLoaded?: number; vEmpty?: number } = {},
 ): RouteAnalysis {
   // frota mista: cada tipo tem carga útil e ciclo próprios; a capacidade da rota é a soma por tipo
   const mixEntries = Object.entries(route.mix ?? {}).filter(([, n]) => n > 0);
@@ -521,7 +528,10 @@ export function analyzeRoute(
     const parts = mixEntries
       .map(([id, n]) => ({ n, cls: cat.find((c) => c.id === id) }))
       .filter((x): x is { n: number; cls: TruckClass } => !!x.cls)
-      .map(({ n, cls }) => ({ n, cls, a: analyzeRoute({ ...route, mix: undefined, truckCount: n }, premises, targetDryT, { ...overrides, payloadT: cls.payloadT, volumeM3: cls.volumeM3 || undefined, trucks: n }) }));
+      .map(({ n, cls }) => {
+        const ft = premises.fleetTypes?.find((t) => t.classId === cls.id);
+        return { n, cls, a: analyzeRoute({ ...route, mix: undefined, truckCount: n }, premises, targetDryT, { ...overrides, payloadT: cls.payloadT, volumeM3: cls.volumeM3 || undefined, trucks: n, vLoaded: ft?.speedLoaded, vEmpty: ft?.speedEmpty }) };
+      });
     if (parts.length) {
       const nTot = parts.reduce((a, p) => a + p.n, 0);
       const base = [...parts].sort((x, y) => y.n - x.n)[0].a;
@@ -569,7 +579,9 @@ export function analyzeRoute(
   const loadMin = loading ? loading.loadMin + (nodeL ? Math.max(0, nodeL.spotMin ?? premises.loaderSpotMin ?? 0.5) : 0) : Math.max(premises.loadingTime, 0);
 
   const speedFactor = overrides.speedFactor ?? 1;
-  const effPremises = speedFactor === 1 ? premises : { ...premises, velocidadeCheio: premises.velocidadeCheio * speedFactor, velocidadeVazio: premises.velocidadeVazio * speedFactor };
+  const vl = overrides.vLoaded && overrides.vLoaded > 0 ? overrides.vLoaded : premises.velocidadeCheio;
+  const ve = overrides.vEmpty && overrides.vEmpty > 0 ? overrides.vEmpty : premises.velocidadeVazio;
+  const effPremises = speedFactor === 1 && vl === premises.velocidadeCheio && ve === premises.velocidadeVazio ? premises : { ...premises, velocidadeCheio: vl * speedFactor, velocidadeVazio: ve * speedFactor };
   const cycle = cycleFor({ ...route, queueMin: overrides.queueMin ?? routeQueueMin(route, premises) }, effPremises, loadMin);
 
   const calendar = sumCalendarHours(premises, area);
@@ -799,7 +811,8 @@ export function loaderSizing(routes: Route[], premises: DetailedPremises, analys
   const areaOf = (k: RouteKind) => (k === 'product' || k === 'tailings' ? 'planta' : 'mina');
   const uf = (area: 'mina' | 'planta') => (area === 'mina' ? premises.ufMina : premises.ufPlanta) || 100;
   for (const n of premises.nodes ?? []) {
-    const l = n.loaderClassId && n.loaderClassId !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === n.loaderClassId) : null;
+    const lid = effectiveLoaderId(n, premises);
+    const l = lid && lid !== 'silo' ? catalogOf(premises).loaders.find((x) => x.id === lid) : null;
     if (!l) continue;
     const rs = active.filter((r) => r.fromId === n.id && !r.loader);
     if (!rs.length) continue;

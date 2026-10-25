@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Trash2, X } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance } from '@/engine/network';
-import { catalogOf, routeKind } from '@/engine/fleet';
+import { effectiveLoaderId, routeKind } from '@/engine/fleet';
+import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
 /**
@@ -222,7 +223,6 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
   const nodes = premises.nodes ?? [];
   const res = useMemo(() => networkBalance(routes, premises, routeKind), [routes, premises]);
   const pp = processPct(premises);
-  const catalog = catalogOf(premises);
   const svgRef = useRef<SVGSVGElement>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [link, setLink] = useState<{ from: string; x: number; y: number; moved: boolean } | null>(null);
@@ -516,13 +516,9 @@ const FlowDiagram: React.FC<Props> = ({ premises, setPremises, routes, setRoutes
                   <>
                     <label className="block text-xs text-black/55">
                       Carregamento dos caminhões
-                      <select className={`${cell} mt-1`} value={selNode.loaderClassId ?? ''} onChange={(e) => setNode(selNode.id, { loaderClassId: e.target.value || undefined })}>
-                        <option value="">Tempo de carga das premissas</option>
-                        <option value="silo">Silo / correia (sem equipamento)</option>
-                        {catalog.loaders.map((l) => <option key={l.id} value={l.id}>{l.manufacturer ? `${l.manufacturer} – ` : ''}{l.name}</option>)}
-                      </select>
+                      <LoaderSelect premises={premises} className={`${cell} mt-1`} value={selNode.loaderClassId} label="Carregamento dos caminhões" onChange={(v) => setNode(selNode.id, { loaderClassId: v })} />
                     </label>
-                    {selNode.loaderClassId && selNode.loaderClassId !== 'silo' && (
+                    {(effectiveLoaderId(selNode, premises) ?? 'silo') !== 'silo' && (
                       <label className="block text-xs text-black/55">Equipamentos disponíveis<input type="number" min={0} step={1} className={`${num} mt-1`} value={selNode.loaderCount ?? ''} placeholder="o sistema calcula" onChange={(e) => setNode(selNode.id, { loaderCount: e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))) })} /></label>
                     )}
                   </>

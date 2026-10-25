@@ -52,6 +52,9 @@ export interface Route {
 export interface FleetType {
   classId: string;
   count: number;
+  /** velocidades próprias deste tipo (km/h); vazio = as das premissas */
+  speedLoaded?: number;
+  speedEmpty?: number;
 }
 
 /** Tipos de local da rede de fluxos. */
@@ -68,7 +71,7 @@ export interface FlowNode {
   wasteT?: number;
   /** formação (+) ou consumo (−) de estoque no mês (t seca), em locais de passagem */
   stockChangeT?: number;
-  /** carregamento dos caminhões que saem deste local: id do catálogo, 'silo' (sem equipamento) ou vazio (tempo de carga das premissas) */
+  /** carregamento dos caminhões que saem deste local: id do catálogo, 'silo' (sem equipamento), 'tempo' (tempo de carga das premissas) ou vazio (o equipamento padrão de Transporte / Frota) */
   loaderClassId?: string;
   /** equipamentos de carga disponíveis no local (vazio = o sistema calcula o necessário) */
   loaderCount?: number;
@@ -218,6 +221,8 @@ export interface DetailedPremises {
 
   // Alocação de Frota Extra
   extraAllocations?: ExtraFleetAllocation[];
+  /** equipamento de carga padrão (catálogo ou 'silo') para todos os locais que não escolheram o seu */
+  defaultLoaderClassId?: string;
   /** frota por tipo de caminhão (frota mista); vazio = um tipo só (classe e número de caminhões das premissas) */
   fleetTypes?: FleetType[];
   /** frota mista: o sistema distribui os tipos pelo menor custo por tonelada ('auto') ou o usuário define por rota ('manual') */

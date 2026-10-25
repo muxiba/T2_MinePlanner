@@ -62,7 +62,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
   return (
     <div className="space-y-3">
       <p className="text-xs text-black/55">
-        Informe os caminhões que a operação tem, por modelo do catálogo. Com um tipo só, vale o caminhão acima. Com dois ou mais, cada movimentação recebe uma composição: o sistema escolhe pelo menor custo por tonelada
+        Informe os caminhões que a operação tem, por modelo do catálogo, e as velocidades de cada um (vazio = as das premissas). Com um tipo só, vale o caminhão acima. Com dois ou mais, cada movimentação recebe uma composição: o sistema escolhe pelo menor custo por tonelada
         (custo horário do modelo ÷ toneladas por hora naquela rota), sem pôr caminhão fora de estrada em estrada pública, ou você define a composição de cada movimentação.
       </p>
       {!list.length ? (
@@ -78,6 +78,8 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                   <th className="px-1 py-1 font-medium">Modelo (catálogo)</th>
                   <th className="px-1 py-1 font-medium">Quantidade</th>
                   <th className="px-1 py-1 text-right font-medium">Carga útil (t)</th>
+                  <th className="px-1 py-1 text-right font-medium">Vel. cheio (km/h)</th>
+                  <th className="px-1 py-1 text-right font-medium">Vel. vazio (km/h)</th>
                   <th className="px-1 py-1 text-right font-medium">Tipo</th>
                   <th className="px-1 py-1 text-right font-medium">Custo por hora (R$)</th>
                   <th className="px-1 py-1 text-right font-medium">Em uso nas rotas</th>
@@ -98,6 +100,8 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                       </td>
                       <td className="px-1 py-1"><input type="number" min={0} className={`${box} w-24`} value={t.count} aria-label="Quantidade" onChange={(e) => save(list.map((x, k) => (k === i ? { ...x, count: Math.max(0, Math.round(Number(e.target.value) || 0)) } : x)))} /></td>
                       <td className="px-1 py-1 text-right tabular-nums">{c ? c.payloadT : '—'}</td>
+                      <td className="px-1 py-1 text-right"><input type="number" min={0} step={1} className={`${box} w-20`} value={t.speedLoaded ?? ''} placeholder={String(premises.velocidadeCheio)} aria-label="Velocidade cheio" title="Vazio = a velocidade das premissas" onChange={(e) => save(list.map((x, k) => (k === i ? { ...x, speedLoaded: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) } : x)))} /></td>
+                      <td className="px-1 py-1 text-right"><input type="number" min={0} step={1} className={`${box} w-20`} value={t.speedEmpty ?? ''} placeholder={String(premises.velocidadeVazio)} aria-label="Velocidade vazio" title="Vazio = a velocidade das premissas" onChange={(e) => save(list.map((x, k) => (k === i ? { ...x, speedEmpty: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) } : x)))} /></td>
                       <td className="px-1 py-1 text-right">{c?.vehicle === 'rodoviario' ? 'Rodoviário' : 'Fora de estrada'}</td>
                       <td className="px-1 py-1 text-right tabular-nums">{c ? t0(hourlyCost(c, premises)) : '—'}</td>
                       <td className={`px-1 py-1 text-right tabular-nums ${(used.get(t.classId) ?? 0) > t.count + 1e-6 ? 'font-semibold text-red-700' : ''}`}>{mixed ? `${fmtN(mode === 'estatistico' ? Math.max(0, Math.ceil((used.get(t.classId) ?? 0) - 1e-6)) : used.get(t.classId) ?? 0)} de ${t.count}` : '—'}</td>
@@ -112,7 +116,7 @@ const FleetTypesEditor: React.FC<Props> = ({ premises, setPremises, routes, setR
                 <tr className="border-t border-black/10 font-semibold">
                   <td className="px-1 py-1">Total da frota</td>
                   <td className="px-1 py-1 text-right tabular-nums">{total}</td>
-                  <td colSpan={5} />
+                  <td colSpan={7} />
                 </tr>
               </tfoot>
             </table>

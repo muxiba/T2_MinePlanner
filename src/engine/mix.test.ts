@@ -61,3 +61,21 @@ describe('frota mista estatística', () => {
     expect(typeTotals(routes, p).get('rod-40')).toBe(Math.ceil(sum - 1e-6));
   });
 });
+
+describe('velocidade por tipo e equipamento padrão', () => {
+  it('tipo mais rápido faz ciclo menor; equipamento padrão vale para os locais sem escolha', async () => {
+    const { ensureNetwork } = await import('./network');
+    const { routeKind } = await import('./fleet');
+    const r = { ...INITIAL_ROUTES[0], mix: { 'rod-40': 2 } };
+    const t = routeTargets(INITIAL_ROUTES, P).get(r.id)!;
+    const slow = analyzeRoute(r, { ...P, fleetTypes: [{ classId: 'rod-40', count: 2 }, { classId: 'rod-30', count: 1 }] }, t);
+    const fast = analyzeRoute(r, { ...P, fleetTypes: [{ classId: 'rod-40', count: 2, speedLoaded: 40, speedEmpty: 50 }, { classId: 'rod-30', count: 1 }] }, t);
+    expect(fast.cycle.totalMin).toBeLessThan(slow.cycle.totalMin);
+    const net = ensureNetwork(INITIAL_ROUTES, P, routeKind)!;
+    const pn = { ...P, nodes: net.nodes, defaultLoaderClassId: 'esc-50' };
+    const fa = analyzeFleet(net.routes, pn);
+    expect(fa.loaderNeeds.length).toBeGreaterThan(0);
+    const pt = { ...pn, nodes: net.nodes.map((n) => ({ ...n, loaderClassId: 'tempo' })) };
+    expect(analyzeFleet(net.routes, pt).loaderNeeds.length).toBe(0);
+  });
+});

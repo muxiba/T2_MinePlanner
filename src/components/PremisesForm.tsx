@@ -1,4 +1,5 @@
 import CatalogEditor from './CatalogEditor';
+import { analyzeFleet } from '@/engine/fleet';
 import NetworkEditor from './NetworkEditor';
 import FlowDiagram from './FlowDiagram';
 import { LoaderNeedsTable, LoaderTimesEditor } from './LoaderSetupEditor';
@@ -36,7 +37,7 @@ const STEPS = [
   { id: 2, label: 'Processo e massas', hint: 'Tipo de processo, RM, rejeito, umidade e estéril. A produção planejada mostra as massas que saem destas entradas.' },
   { id: 3, label: 'Locais e movimentações', hint: 'Frentes, plantas, estoques, expedição, baias e pilhas, e as movimentações entre eles (cada uma é uma rota e consome frota).' },
   { id: 4, label: 'Frota e catálogo', hint: 'Caminhão das premissas ou frota mista por tipo, velocidades, e o catálogo de modelos com custos e vida útil.' },
-  { id: 5, label: 'Carga e ciclo', hint: 'Tempos do ciclo. O equipamento de carga de cada local fica em Locais e movimentações.' },
+  { id: 5, label: 'Carga e ciclo', hint: 'Tempos do ciclo e equipamentos de carga: tempos de cada equipamento (carregar, giro, descarga), caçambadas por caminhão e quantos equipamentos cada local e cada movimentação precisam.' },
   { id: 6, label: 'Perdas', hint: 'Troca de turno, refeição, abastecimento e interferências: definem a UF e entram em cada ciclo.' },
 ];
 
@@ -253,6 +254,17 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
     setTimeout(() => document.getElementById('frota-por-tipo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
+  // tempo médio de carga com os equipamentos escolhidos (para comparar com o tempo informado das premissas)
+  const loadHint = (() => {
+    if (!routes) return undefined;
+    const needs = analyzeFleet(routes, premises).loaderNeeds;
+    const tot = needs.reduce((a, l) => a + l.trucksLoaded, 0);
+    if (!tot) return 'Nenhum local com equipamento de carga: este tempo vale para todas as rotas.';
+    const avg = needs.reduce((a, l) => a + l.trucksLoaded * l.loadMin, 0) / tot;
+    const fmt = (x: number) => x.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return `Com os equipamentos escolhidos a carga média é ${fmt(avg)} min (${needs.map((l) => `${l.where}: ${fmt(l.loadMin)}`).join(' · ')}). Este valor só vale para os locais sem equipamento.`;
+  })();
+
   const sections = [
     {
       title: "Período de Simulação",
@@ -322,12 +334,18 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       title: "Transporte / Frota",
       step: 4,
       fields: [
-        { label: "Velocidade Vazio (km/h)", key: "velocidadeVazio" },
-        { label: "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
+        { label: mixedFleet ? "Velocidade Vazio (km/h) — padrão dos tipos sem velocidade própria" : "Velocidade Vazio (km/h)", key: "velocidadeVazio" },
+        { label: mixedFleet ? "Velocidade Cheio (km/h) — padrão dos tipos sem velocidade própria" : "Velocidade Cheio (km/h)", key: "velocidadeCheio" },
         { label: "Classe do Caminhão", key: "truckClassId", type: "select", options: [...catalogOf(premises).trucks.map((t) => ({ label: `${t.manufacturer ? `${t.manufacturer} – ` : ''}${t.name}`, value: t.id })), { label: "Outra (informar abaixo)", value: "" }] },
         { label: "Capacidade Caminhão (t)", key: "truckCapacity" },
         { label: mixedFleet ? "Número de Caminhões — soma da frota por tipo" : "Número de Caminhões", key: "truckCount", readOnly: mixedFleet },
         { label: "Volume da Caçamba (m³)", key: "truckVolumeM3" },
+        {
+          label: "Equipamento de carga padrão (todas as rotas; muda por local em Carga e ciclo)",
+          key: "defaultLoaderClassId",
+          type: "select",
+          options: [{ label: "Nenhum — tempo de carregamento das premissas", value: "" }, { label: "Silo / correia (sem equipamento)", value: "silo" }, ...catalogOf(premises).loaders.map((l) => ({ label: `${l.manufacturer ? `${l.manufacturer} – ` : ''}${l.name}`, value: l.id }))],
+        },
         { label: "Transporte de rejeito necessário (t/h úmida)", key: "fleetCapacityBaiaTPH", readOnly: true },
         { label: "Transporte de produto necessário (t/h úmida)", key: "fleetCapacityTerminalTPH", readOnly: true },
         { label: "Transporte total necessário (t/h úmida)", key: "maxTotalFleetCapacityTPH", readOnly: true },
@@ -337,7 +355,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
       title: "Tempos de Ciclo (min)",
       step: 5,
       fields: [
-        { label: "Carregamento (min)", key: "loadingTime" },
+        { label: "Carregamento (min) — locais sem equipamento de carga", key: "loadingTime", hint: loadHint },
         { label: "Basculamento/Manobra (min)", key: "dumpingTime" },
         { label: "Pesagem Carregado (min)", key: "weighingTimeLoaded" },
         { label: "Pesagem Vazio (min)", key: "weighingTimeEmpty" },
@@ -491,6 +509,8 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                         const val =
                           field.key === "processType" || field.key === "moistureMode" || field.key === "truckClassId"
                             ? e.target.value
+                            : field.key === "defaultLoaderClassId"
+                              ? e.target.value || undefined
                             : field.key === "hasWasteRock"
                               ? e.target.value === "true"
                               : parseInt(e.target.value);
@@ -517,6 +537,7 @@ const PremisesForm: React.FC<PremisesFormProps> = ({ premises, setPremises, setR
                       className={`w-full border border-black/5 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all ${field.highlight ? 'bg-red-50/50 border-red-100 font-bold text-red-600' : 'bg-[#F8F9FA]'} ${field.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     />
                   )}
+                  {field.hint && <p className="mt-1 text-[11px] leading-snug text-black/50">{field.hint}</p>}
                 </div>
               ))}
             </div>

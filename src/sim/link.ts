@@ -256,6 +256,8 @@ export function fleetTypeConfigs(model: SimModel, premises: DetailedPremises, ba
       vehicle: t.cls.vehicle ?? base.vehicle,
       payloadT: t.cls.payloadT,
       volumeM3: t.cls.volumeM3 || undefined,
+      // velocidades próprias do tipo (frota mista); sem elas, as das premissas
+      speed: t.speedLoaded || t.speedEmpty ? premisesSpeed(model, { ...premises, velocidadeCheio: t.speedLoaded || premises.velocidadeCheio, velocidadeVazio: t.speedEmpty || premises.velocidadeVazio }) : base.speed,
       speedLimitLoadedKmh: prev?.speedLimitLoadedKmh ?? (road ? base.speedLimitLoadedKmh : undefined),
       speedLimitEmptyKmh: prev?.speedLimitEmptyKmh ?? (road ? base.speedLimitEmptyKmh : undefined),
       rollingResistance: prev?.rollingResistance ?? base.rollingResistance,

@@ -2,7 +2,8 @@ import React, { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import type { DetailedPremises, FlowNode, NodeType, Route, RouteKind } from '@/types';
 import { MATERIAL_LABELS, NODE_LABELS, materialsFrom, networkBalance } from '@/engine/network';
-import { catalogOf, routeKind } from '@/engine/fleet';
+import { effectiveLoaderId, routeKind } from '@/engine/fleet';
+import { LoaderSelect } from './LoaderSetupEditor';
 import { processPct } from '@/engine/process';
 
 /**
@@ -34,7 +35,6 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
   const frentes = nodes.filter((n) => n.type === 'frente');
   const shareSum = frentes.reduce((a, n) => a + (n.romShare ?? 1), 0) || 1;
   const pp = processPct(premises);
-  const catalog = catalogOf(premises);
 
   const addNode = (type: NodeType) => setPremises((p) => ({ ...p, nodes: [...(p.nodes ?? []), { id: newId(type), name: `${NODE_LABELS[type]} ${(p.nodes ?? []).filter((n) => n.type === type).length + 1}`, type }] }));
   const removeNode = (id: string) => {
@@ -140,15 +140,11 @@ const NetworkEditor: React.FC<Props> = ({ premises, setPremises, routes, setRout
                     </td>
                     <td className="px-1 py-1">
                       {hasOut ? (
-                        <select className={cell} value={n.loaderClassId ?? ''} aria-label="Carregamento" onChange={(e) => setNode(n.id, { loaderClassId: e.target.value || undefined })}>
-                          <option value="">Tempo de carga das premissas</option>
-                          <option value="silo">Silo / correia (sem equipamento)</option>
-                          {catalog.loaders.map((l) => <option key={l.id} value={l.id}>{l.manufacturer ? `${l.manufacturer} – ` : ''}{l.name}</option>)}
-                        </select>
+                        <LoaderSelect premises={premises} className={cell} value={n.loaderClassId} label="Carregamento" onChange={(v) => setNode(n.id, { loaderClassId: v })} />
                       ) : <span className="text-xs text-black/30">sem saída de caminhões</span>}
                     </td>
                     <td className="px-1 py-1">
-                      {hasOut && n.loaderClassId && n.loaderClassId !== 'silo' ? (
+                      {hasOut && (effectiveLoaderId(n, premises) ?? 'silo') !== 'silo' ? (
                         <input type="number" min={0} step={1} className={`${num} w-20`} value={n.loaderCount ?? ''} placeholder="calcular" aria-label="Equipamentos disponíveis" onChange={(e) => setNode(n.id, { loaderCount: e.target.value === '' ? undefined : Math.max(0, Math.round(Number(e.target.value))) })} />
                       ) : <span className="text-xs text-black/30">—</span>}
                     </td>

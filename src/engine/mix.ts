@@ -11,13 +11,15 @@ export interface MixType {
   classId: string;
   cls: TruckClass;
   count: number;
+  speedLoaded?: number;
+  speedEmpty?: number;
 }
 
 /** Tipos da frota. Sem frota mista cadastrada: um tipo só, o caminhão das premissas. */
 export function fleetTypesOf(premises: DetailedPremises): MixType[] {
   const cat = catalogOf(premises).trucks;
   const list = (premises.fleetTypes ?? []).filter((t) => t.count > 0 && cat.some((c) => c.id === t.classId));
-  if (list.length) return list.map((t) => ({ classId: t.classId, cls: cat.find((c) => c.id === t.classId)!, count: t.count }));
+  if (list.length) return list.map((t) => ({ classId: t.classId, cls: cat.find((c) => c.id === t.classId)!, count: t.count, speedLoaded: t.speedLoaded, speedEmpty: t.speedEmpty }));
   const cls = cat.find((c) => c.id === premises.truckClassId);
   return [{ classId: cls?.id ?? '__premissas', cls: cls ?? { id: '__premissas', name: `Caminhão ${premises.truckCapacity} t`, payloadT: premises.truckCapacity, volumeM3: premises.truckVolumeM3 ?? 0 }, count: premises.truckCount || 0 }];
 }
@@ -52,7 +54,7 @@ export interface MixCell {
 
 /** Desempenho de cada tipo em cada rota. */
 export function typeOnRoute(route: Route, premises: DetailedPremises, targetDryT: number, t: MixType): MixCell {
-  const a = analyzeRoute({ ...route, mix: undefined }, premises, targetDryT, { payloadT: t.cls.payloadT, volumeM3: t.cls.volumeM3 || undefined, trucks: 0 });
+  const a = analyzeRoute({ ...route, mix: undefined }, premises, targetDryT, { payloadT: t.cls.payloadT, volumeM3: t.cls.volumeM3 || undefined, trucks: 0, vLoaded: t.speedLoaded, vEmpty: t.speedEmpty });
   const costPerH = hourlyCost(t.cls, premises);
   return { classId: t.classId, name: `${t.cls.manufacturer ? `${t.cls.manufacturer} ` : ''}${t.cls.name}`, count: 0, payloadT: a.payloadT, truckMonthT: a.truckMonthT, truckRateTph: a.truckRateTph, costPerH, costPerT: a.truckRateTph > 0 ? costPerH / a.truckRateTph : Infinity };
 }
