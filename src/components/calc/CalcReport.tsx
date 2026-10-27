@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { processPct } from '@/engine/process';
 import { createPortal } from 'react-dom';
 import type { DetailedPremises, Route } from '@/types';
-import { catalogOf, fmtTrucks, KIND_LABELS, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
+import { targetLabels, catalogOf, fmtTrucks, KIND_LABELS, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
 import { flowSvg } from '@/components/FlowDiagram';
 import { buildFleetReport } from '@/engine/fleetReport';
 import { fleetTypesOf, hourlyCost, mixedOn } from '@/engine/mix';
@@ -146,8 +146,8 @@ export const CalcReport: React.FC<Props> = ({ analysis: a, premises: p, results,
 
       {/* ------------------------------ indicadores ------------------------------ */}
       <div className="avoid mt-3 grid grid-cols-4 gap-2">
-        <RKpi label="Meta de ROM" value={`${t0(a.romTargetDryT)} t`} sub="seca por mês" />
-        <RKpi label="Chega à planta" value={`${t0(a.romDeliverableDryT)} t`} sub={`${pc(a.romTargetDryT ? a.romDeliverableDryT / a.romTargetDryT : 1)} da meta · possível ${t0(a.romPossibleDryT)} t`} tone={a.meetsTarget ? 'ok' : 'bad'} />
+        <RKpi label={targetLabels(p).target} value={`${t0(a.romTargetDryT)} t`} sub="seca por mês" />
+        <RKpi label={targetLabels(p).delivered} value={`${t0(a.romDeliverableDryT)} t`} sub={`${pc(a.romTargetDryT ? a.romDeliverableDryT / a.romTargetDryT : 1)} da meta · possível ${t0(a.romPossibleDryT)} t`} tone={a.meetsTarget ? 'ok' : 'bad'} />
         <RKpi label="Caminhões" value={`${f.premise} / ${fmtTrucks(f.allocated)} / ${f.needed}`} sub={`frota / nas rotas / necessários (${n2(f.neededExact)} exatos)`} />
         <RKpi label="Etapa mais justa" value={b ? pc(b.ratio) : '—'} sub={b?.label ?? ''} tone={b && b.ratio < 0.999 ? 'bad' : 'ok'} />
       </div>

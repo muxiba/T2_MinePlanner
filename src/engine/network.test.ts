@@ -184,3 +184,20 @@ describe('carga por fluxo', () => {
     expect(b.find((l) => l.entryId === 'feed')!.role).toBe('alimentacao');
   });
 });
+
+describe('só transporte: sem limite de planta', () => {
+  it('a capacidade da planta das premissas não limita o que é entregue', async () => {
+    const { analyzeFleet, syncAutoFleet } = await import('./fleet');
+    const { DEFAULT_PREMISES } = await import('../constants');
+    const nodes = [
+      { id: 'o', name: 'Origem', type: 'frente' as const, group: 'origem' as const },
+      { id: 'd', name: 'Destino', type: 'expedicao' as const, group: 'destino' as const },
+    ];
+    const p = { ...DEFAULT_PREMISES, flowMode: 'transporte' as const, nodes, plantFeedRateTPH: 10, umidadeNatural: 0, perdaMaterial: 0 };
+    let routes = [{ id: 'm', name: 'O → D', kind: 'rom' as const, fromId: 'o', toId: 'd', active: true, truckCount: 0, truckCapacity: 40, distance: 5000, cycleTime: 0, mechanicalAvailability: 85, operationalEfficiency: 100, fleetMode: 'inteiro' as const, targetMass: 100000 }];
+    for (let i = 0; i < 3; i++) routes = (syncAutoFleet(routes as never, p) as never) ?? routes;
+    const fa = analyzeFleet(routes as never, p);
+    expect(fa.romTargetDryT).toBe(100000);
+    expect(fa.romDeliverableDryT).toBeGreaterThanOrEqual(99999);
+  });
+});

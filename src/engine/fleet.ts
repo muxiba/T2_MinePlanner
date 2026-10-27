@@ -762,6 +762,13 @@ function stageFrom(id: StageId, label: string, list: RouteAnalysis[], field: 'ca
 const fmtT = (n: number) => `${Math.round(n).toLocaleString('pt-BR')} t`;
 const fmtN = (n: number, d = 1) => n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
 
+/** Rótulos da meta e do que chega: processo (ROM → planta) ou só transporte (destinos). */
+export function targetLabels(premises: Pick<DetailedPremises, 'flowMode'>) {
+  return transportMode(premises)
+    ? { target: 'Meta de transporte', delivered: 'Entregue nos destinos', targetSub: 'seca por mês (soma das movimentações)' }
+    : { target: 'Meta de ROM', delivered: 'Chega à planta', targetSub: 'seca por mês (consumo da planta)' };
+}
+
 export function analyzeFleet(routes: Route[], premises: DetailedPremises): FleetAnalysis {
   const targets = routeTargets(routes, premises);
   const active = routes.filter((r) => r.active);
@@ -781,9 +788,10 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
     const s = stageFrom('carga', 'Carga na mina', romWithLoader, 'loaderCap');
     if (s) stages.push(s);
   }
-  const transporte = stageFrom('transporte_rom', 'Transporte de ROM', rom, 'capacityWetT');
+  const tm = transportMode(premises);
+  const transporte = stageFrom('transporte_rom', tm ? 'Transporte' : 'Transporte de ROM', rom, 'capacityWetT');
   if (transporte) stages.push(transporte);
-  else if (premises.targetMonthlyROM > 0) {
+  else if (premises.targetMonthlyROM > 0 && !tm) {
     // sem rota de ROM ativa: nada chega à planta
     stages.push({
       id: 'transporte_rom',
@@ -795,7 +803,8 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
       basis: 'úmida',
     });
   }
-  if (premises.targetMonthlyROM > 0 && plantCapacityDry > 0) {
+  // só transporte: não há planta; a meta é a massa das movimentações (a capacidade da planta não limita)
+  if (!tm && premises.targetMonthlyROM > 0 && plantCapacityDry > 0) {
     stages.push({
       id: 'planta',
       label: 'Planta (alimentação)',
@@ -815,7 +824,9 @@ export function analyzeFleet(routes: Route[], premises: DetailedPremises): Fleet
 
   const bottleneck = stages.length ? stages.reduce((min, s) => (s.ratio < min.ratio ? s : min)) : null;
   const systemRatio = bottleneck ? bottleneck.ratio : 1;
-  const romTargetDryT = premises.targetMonthlyROM;
+  // só transporte: meta = massa entregue nos destinos (movimentações que não terminam em ponto de passagem)
+  const passIds = new Set((premises.nodes ?? []).filter((n) => n.group === 'passagem').map((n) => n.id));
+  const romTargetDryT = tm ? analyses.filter((a) => !passIds.has(active.find((r) => r.id === a.id)?.toId ?? '')).reduce((s, a) => s + a.targetDryT, 0) : premises.targetMonthlyROM;
   // o ROM que chega e é processado é limitado pela pior etapa do caminho mina → planta
   const romPathRatio = Math.min(1, ...stages.filter((s) => ['carga', 'transporte_rom', 'planta'].includes(s.id)).map((s) => s.ratio));
   const romDeliverableDryT = romTargetDryT * (Number.isFinite(romPathRatio) ? romPathRatio : 1);

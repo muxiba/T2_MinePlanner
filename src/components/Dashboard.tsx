@@ -6,9 +6,10 @@ import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Lege
 import { Bar } from 'react-chartjs-2';
 import type { DetailedPremises, Route } from '../types';
 import { generatePortableHTML } from '../utils/export';
-import { analyzeFleet, fmtTrucks, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
+import { analyzeFleet, targetLabels, fmtTrucks, sumCalendarHours, type FleetAnalysis } from '@/engine/fleet';
 import { t0, n1, n2, pc, Kpi, FlowBox, Arrow, HoursCascade, CycleBars, RouteTable, StageBar, Line2 } from './calc/parts';
 import { KIND_LABELS } from '@/engine/fleet';
+import { transportMode } from '@/engine/network';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -57,7 +58,7 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
       [],
       ['Indicador', 'Valor'],
       ['Meta ROM (t seca/mês)', dec(a.romTargetDryT, 0)],
-      ['Chega à planta (t seca/mês)', dec(a.romDeliverableDryT, 0)],
+      [`${targetLabels(premises).delivered} (t seca/mês)`, dec(a.romDeliverableDryT, 0)],
       ['Possível com a frota (t seca/mês)', dec(a.romPossibleDryT, 0)],
       ['Frota das premissas', f.premise],
       ['Caminhões nas rotas', dec(f.allocated)],
@@ -132,9 +133,9 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
 
       {/* ------------------------------ indicadores ------------------------------ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Meta de ROM" value={`${t0(a.romTargetDryT)} t`} sub="seca por mês (consumo da planta)" />
+        <Kpi label={targetLabels(premises).target} value={`${t0(a.romTargetDryT)} t`} sub={targetLabels(premises).targetSub} />
         <Kpi
-          label="Chega à planta"
+          label={targetLabels(premises).delivered}
           value={`${t0(a.romDeliverableDryT)} t`}
           sub={`${pc(a.romTargetDryT ? a.romDeliverableDryT / a.romTargetDryT : 1)} da meta · possível ${t0(a.romPossibleDryT)} t`}
           tone={a.meetsTarget ? 'ok' : 'bad'}
@@ -144,6 +145,19 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
       </div>
 
       {/* ------------------------------ 1. massas ------------------------------ */}
+      {transportMode(premises) ? (
+        <Section n={1} title="Movimentações do mês" note="Só transporte: cada movimentação leva a massa informada da origem ao destino. Não há planta, recuperação nem rejeito.">
+          <div className="flex flex-wrap items-stretch gap-2">
+            <FlowBox color="#059669" title="Origens" main={`${t0(a.romTargetDryT)} t seca`} lines={[`${t0(romWet)} t úmidas transportadas`, `${a.routes.length} movimentação(ões)`]} />
+            <Arrow />
+            <div className="flex min-w-[220px] flex-1 flex-col gap-2">
+              {a.routes.map((r) => (
+                <FlowBox key={r.id} color="#2563eb" title={r.name} main={`${t0(r.targetDryT)} t seca`} lines={[`${n1(r.hours.effective ? r.targetWetT / r.hours.effective : 0)} t/h nas horas efetivas`]} />
+              ))}
+            </div>
+          </div>
+        </Section>
+      ) : (
       <Section n={1} title="Do objetivo às massas transportadas" note={`Massa úmida = seca ${premises.moistureMode === 'base_umida' ? `÷ (1 − ${n1(premises.umidadeNatural)}%) × (1 + ${n1(premises.perdaMaterial)}%)` : `× (1 + ${n1(premises.umidadeNatural)}% umidade + ${n1(premises.perdaMaterial)}% perda)`}. Produto e rejeito saem do ROM pela recuperação mássica.`}>
         <div className="flex flex-wrap items-stretch gap-2">
           <FlowBox color="#059669" title="ROM na mina" main={`${t0(a.romTargetDryT)} t seca`} lines={[`${t0(romWet)} t úmidas transportadas`, `${n1(mineEff ? romWet / mineEff : 0)} t/h efetiva`]} />
@@ -162,12 +176,13 @@ const Dashboard: React.FC<DashboardProps> = ({ results, premises, routes, analys
           </div>
         </div>
       </Section>
+      )}
 
       {/* ------------------------------ 2. horas ------------------------------ */}
       <Section n={2} title="Horas disponíveis no mês" note="Horas efetivas = horas de calendário × DF (disponibilidade física) × UF (utilização). São as horas em que cada caminhão realmente transporta.">
         <div className="grid gap-6 md:grid-cols-2">
           <HoursCascade title="Mina (ROM e estéril)" cal={calMina} df={premises.dfMina} uf={premises.ufMina} />
-          <HoursCascade title="Planta (produto e rejeito)" cal={calPlanta} df={premises.dfPlanta} uf={premises.ufPlanta} />
+          {!transportMode(premises) && <HoursCascade title="Planta (produto e rejeito)" cal={calPlanta} df={premises.dfPlanta} uf={premises.ufPlanta} />}
         </div>
       </Section>
 

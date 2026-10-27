@@ -225,7 +225,7 @@ export function premisesConfig(model: SimModel, premises: DetailedPremises, prev
       const cap = `${premises.truckCapacity || 0} t${premises.truckVolumeM3 ? `, ${premises.truckVolumeM3} m³` : ''}`;
       return cls ? `Premissas: ${cls.manufacturer ? `${cls.manufacturer} ` : ''}${cls.name}${premises.truckVolumeM3 ? ` · ${premises.truckVolumeM3} m³` : ''}` : `Premissas: caminhão ${cap}`;
     })(),
-    vehicle: prev?.vehicle,
+    vehicle: prev?.vehicle ?? catalogOf(premises).trucks.find((t) => t.id === premises.truckClassId)?.vehicle,
     speedLimitLoadedKmh: prev?.speedLimitLoadedKmh,
     speedLimitEmptyKmh: prev?.speedLimitEmptyKmh,
     rollingResistance: prev?.rollingResistance,

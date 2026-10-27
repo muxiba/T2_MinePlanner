@@ -17,6 +17,8 @@ export interface AnimInfo {
   material: string;
   /** veículo do circuito: mina / fora de estrada ou rodoviário */
   vehicle?: 'mina' | 'rodoviario';
+  /** meta do circuito (t por dia trabalhado), para comparar com o que a animação gerou */
+  targetTpd?: number;
 }
 
 export interface AnimPeriod {
@@ -30,27 +32,35 @@ export interface AnimPeriod {
 const h1 = (min: number) => n1(min / 60);
 const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 
-const AnimTables: React.FC<{ animator: Animator; from: number; t: number; info: AnimInfo[]; period?: AnimPeriod }> = ({ animator, from, t, info, period }) => {
+const AnimTables: React.FC<{ animator: Animator; from: number; t: number; info: AnimInfo[]; period?: AnimPeriod; hoursPerDay?: number }> = ({ animator, from, t, info, period, hoursPerDay = 24 }) => {
   const [view, setView] = useState<'circuitos' | 'caminhoes' | 'matriz'>('circuitos');
   // recalcula a cada minuto simulado (em animações longas, a cada fração da duração, para não pesar)
   const q = Math.max(1, Math.round(animator.end / 3000));
   const minute = t >= animator.end ? animator.end : Math.floor(t / q) * q;
   const tot = useMemo(() => animator.totals(from, Math.max(from, minute)), [animator, from, minute]);
-  const byMaterial = new Map<string, { tonnes: number; trips: number }>();
+  const byMaterial = new Map<string, { tonnes: number; trips: number; target: number; hasTarget: boolean }>();
   tot.circuits.forEach((c) => {
     const m = info[c.circuit]?.material ?? 'Material';
-    const v = byMaterial.get(m) ?? { tonnes: 0, trips: 0 };
+    const v = byMaterial.get(m) ?? { tonnes: 0, trips: 0, target: 0, hasTarget: false };
     v.tonnes += c.tonnes;
     v.trips += c.trips;
+    if (info[c.circuit]?.targetTpd !== undefined) {
+      v.target += info[c.circuit]!.targetTpd!;
+      v.hasTarget = true;
+    }
     byMaterial.set(m, v);
   });
   const hours = tot.span / 60;
+  // dias animados e horas de operação (a produção acontece só no turno; a média de 24 h esconde isso)
+  const days = tot.span / 1440;
+  const hpd = Math.min(24, Math.max(0.5, hoursPerDay));
+  const opHours = Math.min(hours, days * hpd);
 
   return (
     <div className="space-y-3 rounded-xl border border-black/[0.07] bg-[#FAFBFB] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm font-semibold">
-          O que a animação gerou até agora <span className="font-normal text-black/50">({n1(hours)} h de operação simuladas)</span>
+          O que a animação gerou até agora <span className="font-normal text-black/50">({n1(days)} dia(s) simulados, {n1(opHours)} h de operação)</span>
         </p>
         <div className="inline-flex rounded-lg border border-black/10 bg-white p-0.5 text-xs" role="tablist">
           {(['circuitos', 'caminhoes', 'matriz'] as const).map((k) => (
@@ -66,7 +76,12 @@ const AnimTables: React.FC<{ animator: Animator; from: number; t: number; info: 
           <div key={m} className="rounded-lg bg-white px-3 py-2 shadow-sm">
             <p className="truncate text-[10px] font-bold tracking-widest text-black/45 uppercase" title={m}>{m}</p>
             <p className="font-mono text-lg font-bold tabular-nums">{t0(v.tonnes)} t</p>
-            <p className="text-[11px] text-black/50">{v.trips} viagens · {hours > 0 ? t0(v.tonnes / hours) : 0} t/h</p>
+            <p className="text-[11px] text-black/50">
+              {v.trips} viagens · <b className="text-black/70">{opHours > 0 ? t0(v.tonnes / opHours) : 0} t/h</b> nas {n1(hpd)} h de operação/dia
+            </p>
+            <p className="text-[11px] text-black/50">
+              {days > 0 ? t0(v.tonnes / days) : 0} t/dia{v.hasTarget && v.target > 0 ? ` · meta ${t0(v.target)} t/dia (${Math.round((v.tonnes / Math.max(days, 1e-9) / v.target) * 100)}%)` : ''} · {hours > 0 ? t0(v.tonnes / hours) : 0} t/h na média de 24 h
+            </p>
           </div>
         ))}
       </div>
@@ -83,6 +98,8 @@ const AnimTables: React.FC<{ animator: Animator; from: number; t: number; info: 
                 <th className="py-1.5 pr-2 text-right font-medium">Caminhões</th>
                 <th className="py-1.5 pr-2 text-right font-medium">Viagens</th>
                 <th className="py-1.5 pr-2 text-right font-medium">Toneladas</th>
+                <th className="py-1.5 pr-2 text-right font-medium">t/dia (meta)</th>
+                <th className="py-1.5 pr-2 text-right font-medium">t/h no turno</th>
                 <th className="py-1.5 pr-2 text-right font-medium">Ciclo médio</th>
                 <th className="py-1.5 pr-2 text-right font-medium">Fila por viagem</th>
                 <th className="py-1.5 pr-2 text-right font-medium">Carga ocupada</th>
@@ -103,6 +120,11 @@ const AnimTables: React.FC<{ animator: Animator; from: number; t: number; info: 
                     <td className="py-1.5 pr-2 text-right tabular-nums">{c.trucks}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{c.trips}</td>
                     <td className="py-1.5 pr-2 text-right font-semibold tabular-nums">{t0(c.tonnes)} t</td>
+                    <td className={clsx('py-1.5 pr-2 text-right tabular-nums', info[c.circuit]?.targetTpd && days > 0 && c.tonnes / days < info[c.circuit]!.targetTpd! * 0.995 ? 'text-red-700' : '')}>
+                      {days > 0 ? t0(c.tonnes / days) : 0}
+                      {info[c.circuit]?.targetTpd ? <span className="block text-[11px] text-black/45">meta {t0(info[c.circuit]!.targetTpd!)}</span> : null}
+                    </td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">{opHours > 0 ? t0(c.tonnes / opHours) : 0}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{c.trips ? `${n1(c.cycleMin)} min` : '—'}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{c.trips ? `${n1(c.queueMin)} min` : '—'}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{pct(c.loaderBusyMin, cap)}</td>

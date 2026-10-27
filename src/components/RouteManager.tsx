@@ -5,7 +5,7 @@ import React, { useMemo } from 'react';
 import { processPct } from '@/engine/process';
 import { Activity, AlertTriangle, Check, Download, Edit2, MapPin, Plus, PlusCircle, Scale, Shuffle, Trash2, Truck, Wand2 } from 'lucide-react';
 import type { DetailedPremises, Route, RouteKind } from '../types';
-import { FLOW_ORDER, catalogOf, loaderFromCatalog, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
+import { targetLabels, FLOW_ORDER, catalogOf, loaderFromCatalog, analyzeFleet, checkFlows, flowTargets, guessRouteKind, newFlowRoute, requiredFlows, fitExtraAllocations, fmtTrucks, optimizeFleet, syncAutoFleet, trucksWithoutRoute, routeKind, routeRates, sumCalendarHours, KIND_LABELS, type RouteAnalysis } from '@/engine/fleet';
 import ExtraFleetManager from './ExtraFleetManager';
 
 /**
@@ -57,7 +57,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
     const short = a2.routes.reduce((s, x) => s + Math.max(0, (mode === 'inteiro' ? x.trucksNeeded : x.trucksNeededExact) - x.trucksAllocated), 0);
     setAdjustMsg(
       `${moves.length ? moves.join(' · ') : 'Nada mudou: as rotas já estavam assim'}. ` +
-        `${free} caminhão(ões) ficam na frota extra. Chega à planta: ${t0(a2.romDeliverableDryT)} t.` +
+        `${free} caminhão(ões) ficam na frota extra. ${targetLabels(premises).delivered}: ${t0(a2.romDeliverableDryT)} t.` +
         (short > 0.01 ? ` A frota não basta: faltam ${fmtTrucks(short)} caminhão(ões) para todas as rotas baterem a meta.` : ''),
     );
   };
@@ -178,7 +178,7 @@ const RouteManager: React.FC<RouteManagerProps> = ({ routes, setRoutes, premises
           <Stat label="Sem rota (frota extra)" value={fmtTrucks(f.spare)} sub={Math.abs(f.spare - Math.round(f.spare)) > 0.01 ? `${Math.floor(f.spare + 1e-9)} caminhão(ões) inteiro(s) livre(s)` : undefined} tone={f.spare > 0.01 && !analysis.meetsTarget ? 'warn' : undefined} />
           <Stat label="Necessários" value={`${f.needed}`} sub={`${n2(f.neededExact)} sem arredondar`} />
           <Stat
-            label="Chega à planta"
+            label={targetLabels(premises).delivered}
             value={`${t0(analysis.romDeliverableDryT)} t`}
             sub={`${pc(analysis.romTargetDryT ? analysis.romDeliverableDryT / analysis.romTargetDryT : 1)} da meta de ${t0(analysis.romTargetDryT)} t · possível com esta frota: ${t0(analysis.romPossibleDryT)} t`}
             tone={analysis.meetsTarget ? 'ok' : 'bad'}

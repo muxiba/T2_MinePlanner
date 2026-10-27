@@ -148,7 +148,7 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
       const maxStops = Math.max(0, ...routes.filter((r) => r.active).map((r) => r.stops?.length ?? 0));
       const hasPass = by.passagem.length > 0;
       const start = hasPass ? COL.planta + W + 20 : COL.mina + W + 20;
-      const rightX = Math.max(hasPass ? COL.right : 560, start + 60 + maxStops * 170);
+      const rightX = Math.max(hasPass ? COL.right : 560, start + 60 + maxStops * 170 + (maxStops ? 150 : 0));
       box.origem = { x: COL.mina, y: top, w: W + 20, h: h('origem') };
       if (hasPass) box.passagem = { x: COL.planta, y: top, w: W + 20, h: h('passagem') };
       box.destino = { x: rightX, y: top, w: W + 20, h: h('destino') };
@@ -173,6 +173,27 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
     }
     const H = Math.max(...Object.values(box).map((b) => b!.y + b!.h)) + 20;
     const layout = { by, box, pos, H: Math.max(H, transport ? 0 : 0), Wd };
+  // só transporte: cada movimentação com paradas ganha a sua faixa (as caixas de rotas diferentes não se sobrepõem)
+  const BW = 130;
+  const BH = 38;
+  const laneY = new Map<string, number>();
+  if (transport) {
+    const withStops = routes
+      .filter((r) => r.stops?.length && r.fromId && r.toId && layout.pos.has(r.fromId) && layout.pos.has(r.toId))
+      .map((r) => {
+        const a = layout.pos.get(r.fromId!)!;
+        const b = layout.pos.get(r.toId!)!;
+        return { r, a, b, pref: (a.y + a.h / 2 + b.y + b.h / 2) / 2 };
+      })
+      .filter((x) => x.b.x > x.a.x + x.a.w / 2)
+      .sort((u, v) => u.pref - v.pref || (u.b.y - v.b.y));
+    let last = -Infinity;
+    for (const x of withStops) {
+      const y = Math.max(x.pref, last + BH + 14);
+      laneY.set(x.r.id, y);
+      last = y;
+    }
+  }
   const edges = routes
     .filter((r) => r.fromId && r.toId && layout.pos.has(r.fromId) && layout.pos.has(r.toId))
     .map((r) => {
@@ -218,12 +239,11 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
         const x2 = b.x - 2;
         const y2 = b.y + b.h / 2;
         const n = ord.length;
-        const BW = 130;
-        const BH = 38;
+        const lane = laneY.get(r.id);
         const boxes: StopBox[] = ord.map((st, i) => {
           const f = (i + 1) / (n + 1);
           const cx = x1 + (x2 - x1) * f;
-          const cy = y1 + (y2 - y1) * f;
+          const cy = lane ?? y1 + (y2 - y1) * f;
           const km = (st.distM || 0) >= 1000 ? `${((st.distM || 0) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : `${Math.round(st.distM || 0)} m`;
           return { x: cx - BW / 2, y: cy - BH / 2, w: BW, h: BH, stopId: st.id, name: st.name, sub: `${km} · ${(st.stopMin || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} min ${st.dir === 'ambos' ? '↔' : st.dir === 'ida' ? '→' : '←'}` };
         });
@@ -241,7 +261,7 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
           return `M${sx},${sy} C${sx + c},${sy} ${ex - c},${ey} ${ex},${ey}`;
         });
         const [sx, sy, ex, ey] = pts[0];
-        return { r, d: segs.join(' '), lx: (sx + ex) / 2, ly: (sy + ey) / 2 - 16, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops: [], segs, boxes };
+        return { r, d: segs.join(' '), lx: sx + (ex - sx) * 0.55, ly: ey - 15, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops: [], segs, boxes };
       }
       return { r, d, lx, ly, k, bad, mass: r.active ? res.edges.get(r.id) ?? 0 : 0, stops };
     });
@@ -255,7 +275,9 @@ export function flowLayout(nodes: FlowNode[], routes: Route[], res: ReturnType<t
     placed.push({ x: e.lx, y: e.ly });
   }
 
-  return { ...layout, edges };
+  // a faixa mais baixa pode passar da altura dos blocos
+  const bottom = Math.max(0, ...edges.flatMap((e) => (e.boxes ?? []).map((b) => b.y + b.h)), ...edges.map((e) => e.ly + 14));
+  return { ...layout, H: Math.max(layout.H, bottom + 20), edges };
 }
 
 const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);

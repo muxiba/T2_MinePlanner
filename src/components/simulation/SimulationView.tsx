@@ -362,6 +362,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
   const [animDays, setAnimDays] = useState(1);
   const animator = useMemo(() => (anim ? makeAnimator(anim.trace, anim.geometry, anim.loaderTrace) : null), [anim]);
   const [animInfo, setAnimInfo] = useState<AnimInfo[]>([]);
+  const [animHpd, setAnimHpd] = useState<number>(24);
   const [animPer, setAnimPer] = useState<AnimPeriod | undefined>(undefined);
   const raf = useRef<number | null>(null);
 
@@ -408,6 +409,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       }
       const res = await runInWorker<RunResult>({ kind: 'trace', model: m, configId: sel.configId, scenarioId: sel.scenarioId, hours: animDays * 24 + model.warmupH });
       setAnimRoutes(animPeriod > 0 ? m.routes : null);
+      setAnimHpd(m.scenarios.find((x) => x.id === sel.scenarioId)?.hoursPerDay ?? m.scenarios[0]?.hoursPerDay ?? 24);
       // material de cada circuito animado (para a tabela de produção)
       setAnimInfo(
         res.geometry.map((g) => {
@@ -417,8 +419,13 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
             const mv = model.plan.movements.find((x) => `pm-${x.id}` === g.circuitId);
             return { name: c?.name ?? g.circuitId, material: mv?.material ?? 'Material', vehicle };
           }
-          const flow = c ? calc.find((x) => x.circuitId === c.id)?.flow : undefined;
-          return { name: c?.name ?? g.circuitId, material: flow ? FLOW_LABELS[flow] : 'Material', vehicle };
+          const cc = c ? calc.find((x) => x.circuitId === c.id) : undefined;
+          const flow = cc?.flow;
+          // material da movimentação ligada (modo só transporte); senão, o fluxo
+          const edge = c?.edgeId ? routes?.find((x) => x.id === c.edgeId) : undefined;
+          const material = edge?.materialName || (flow ? FLOW_LABELS[flow] : 'Material');
+          const targetTpd = cc && cc.workDays > 0 ? cc.tonnes / cc.workDays : undefined;
+          return { name: c?.name ?? g.circuitId, material, vehicle, targetTpd };
         }),
       );
       if (animPeriod > 0 && model.plan) {
@@ -1616,7 +1623,7 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
                   className="w-full accent-emerald-600"
                   aria-label="Linha do tempo"
                 />
-                <AnimTables animator={animator} from={model.warmupH * 60} t={animT} info={animInfo} period={animPer} />
+                <AnimTables animator={animator} from={model.warmupH * 60} t={animT} info={animInfo} period={animPer} hoursPerDay={animHpd} />
                 <p className="text-xs text-black/45">
                   Equipamentos desenhados em escala (caminhão 10,5 × 2,6 m; escavadeira 9,5 × 3,3 m): aproxime com a roda do mouse. Com pouco zoom, ficam com um tamanho mínimo para continuar visíveis.{' '}
                   {animPeriod > 0 && (periodResults?.some((r) => r.period === animPeriod && r.configId === sel.configId) ? 'Frota dimensionada para o período. ' : 'Rode “Dimensionar” no Plano de lavra para usar a frota do período; por ora, 1 caminhão por movimentação. ')}

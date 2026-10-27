@@ -26,7 +26,7 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
-import { analyzeFleet, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, routeKind, syncAutoFleet } from '@/engine/fleet';
+import { analyzeFleet, targetLabels, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, routeKind, syncAutoFleet } from '@/engine/fleet';
 import { ensureNetwork } from '@/engine/network';
 import SummaryView from '@/components/summary/SummaryView';
 const TutorialView = React.lazy(() => import('@/components/TutorialView'));
@@ -306,9 +306,9 @@ const PlannerPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-6">
-          <Metric label="Meta de ROM (t/mês)" value={t0(analysis.romTargetDryT)} className="text-[#1A1A1A]" />
+          <Metric label={`${targetLabels(premises).target} (t/mês)`} value={t0(analysis.romTargetDryT)} className="text-[#1A1A1A]" />
           <Metric
-            label="Chega à planta (t/mês)"
+            label={`${targetLabels(premises).delivered} (t/mês)`}
             value={t0(analysis.romDeliverableDryT)}
             className={analysis.meetsTarget ? 'text-emerald-600' : 'text-red-600'}
           />
