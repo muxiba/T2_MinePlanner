@@ -26,6 +26,7 @@ import { AppShell } from '@/components/AppShell';
 import { Alert, Button, FullScreenLoader } from '@/components/ui';
 import type { Scenario } from '@/types';
 import { calculateTotalProduction } from '@/utils/calculations';
+import { transportMode } from '@/engine/network';
 import { analyzeFleet, targetLabels, ensureFlowRoutes, fitExtraAllocations, fmtTrucks, requiredFlows, routeKind, syncAutoFleet } from '@/engine/fleet';
 import { ensureNetwork } from '@/engine/network';
 import SummaryView from '@/components/summary/SummaryView';
@@ -116,10 +117,11 @@ const PlannerPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.status, plan.planId]);
 
-  const results = useMemo(
-    () => calculateTotalProduction(routes, premises, productionLogs),
-    [routes, premises, productionLogs],
-  );
+  const results = useMemo(() => {
+    // só transporte: a meta do calendário e dos lançamentos é a soma das movimentações (não o consumo da planta)
+    const p = transportMode(premises) ? { ...premises, targetMonthlyROM: analyzeFleet(routes, premises).romTargetDryT, plantFeedRateTPH: Math.max(premises.plantFeedRateTPH || 0, 1e6) } : premises;
+    return calculateTotalProduction(routes, p, productionLogs);
+  }, [routes, premises, productionLogs]);
 
   // Rotas + frota extra nunca passam da frota das premissas: ao mudar rotas ou frota,
   // as alocações por horas são reajustadas para caberem nos caminhões sem rota.
@@ -427,7 +429,7 @@ const PlannerPage: React.FC = () => {
                 <ProductionLogging routes={routes} logs={productionLogs} setLogs={setProductionLogs} results={results} premises={premises} onReset={resetSimulation} />
               )}
               {activeTab === 'replanning' && <ReplanningView results={results} premises={premises} />}
-              {activeTab === 'calendar' && <ProductionCalendar results={results} premises={premises} logs={productionLogs} />}
+              {activeTab === 'calendar' && <ProductionCalendar results={results} premises={premises} logs={productionLogs} analysis={analysis} />}
               {activeTab === 'scenarios' && (
                 <ScenarioManager
                   routes={routes}

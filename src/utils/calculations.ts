@@ -463,7 +463,11 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
     });
   }
   const daysPassed = loggedDates.size;
-  const remainingDays = Math.max(0, premises.calendarDays - daysPassed);
+  // dias que faltam = dias de operação do calendário (horas > 0) ainda sem lançamento; sem calendário, os dias corridos
+  const cal = premises.dailyCalendar ?? [];
+  const remainingDays = cal.length
+    ? cal.filter((d) => (d.hoursMina || 0) > 0 && !loggedDates.has(String(d.date).split('T')[0])).length
+    : Math.max(0, premises.calendarDays - daysPassed);
   
   const remainingTarget = Math.max(0, monthlyTarget - totalActualProduction);
   
@@ -471,7 +475,8 @@ export function calculateTotalProduction(routes: Route[], premises: DetailedPrem
   const requiredDailyProduction = remainingDays > 0 ? remainingTarget / remainingDays : 0;
   
   // Check if required hourly production exceeds plant capacity
-  const averageDailyHoursPlanta = premises.calendarDays > 0 ? horasCalendarioPlanta / premises.calendarDays : 24;
+  const plantaDays = cal.filter((d) => (d.hoursPlanta || 0) > 0).length || premises.calendarDays;
+  const averageDailyHoursPlanta = plantaDays > 0 ? horasCalendarioPlanta / plantaDays : 24;
   const effectiveHoursPerDayPlanta = averageDailyHoursPlanta * eoPlantaFactor;
   const requiredHourlyProduction = effectiveHoursPerDayPlanta > 0 ? requiredDailyProduction / effectiveHoursPerDayPlanta : 0;
   

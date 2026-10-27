@@ -3,14 +3,18 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameM
 import { ptBR } from 'date-fns/locale';
 import { DetailedPremises, DailyLog } from '../types';
 import { Calendar as CalendarIcon, Clock, Truck, AlertCircle, AlertTriangle, Download } from 'lucide-react';
+import { targetLabels, type FleetAnalysis } from '@/engine/fleet';
+import { transportMode } from '@/engine/network';
 
 interface ProductionCalendarProps {
   results: any;
   premises: DetailedPremises;
+  /** análise da frota (motor do 2. Dimensionamento): mesma base do Resumo */
+  analysis: FleetAnalysis;
   logs: Record<string, DailyLog[]>;
 }
 
-const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premises, logs }) => {
+const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premises, logs, analysis }) => {
   const [includeExtraFleet, setIncludeExtraFleet] = React.useState(false);
   const [view, setView] = React.useState<'mes' | 'tabela'>('mes');
   const today = new Date();
@@ -291,7 +295,7 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
       {/* resumo do mês */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {[
-          ['Meta do mês (ROM)', `${fmt0(premises.targetMonthlyROM)} t`],
+          [`${transportMode(premises) ? 'Meta do mês (transporte)' : 'Meta do mês (ROM)'}`, `${fmt0(analysis.romTargetDryT)} t`],
           ['Realizado', `${fmt0(results.totalActualProduction)} t`],
           ['Saldo', `${fmt0(results.remainingTarget)} t`],
           ['Dias lançados / restantes', `${results.daysPassed} / ${results.remainingDays}`],
@@ -317,116 +321,91 @@ const ProductionCalendar: React.FC<ProductionCalendarProps> = ({ results, premis
 
       {view === 'mes' ? renderMonthGrid() : renderCalendarTable()}
 
-      <div className="bg-[#151619] p-8 rounded-3xl shadow-xl text-white">
-        <h3 className="text-lg font-bold mb-6 text-emerald-400 flex items-center gap-2">
-          <Clock size={20} />
-          Resumo de Horas Efetivas e Taxas
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-widest text-white/40">Mina</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Horas Calendário</span>
-              <span className="font-mono font-bold">{horasCalendarioMina.toFixed(2)}h</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Horas Efetivas (DF x UF)</span>
-              <span className="font-mono font-bold text-emerald-400">
-                {results.effectiveHoursPerMonthMina.toFixed(2)}h
-              </span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Capacidade da frota de ROM (seca, por hora efetiva)</span>
-              <span className={`font-mono font-bold ${results.isPlantOverloaded ? 'text-red-400' : 'text-emerald-400'}`}>
-                {results.totalHourlyROM.toFixed(2)} t/h
-              </span>
-            </div>
-          </div>
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-widest text-white/40">Planta</h4>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Horas Calendário</span>
-              <span className="font-mono font-bold">{horasCalendarioPlanta.toFixed(2)}h</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Horas Efetivas (DF x UF)</span>
-              <span className="font-mono font-bold text-blue-400">
-                {results.effectiveHoursPerMonthPlanta.toFixed(2)}h
-              </span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <span className="text-sm text-white/60">Utilização da Planta</span>
-              <span className={`font-mono font-bold ${results.plantUtilization > 100 ? 'text-red-400' : 'text-blue-400'}`}>
-                {results.plantUtilization.toFixed(1)}%
-              </span>
-            </div>
-          </div>
+      <HoursSummary analysis={analysis} premises={premises} calMina={horasCalendarioMina} calPlanta={horasCalendarioPlanta} />
+    </div>
+  );
+};
+
+const fmt = (n: number, d = 0) => (Number.isFinite(n) ? n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
+
+/** Horas e capacidade × necessidade de cada etapa, pela mesma análise do Dimensionamento e do Resumo. */
+const HoursSummary: React.FC<{ analysis: FleetAnalysis; premises: DetailedPremises; calMina: number; calPlanta: number }> = ({ analysis: a, premises, calMina, calPlanta }) => {
+  const tm = transportMode(premises);
+  const L = targetLabels(premises);
+  const effMina = calMina * ((premises.dfMina || 0) / 100) * ((premises.ufMina || 0) / 100);
+  const transport = a.stages.filter((s) => s.id !== 'planta' && s.id !== 'carga');
+  const plant = a.stages.find((s) => s.id === 'planta');
+  const short = transport.filter((s) => s.ratio < 0.999);
+  const row = (k: string, v: string, tone?: string) => (
+    <div className="flex items-center justify-between border-b border-white/5 py-2">
+      <span className="text-sm text-white/60">{k}</span>
+      <span className={`font-mono font-bold ${tone ?? ''}`}>{v}</span>
+    </div>
+  );
+  return (
+    <div className="rounded-3xl bg-[#151619] p-8 text-white shadow-xl">
+      <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-emerald-400">
+        <Clock size={20} />
+        Resumo de horas efetivas e capacidade
+      </h3>
+      <div className="grid grid-cols-1 gap-12 md:grid-cols-2">
+        <div className="space-y-1">
+          <h4 className="mb-2 text-xs font-bold tracking-widest text-white/40 uppercase">{tm ? 'Transporte' : 'Mina'}</h4>
+          {row('Horas calendário', `${fmt(calMina, 1)} h`)}
+          {row('Horas efetivas (DF × UF)', `${fmt(effMina, 1)} h`, 'text-emerald-400')}
+          {row(L.target, `${fmt(a.romTargetDryT)} t seca`)}
+          {row(L.delivered, `${fmt(a.romDeliverableDryT)} t (${fmt(a.romTargetDryT ? (a.romDeliverableDryT / a.romTargetDryT) * 100 : 100)}%)`, a.meetsTarget ? 'text-emerald-400' : 'text-red-400')}
         </div>
-        
-        {results.isPlantOverloaded && (
-          <div className="mt-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-4">
-            <div className="p-2 bg-red-500 text-white rounded-xl">
+        <div className="space-y-1">
+          {tm ? (
+            <>
+              <h4 className="mb-2 text-xs font-bold tracking-widest text-white/40 uppercase">Frota</h4>
+              {row('Caminhões: frota / nas rotas / precisam', `${a.fleet.premise} / ${fmt(a.fleet.allocated, 0)} / ${a.fleet.needed}`)}
+              {row('Necessários sem arredondar', fmt(a.fleet.neededExact, 2))}
+              {row('Possível com esta frota', `${fmt(a.romPossibleDryT)} t`)}
+            </>
+          ) : (
+            <>
+              <h4 className="mb-2 text-xs font-bold tracking-widest text-white/40 uppercase">Planta</h4>
+              {row('Horas calendário', `${fmt(calPlanta, 1)} h`)}
+              {row('Horas efetivas (DF × UF)', `${fmt(a.planta.effective, 1)} h`, 'text-blue-400')}
+              {row('Capacidade da planta no mês', plant ? `${fmt(plant.capacityT)} t (${fmt(plant.ratio * 100)}% da meta)` : '—', plant && plant.ratio < 0.999 ? 'text-red-400' : 'text-blue-400')}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-10 border-t border-white/10 pt-8">
+        <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-orange-400">
+          <Truck size={20} />
+          Capacidade da frota × necessidade (t úmida/mês)
+        </h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {transport.map((s) => (
+            <div key={s.id} className="rounded-2xl border border-white/5 bg-white/5 p-4">
+              <span className="mb-2 block text-xs font-bold tracking-widest text-white/40 uppercase">{s.label}</span>
+              <p className={`font-mono text-2xl font-bold ${s.ratio < 0.999 ? 'text-red-400' : 'text-emerald-400'}`}>{fmt(s.ratio * 100)}%</p>
+              <p className="text-[11px] text-white/50">capacidade {fmt(s.capacityT)} t de {fmt(s.needT)} t necessárias</p>
+            </div>
+          ))}
+        </div>
+        {short.length > 0 ? (
+          <div className="mt-6 flex items-center gap-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+            <div className="rounded-xl bg-red-500 p-2 text-white">
               <AlertCircle size={20} />
             </div>
             <div>
-              <p className="font-bold text-red-400">A frota de ROM entrega mais que a planta processa</p>
-              <p className="text-sm text-white/60">A frota de ROM consegue {results.totalHourlyROM.toFixed(1)} t/h (seca, por hora efetiva), acima do limite da planta ({premises.plantFeedRateTPH} t/h). O plano diário fica limitado à planta; o excedente vira pilha pulmão ou caminhões ociosos.</p>
+              <p className="font-bold text-red-400">Frota abaixo da necessidade</p>
+              <p className="text-sm text-white/60">{short.map((s) => `${s.label}: ${fmt(s.ratio * 100)}% da necessidade`).join(' · ')}. Ajuste os caminhões no 2. Dimensionamento ou aumente a frota nas premissas.</p>
             </div>
           </div>
+        ) : (
+          <p className="mt-6 text-sm text-white/50">A frota das rotas atende à necessidade de todas as etapas.</p>
         )}
-
-        <div className="mt-12 pt-8 border-t border-white/10">
-          <h3 className="text-lg font-bold mb-6 text-orange-400 flex items-center gap-2">
-            <Truck size={20} />
-            Capacidade de Frota vs Demanda
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-              <span className="text-xs font-bold text-white/40 uppercase tracking-widest block mb-2">Frota Mina</span>
-              <div className="flex justify-between items-end">
-                <span className="text-2xl font-mono font-bold">{Math.round(results.transportTph?.rom ?? premises.fleetCapacityMinaTPH).toLocaleString('pt-BR')} t/h</span>
-                <span className="text-[10px] text-white/40">Necessário (úmida)</span>
-              </div>
-            </div>
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-              <span className="text-xs font-bold text-white/40 uppercase tracking-widest block mb-2">
-                {premises.processType === 'umido' ? 'Frota Baia + Terminal' : 'Frota Terminal'}
-              </span>
-              <div className="flex justify-between items-end">
-                <span className="text-2xl font-mono font-bold">
-                  {Math.round(results.transportTph ? (premises.processType === 'umido' ? results.transportTph.tailings : 0) + results.transportTph.product : (premises.processType === 'umido' ? premises.fleetCapacityBaiaTPH : 0) + premises.fleetCapacityTerminalTPH).toLocaleString('pt-BR')} t/h
-                </span>
-                <span className="text-[10px] text-white/40">Necessário (úmida)</span>
-              </div>
-            </div>
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-              <span className="text-xs font-bold text-white/40 uppercase tracking-widest block mb-2">Utilização Total Frota</span>
-              <div className="flex justify-between items-end">
-                <span className={`text-2xl font-mono font-bold ${results.isFleetOverloaded ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {results.fleetUtilization.toFixed(1)}%
-                </span>
-                <span className="text-[10px] text-white/40">
-                  {results.isFleetOverloaded ? 'Sobrecarga detectada' : 'Frota Otimizada'}
-                </span>
-              </div>
-            </div>
-          </div>
-          
-          {results.isFleetOverloaded && (
-            <div className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-4">
-              <div className="p-2 bg-red-500 text-white rounded-xl">
-                <AlertCircle size={20} />
-              </div>
-              <div>
-                <p className="font-bold text-red-400">DÉFICIT DE FROTA DETECTADO</p>
-                <p className="text-sm text-white/60">A frota atual não suporta o somatório das taxas horárias das rotas ativas. Risco de não atingir a meta ou necessidade de equipamentos adicionais.</p>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
 };
 
 export default ProductionCalendar;
+
