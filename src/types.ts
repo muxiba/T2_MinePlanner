@@ -354,6 +354,8 @@ export interface DetailedPremises {
   equipmentCatalog?: EquipmentCatalog;
   /** Modelo do simulador de eventos discretos (aba Simulação). */
   simulation?: import('./sim/types').SimModel;
+  /** dados do relatório (aba Relatórios): título, cliente, configurações, conclusão */
+  reportOptions?: Partial<import('./reports/data').ReportOptions>;
 }
 
 export interface DailyLog {

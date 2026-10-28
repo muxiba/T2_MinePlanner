@@ -283,7 +283,26 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
         { kind: 'sweep', model, configId: sel.configId, scenarioId: sel.scenarioId, circuitId: cid, maxTrucks: 30, targetTpd },
         (f) => setSweepBusy(f),
       );
-      setSweep({ ...res, circuitName: model.circuits.find((c) => c.id === cid)?.name });
+      const circuitName = model.circuits.find((c) => c.id === cid)?.name;
+      setSweep({ ...res, circuitName });
+      // curva guardada no plano para a aba Relatórios
+      if (canEdit)
+        setModel({
+          ...model,
+          lastSweep: {
+            at: new Date().toISOString(),
+            config: model.configs.find((c) => c.id === sel.configId)?.name ?? sel.configId,
+            scenario: model.scenarios.find((c) => c.id === sel.scenarioId)?.name ?? sel.scenarioId,
+            circuit: model.circuits.length > 1 ? circuitName : undefined,
+            target: res.target ?? model.targetTpd ?? 0,
+            minFleet: res.minFleet,
+            saturation: res.saturation,
+            points: res.points.map((p) => {
+              const v = p.value ?? p.stats.tpd;
+              return { trucks: p.trucks, tpd: v.mean, lo: v.lo, hi: v.hi, queueLoadMin: p.stats.queueLoadMin.mean };
+            }),
+          },
+        });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1003,7 +1022,21 @@ const SimulationView: React.FC<Props> = ({ premises, setPremises, routes, setRou
       )}
 
       {tab === 'financeiro' && <FinanceView premises={premises} model={model} setModel={setModel} canEdit={canEdit} />}
-      {tab === 'decisao' && <DecisionView model={model} premises={premises} calc={calc} romT={per.romT} horizon={per} resultsKey={periodResultsKey} setResultsKey={setPeriodResultsKey} results={periodResults} setResults={setPeriodResults} onError={setError} />}
+      {tab === 'decisao' && (
+        <DecisionView
+          model={model}
+          premises={premises}
+          calc={calc}
+          romT={per.romT}
+          horizon={per}
+          resultsKey={periodResultsKey}
+          setResultsKey={setPeriodResultsKey}
+          results={periodResults}
+          setResults={setPeriodResults}
+          onError={setError}
+          onSnapshot={canEdit ? (snap) => setModel({ ...model, lastDecision: snap }) : undefined}
+        />
+      )}
 
       {/* ===================== CONFIGURAÇÕES E CENÁRIOS ====================== */}
       {tab === 'config' && (

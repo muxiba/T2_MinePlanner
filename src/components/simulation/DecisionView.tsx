@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Award, Download, FileText, Play } from 'lucide-react';
-import type { SimModel } from '@/sim/types';
+import type { DecisionSnapshot, SimModel } from '@/sim/types';
 import type { DetailedPremises } from '@/types';
 import { FLOW_LABELS, type CircuitCalc, type PeriodKind } from '@/sim/link';
 import { calendarWorkDays, emptyPlan, type PeriodResult } from '@/sim/plan';
@@ -40,9 +40,11 @@ interface Props {
   results: PeriodResult[] | null;
   setResults: (r: PeriodResult[] | null) => void;
   onError: (m: string | null) => void;
+  /** guarda o resumo da decisão no plano (aba Relatórios) */
+  onSnapshot?: (s: DecisionSnapshot) => void;
 }
 
-const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, horizon, resultsKey, setResultsKey, results, setResults, onError }) => {
+const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, horizon, resultsKey, setResultsKey, results, setResults, onError, onSnapshot }) => {
   const plan = model.plan ?? emptyPlan();
   const fin = model.finance ?? defaultFinance(model.configs);
   const [criterion, setCriterion] = useState<Criterion>('equilibrado');
@@ -116,6 +118,31 @@ const DecisionView: React.FC<Props> = ({ model, premises, calc, romT, horizon, r
   const scName = (id: string) => model.scenarios.find((s) => s.id === id)?.name ?? id;
   const optName = (e: { configId: string; scenarioId: string }) => (e.scenarioId !== '*' && scenIdsRun.length > 1 ? `${cfgName(e.configId)} · ${scName(e.scenarioId)}` : cfgName(e.configId));
   const withRevenue = fin.revenuePerT > 0;
+
+  // resumo para a aba Relatórios: guardado quando a decisão muda
+  const snapshot = useMemo<DecisionSnapshot | null>(() => {
+    if (!chosen || !ranked.length) return null;
+    const keyOfE = (e: { configId: string; scenarioId: string }) => `${e.configId}|${e.scenarioId}`;
+    return {
+      at: '',
+      criterion: CRITERIA.find((c) => c.id === criterion)?.label ?? criterion,
+      rate: chosen.rate,
+      periods: chosen.periods.length,
+      tonnes: chosen.tonnes,
+      chosenId: keyOfE(chosen),
+      rows: ranked.map((e) => ({ id: keyOfE(e), configId: e.configId, name: optName(e), allOk: e.allOk, minMargin: e.minMargin, peakTrucks: e.peakTrucks, capex: e.capex, npvCost: e.npvCost, npvTonnes: e.npvTonnes, costPerT: e.costPerT, npv: e.npv, replacements: e.replacements, tonnes: e.tonnes })),
+      chosenPeriods: chosen.periods.map((p) => ({ label: p.label, trucks: p.trucks, fleetSize: p.fleetSize, bought: p.bought, replaced: p.replaced, tonnes: p.tonnes, dieselL: p.dieselL, total: p.total, pvFactor: p.pvFactor })),
+      sens: sens.map((r) => ({ label: r.label, low: r.low, high: r.high, changes: r.winnerLow !== keyOfE(chosen) || r.winnerHigh !== keyOfE(chosen) })),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ranked, chosen, sens, criterion]);
+  useEffect(() => {
+    if (!snapshot || !onSnapshot) return;
+    const prev = model.lastDecision;
+    const same = prev && JSON.stringify({ ...prev, at: '' }) === JSON.stringify(snapshot);
+    if (!same) onSnapshot({ ...snapshot, at: new Date().toISOString() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot]);
 
   const buildMemo = () =>
     decisionMemo({ model, plan, fin, ranked, chosen: chosen!, criterion, sens, optName, compareNote: [compare === 'config' && scenIdsRun.length > 1 ? 'Cada configuração é avaliada em todos os cenários: precisa cumprir a meta no pior deles, e o custo é a média entre eles.' : '', basisMode === 'circuito' ? 'Modo simples: circuitos da aba Circuito com os períodos e o calendário do plano.' : ''].filter(Boolean).join(' ') || undefined });

@@ -19,6 +19,7 @@ import {
   History,
   ClipboardCheck,
   Waypoints,
+  FileText,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '@/auth/AuthProvider';
@@ -32,6 +33,7 @@ import { ensureNetwork } from '@/engine/network';
 import SummaryView from '@/components/summary/SummaryView';
 const TutorialView = React.lazy(() => import('@/components/TutorialView'));
 const SimulationView = React.lazy(() => import('@/components/simulation/SimulationView'));
+const ReportsView = React.lazy(() => import('@/components/reports/ReportsView'));
 import { generatePortableHTML } from '@/utils/export';
 import { dismissLegacyData, readLegacyData, usePlan, useScenarios, type SaveState } from './usePlan';
 
@@ -53,6 +55,7 @@ const NAV_ITEMS = [
   { id: 'scenarios', label: 'Cenários', icon: Save },
   { id: 'dashboard', label: 'Detalhes de cálculo', icon: LayoutDashboard },
   { id: 'simulacao', label: 'Simulação', icon: Waypoints },
+  { id: 'relatorios', label: 'Relatórios', icon: FileText },
   { id: 'tutorial', label: 'Tutorial', icon: Play },
 ] as const;
 
@@ -386,6 +389,12 @@ const PlannerPage: React.FC = () => {
         )}
 
         {/* Leitores veem tudo, mas os campos ficam desabilitados */}
+        {/* Relatórios: todos geram; só quem edita muda os dados e roda as simulações */}
+        {activeTab === 'relatorios' && (
+          <React.Suspense fallback={<p className="text-sm text-black/50">Carregando relatórios…</p>}>
+            <ReportsView routes={routes} premises={premises} setPremises={setPremises} canEdit={canEdit} companyName={current?.company.name} />
+          </React.Suspense>
+        )}
         {activeTab === 'tutorial' && (
           <React.Suspense fallback={<p>Carregando tutorial.</p>}>
             <TutorialView />

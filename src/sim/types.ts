@@ -146,6 +146,12 @@ export interface SimModel {
   mixDraw?: 'fixo' | 'sorteio';
   /** resumo da última matriz simulada (para o memorial impresso) */
   lastRun?: { at: string; targetTpd: number; rows: { config: string; scenario: string; tpd: number; lo: number; hi: number; cycleMin: number; queueLoadMin: number; costPerT: number }[]; circuits: { name: string; tpd: number; cycleMin: number }[] };
+  /** rodada da aba Relatórios: matriz de cenários e frota mínima de cada configuração (para gerar Word, apresentação e Excel) */
+  reportRun?: ReportRun;
+  /** resumo da última decisão de longo prazo (aba Resultados e decisão), para os relatórios */
+  lastDecision?: DecisionSnapshot;
+  /** resumo da última busca da frota mínima (curva), para os relatórios */
+  lastSweep?: SweepSnapshot;
   /** período cuja geometria (DXF das movimentações) é usada na simulação e no mapa; padrão 1 */
   geoPeriod?: number;
   /** despacho: cada caminhão fica no seu circuito ('fixo') ou, a cada viagem, vai para o circuito mais atrasado na meta ('dinamico') */
@@ -287,4 +293,69 @@ export interface AggregateStats {
   stateShare: Partial<Record<TruckState, number>>;
   bufferMaxT: number;
   perCircuit: { name: string; tph: number; tpd: Summary; cycleMin?: number }[];
+}
+
+/* ------------------------------ Relatórios ------------------------------ */
+
+/** Linha da matriz configuração × cenário guardada para os relatórios. */
+export interface ReportMatrixRow {
+  configId: string;
+  config: string;
+  scenarioId: string;
+  scenario: string;
+  /** frota simulada (caminhões em todos os circuitos) */
+  trucks: number;
+  tpd: number;
+  lo: number;
+  hi: number;
+  cycleMin: number;
+  queueLoadMin: number;
+  queueDumpMin: number;
+  loaderUtil: number;
+  dumpUtil: number;
+  costPerT: number;
+  /** tempo médio de cada estado por ciclo (min) */
+  cycle: Partial<Record<TruckState, number>>;
+}
+
+/** Frota mínima simulada de uma configuração (todos os circuitos na meta). */
+export interface ReportMinFleet {
+  configId: string;
+  config: string;
+  scenarioId: string;
+  scenario: string;
+  total: number;
+  circuits: { name: string; trucks: number; targetTpd: number; achievedTpd: number; cycleMin: number; saturated: boolean }[];
+}
+
+export interface ReportRun {
+  at: string;
+  /** meta do sistema (t/dia) */
+  targetTpd: number;
+  matrix: ReportMatrixRow[];
+  minFleet: ReportMinFleet[];
+}
+
+export interface DecisionSnapshot {
+  at: string;
+  criterion: string;
+  rate: number;
+  periods: number;
+  tonnes: number;
+  chosenId: string;
+  rows: { id: string; configId: string; name: string; allOk: boolean; minMargin: number; peakTrucks: number; capex: number; npvCost: number; npvTonnes: number; costPerT: number; npv: number | null; replacements: number; tonnes: number }[];
+  /** períodos da opção escolhida */
+  chosenPeriods: { label: string; trucks: number; fleetSize: number; bought: number; replaced: number; tonnes: number; dieselL: number; total: number; pvFactor: number }[];
+  sens: { label: string; low: number; high: number; changes: boolean }[];
+}
+
+export interface SweepSnapshot {
+  at: string;
+  config: string;
+  scenario: string;
+  circuit?: string;
+  target: number;
+  minFleet: number | null;
+  saturation: number;
+  points: { trucks: number; tpd: number; lo: number; hi: number; queueLoadMin: number }[];
 }
